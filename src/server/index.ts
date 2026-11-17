@@ -1,0 +1,293 @@
+import { realpathSync } from 'node:fs';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { newToken } from './auth.js';
+import { ActivityMeter } from './activity.js';
+import { ClosedStore } from './closed.js';
+import { clearServerState, dataDir, loadConfig, readServerState, writeServerState } from './config.js';
+import { createRequestHandler } from './http.js';
+import { realPtyFactory, type PtyFactory } from './pty-session.js';
+import { claudeProjectsDir, findConversation } from './conversations.js';
+import { TranscriptScanner } from './transcript-usage.js';
+import { PromptDelivery } from './prompt-delivery.js';
+import { loadRestorable, restoreSessions, saveRestorable } from './restore.js';
+import { ScheduleStore, type LaunchResult } from './schedules.js';
+import { SessionManager } from './session-manager.js';
+import { StoryStore } from './stories.js';
+import { UsageStore } from './usage.js';
+import type { Schedule } from '../shared/types.js';
+import { attachWebSocket } from './ws.js';
+
+export const DEFAULT_PORT = 7717;
+const HOST = '127.0.0.1';
+const PORT_ATTEMPTS = 51;
+/** How much transcript is read in one go; small enough not to be felt while typing. */
+const SCAN_STEP_BYTES = 4 * 1024 * 1024;
+const SCAN_BUSY_MS = 100;
+const SCAN_IDLE_MS = 3000;
+
+export interface RunningServer {
+  port: number;
+  token: string;
+  address: string;
+  stop(): Promise<void>;
+  /** Resolves once the server has stopped, however that was triggered. */
+  stopped: Promise<void>;
+}
+
+export interface StartOptions {
+  port?: number;
+  ptyFactory?: PtyFactory;
+  quiet?: boolean;
+}
+
+function listen(server: Server, port: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, HOST, () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
+}
+
+/**
+ * Binds the server itself to the first free port from `start`. Probing a port and binding
+ * it afterwards leaves a gap in which another program can take it, so the real bind is the test.
+ */
+async function listenOnFirstFree(server: Server, start: number): Promise<number> {
+  for (let port = start; port < start + PORT_ATTEMPTS && port <= 65535; port++) {
+    try {
+      await listen(server, port);
+      return port;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EADDRINUSE' && (e as NodeJS.ErrnoException).code !== 'EACCES') throw e;
+    }
+  }
+  throw new Error(`No free port between ${start} and ${start + PORT_ATTEMPTS - 1}`);
+}
+
+export async function startServer(opts: StartOptions = {}): Promise<RunningServer> {
+  const log = (msg: string): void => {
+    if (!opts.quiet) console.log(`${new Date().toISOString()} ${msg}`);
+  };
+
+  const first = loadConfig({ quarantineCorrupt: true });
+  if (first.warning) log(`warning: ${first.warning}`);
+
+  const server = createServer();
+  const port = await listenOnFirstFree(server, opts.port ?? DEFAULT_PORT);
+  const token = newToken();
+  const hookToken = newToken();
+  const startedAt = Date.now();
+  const here = dirname(fileURLToPath(import.meta.url));
+
+  const stories = new StoryStore();
+  stories.ensureColors();
+  const manager = new SessionManager({
+    stories: () => stories.list(),
+    ptyFactory: opts.ptyFactory ?? realPtyFactory,
+    now: Date.now,
+    // Read on every use so edits to config.json apply without a restart.
+    config: () => loadConfig().config,
+    port,
+    hookToken,
+    hookScriptPath: join(here, '..', 'hook', 'hook.js'),
+    statusScriptPath: join(here, '..', 'hook', 'statusline.js'),
+  });
+  const usage = new UsageStore({ now: Date.now, file: join(dataDir(), 'usage.json') });
+  const activity = new ActivityMeter(Date.now);
+  manager.onOutput((id, data) => activity.add(id, data.length));
+  // Sessions that end or are closed are remembered, to be opened again from their area.
+  const closed = new ClosedStore({ file: join(dataDir(), 'closed.json'), now: Date.now });
+  manager.onClosed((entry, sessionId) => closed.add(entry, sessionId));
+
+  // Schedules: at its time, a schedule opens a Claude Code session like any other, and its
+  // prompt is typed into the terminal once Claude Code is ready for it.
+  const delivery = new PromptDelivery({
+    now: Date.now,
+    write: (id, data) => manager.input(id, data),
+    alive: (id) => {
+      const s = manager.get(id);
+      return s !== null && s.status !== 'exited';
+    },
+  });
+  const launchSchedule = (schedule: Schedule): LaunchResult => {
+    const profile = manager.profiles().find((p) => p.id === schedule.profileId);
+    if (!profile) return { error: 'The profile of this schedule no longer exists.' };
+    if (profile.kind !== 'claude') return { error: `The profile "${profile.name}" does not start Claude Code.` };
+    const storyId = schedule.storyId !== null && stories.list().some((s) => s.id === schedule.storyId) ? schedule.storyId : null;
+    const session = manager.create({
+      profileId: profile.id,
+      name: schedule.name,
+      storyId,
+      ...(schedule.cwd ? { cwd: schedule.cwd } : {}),
+      ...(schedule.model ? { model: schedule.model } : {}),
+      args: [...profile.args, ...(schedule.permissionMode === 'default' ? [] : ['--permission-mode', schedule.permissionMode])],
+    });
+    if (session.error) {
+      // Nobody is watching: a session that never started is recorded in the run, not left open.
+      manager.remove(session.id);
+      return { error: session.error };
+    }
+    delivery.expect(session.id, schedule.prompt, (outcome, detail) => schedules.resolveRun(schedule.id, session.id, outcome, detail));
+    log(`schedule "${schedule.name}": started session ${session.id}`);
+    return { sessionId: session.id };
+  };
+  const schedules: ScheduleStore = new ScheduleStore({
+    file: join(dataDir(), 'schedules.json'),
+    now: Date.now,
+    launch: launchSchedule,
+    busy: (id) => {
+      const s = manager.get(id);
+      return s !== null && (s.status === 'working' || (s.status === 'attention' && s.reason === 'blocked'));
+    },
+  });
+  schedules.start();
+  const deliveryTicker = setInterval(() => delivery.tick(), 200);
+  deliveryTicker.unref?.();
+
+  // Sessions open at the last stop come back; from then on the list is kept current, so that
+  // it is right even if the server is killed. An orderly stop must not empty it: stopping
+  // ends every process, which is not the user closing their sessions.
+  const sessionsFile = join(dataDir(), 'sessions.json');
+  if (first.config.restoreSessions) {
+    const previous = loadRestorable(sessionsFile);
+    if (previous.length > 0) {
+      log(`restoring ${previous.length} session(s) from the last run`);
+      restoreSessions(manager, previous, findConversation);
+    }
+  }
+  // Costs are read from Claude Code's transcripts, a little at a time so that terminals are
+  // never held up: quickly while there is a backlog (the first start reads a month of them),
+  // then at an idle pace.
+  const scanner = new TranscriptScanner({
+    dir: claudeProjectsDir,
+    usage,
+    now: Date.now,
+    storyOf: (conversationId) => {
+      const sessionId = manager.openConversations().get(conversationId);
+      const storyId = sessionId ? manager.get(sessionId)?.storyId : null;
+      const story = storyId ? stories.list().find((s) => s.id === storyId) : undefined;
+      return { storyId: story?.id ?? null, storyName: story?.name ?? null };
+    },
+  });
+  let scanTimer: ReturnType<typeof setTimeout> | undefined;
+  let scanning = true;
+  const scanLoop = async (): Promise<void> => {
+    if (!scanning) return;
+    let more = false;
+    try {
+      more = await scanner.tick(SCAN_STEP_BYTES);
+    } catch (e) {
+      log(`usage: could not read transcripts: ${(e as Error).message}`);
+    }
+    if (!scanning) return;
+    scanTimer = setTimeout(() => void scanLoop(), more ? SCAN_BUSY_MS : SCAN_IDLE_MS);
+    scanTimer.unref?.();
+  };
+  scanTimer = setTimeout(() => void scanLoop(), 300);
+  scanTimer.unref?.();
+
+  let saving = true;
+  let saveTimer: ReturnType<typeof setTimeout> | undefined;
+  const saveNow = (): void => {
+    clearTimeout(saveTimer);
+    saveTimer = undefined;
+    if (saving) saveRestorable(sessionsFile, manager.restorable());
+  };
+  manager.onChange(() => {
+    if (!saving || saveTimer) return;
+    saveTimer = setTimeout(saveNow, 200);
+    saveTimer.unref?.();
+  });
+  saveNow();
+
+  let resolveStopped: () => void = () => {};
+  const stopped = new Promise<void>((r) => (resolveStopped = r));
+  let stopping: Promise<void> | null = null;
+
+  const ws = attachWebSocket(server, { manager, stories, closed, schedules, usage, activity, port, token });
+  const ticker = setInterval(() => {
+    manager.tick();
+    schedules.tick();
+  }, 1000);
+
+  const stop = (): Promise<void> => {
+    stopping ??= (async () => {
+      clearInterval(ticker);
+      clearInterval(deliveryTicker);
+      scanning = false;
+      clearTimeout(scanTimer);
+      saveNow();
+      saving = false;
+      manager.shutdown();
+      usage.flush();
+      ws.close();
+      server.closeAllConnections();
+      await new Promise<void>((r) => server.close(() => r()));
+      // Another server may have taken over the state file since; only remove our own.
+      const recorded = readServerState();
+      if (recorded && recorded.pid === process.pid && recorded.startedAt === startedAt) clearServerState();
+      log('stopped');
+      resolveStopped();
+    })();
+    return stopping;
+  };
+
+  server.on(
+    'request',
+    createRequestHandler({
+      manager,
+      stories,
+      usage,
+      closed,
+      schedules,
+      onClaudeStatus: (id) => delivery.ready(id),
+      onPromptSubmitted: (id) => delivery.submitted(id),
+      port,
+      token,
+      hookToken,
+      webDir: join(here, '..', 'web'),
+      startedAt,
+      // Let the 204 reach the caller before the sockets are torn down.
+      onShutdown: () => void setTimeout(() => void stop(), 50),
+    }),
+  );
+
+  writeServerState({ pid: process.pid, port, token, hookToken, startedAt });
+  log(`listening on http://${HOST}:${port}`);
+
+  return { port, token, address: (server.address() as AddressInfo).address, stop, stopped };
+}
+
+function isMainModule(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) {
+  const i = process.argv.indexOf('--port');
+  const port = i >= 0 ? Number(process.argv[i + 1]) : undefined;
+  // One failing session must not take the others down with it.
+  process.on('uncaughtException', (e) => console.error(`${new Date().toISOString()} uncaught: ${e.stack ?? e}`));
+  process.on('unhandledRejection', (e) => console.error(`${new Date().toISOString()} unhandled: ${String(e)}`));
+  startServer({ port: Number.isInteger(port) ? port : undefined })
+    .then((running) => {
+      const shutdown = (): void => void running.stop();
+      process.on('SIGINT', shutdown);
+      process.on('SIGTERM', shutdown);
+      void running.stopped.then(() => process.exit(0));
+    })
+    .catch((e: unknown) => {
+      console.error(`${new Date().toISOString()} failed to start: ${(e as Error).stack ?? e}`);
+      process.exit(1);
+    });
+}

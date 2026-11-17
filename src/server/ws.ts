@@ -1,0 +1,207 @@
+import type { IncomingMessage, Server } from 'node:http';
+import type { Duplex } from 'node:stream';
+import { WebSocketServer, type WebSocket } from 'ws';
+import type { ClientMessage, ServerMessage } from '../shared/types.js';
+import { hostAllowed, originAllowed, safeEqual, tokenFromProtocols, WS_PROTOCOL } from './auth.js';
+import type { SessionManager } from './session-manager.js';
+import type { ActivityMeter } from './activity.js';
+import type { ClosedStore } from './closed.js';
+import type { ScheduleStore } from './schedules.js';
+import type { StoryStore } from './stories.js';
+import type { UsageStore } from './usage.js';
+
+interface Subscription {
+  /** False while the snapshot is being taken; live output is held back until it is sent. */
+  ready: boolean;
+  buffer: string[];
+}
+
+interface Client {
+  ws: WebSocket;
+  subs: Map<string, Subscription>;
+}
+
+function refuse(socket: Duplex, status: number, text: string): void {
+  socket.write(`HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
+  socket.destroy();
+}
+
+function parseMessage(raw: string): ClientMessage | null {
+  let m: unknown;
+  try {
+    m = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof m !== 'object' || m === null) return null;
+  const o = m as Record<string, unknown>;
+  if (typeof o.id !== 'string') return null;
+  switch (o.t) {
+    case 'attach':
+    case 'resize':
+      if (typeof o.cols !== 'number' || typeof o.rows !== 'number') return null;
+      return { t: o.t, id: o.id, cols: o.cols, rows: o.rows };
+    case 'detach':
+      return { t: 'detach', id: o.id };
+    case 'input':
+      if (typeof o.data !== 'string') return null;
+      return { t: 'input', id: o.id, data: o.data };
+    default:
+      return null;
+  }
+}
+
+export function attachWebSocket(
+  server: Server,
+  deps: { manager: SessionManager; stories?: StoryStore; closed?: ClosedStore; schedules?: ScheduleStore; usage?: UsageStore; activity?: ActivityMeter; port: number; token: string },
+): { close(): void } {
+  const { manager } = deps;
+  const wss = new WebSocketServer({
+    noServer: true,
+    maxPayload: 1024 * 1024,
+    // Answer with the protocol name only; the token entry is never echoed back.
+    handleProtocols: (protocols) => (protocols.has(WS_PROTOCOL) ? WS_PROTOCOL : false),
+  });
+  const clients = new Set<Client>();
+
+  const send = (c: Client, m: ServerMessage): void => {
+    if (c.ws.readyState === c.ws.OPEN) c.ws.send(JSON.stringify(m));
+  };
+
+  manager.onChange((sessions) => {
+    for (const c of clients) send(c, { t: 'sessions', sessions });
+  });
+
+  deps.stories?.onChange((stories) => {
+    for (const c of clients) send(c, { t: 'stories', stories });
+  });
+
+  deps.closed?.onChange((closed) => {
+    for (const c of clients) send(c, { t: 'closed', closed });
+  });
+
+  deps.schedules?.onChange((schedules) => {
+    for (const c of clients) send(c, { t: 'schedules', schedules });
+  });
+
+  // Usage changes with every status report; clients get at most one update per pulse.
+  let usageDirty = false;
+  deps.usage?.onChange(() => (usageDirty = true));
+  let usageDay = deps.usage?.today();
+  // Activity is sent on each pulse while anything is printing, then once more, empty, so
+  // that the rev counters fall back to rest.
+  let wasActive = false;
+  const pulse = setInterval(() => {
+    // Read even with nobody connected: reading is what clears sessions that went quiet.
+    const rates = deps.activity?.rates();
+    if (clients.size === 0) {
+      wasActive = false;
+      return;
+    }
+    if (deps.usage) {
+      // "Today" changes at midnight even if no session reports anything.
+      const day = deps.usage.today();
+      if (day !== usageDay) {
+        usageDay = day;
+        usageDirty = true;
+      }
+      if (usageDirty) {
+        usageDirty = false;
+        const usage = deps.usage.summary();
+        for (const c of clients) send(c, { t: 'usage', usage });
+      }
+    }
+    if (rates) {
+      const active = Object.keys(rates).length > 0;
+      if (active || wasActive) for (const c of clients) send(c, { t: 'activity', rates });
+      wasActive = active;
+    }
+    // Twice per measuring window (activity counts the last second), so that a burst landing
+    // just after one tick is still inside the window at the next.
+  }, 500);
+  pulse.unref?.();
+
+  manager.onOutput((id, data) => {
+    for (const c of clients) {
+      const sub = c.subs.get(id);
+      if (!sub) continue;
+      if (sub.ready) send(c, { t: 'output', id, data });
+      else sub.buffer.push(data);
+    }
+  });
+
+  function attach(c: Client, id: string, cols: number, rows: number): void {
+    if (!manager.get(id)) return;
+    manager.resize(id, cols, rows);
+    // Buffering starts in the same tick as the snapshot request, so the two meet exactly:
+    // the snapshot holds everything before this point, the buffer everything after.
+    const sub: Subscription = { ready: false, buffer: [] };
+    c.subs.set(id, sub);
+    void manager.snapshot(id).then((data) => {
+      // A newer attach or a detach has replaced this subscription: drop the stale answer.
+      if (c.subs.get(id) !== sub || data === null) return;
+      send(c, { t: 'snapshot', id, data });
+      for (const chunk of sub.buffer) send(c, { t: 'output', id, data: chunk });
+      sub.buffer = [];
+      sub.ready = true;
+    });
+  }
+
+  function onMessage(c: Client, raw: string): void {
+    const m = parseMessage(raw);
+    if (!m) return;
+    switch (m.t) {
+      case 'attach':
+        attach(c, m.id, m.cols, m.rows);
+        break;
+      case 'detach':
+        c.subs.delete(m.id);
+        break;
+      case 'input':
+        manager.input(m.id, m.data);
+        break;
+      case 'resize':
+        manager.resize(m.id, m.cols, m.rows);
+        break;
+    }
+  }
+
+  const onUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
+    const path = (req.url ?? '').split('?')[0];
+    if (path !== '/ws') return refuse(socket, 404, 'Not Found');
+    if (!hostAllowed(req.headers.host, deps.port)) return refuse(socket, 403, 'Forbidden');
+    // A page on any site can open a WebSocket to localhost; the Origin check is what stops it.
+    if (!originAllowed(req.headers.origin, deps.port)) return refuse(socket, 403, 'Forbidden');
+    // A browser cannot add headers to a WebSocket handshake, so the page offers the token as
+    // a subprotocol. Unlike a cookie, it is sent only because the page chose to send it.
+    const offered = tokenFromProtocols(req.headers['sec-websocket-protocol']);
+    if (!offered || !safeEqual(offered, deps.token)) return refuse(socket, 401, 'Unauthorized');
+
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      const client: Client = { ws, subs: new Map() };
+      clients.add(client);
+      send(client, { t: 'sessions', sessions: manager.list() });
+      if (deps.stories) send(client, { t: 'stories', stories: deps.stories.list() });
+      if (deps.closed) send(client, { t: 'closed', closed: deps.closed.list() });
+      if (deps.schedules) send(client, { t: 'schedules', schedules: deps.schedules.list() });
+      if (deps.usage) send(client, { t: 'usage', usage: deps.usage.summary() });
+      ws.on('message', (data, isBinary) => {
+        if (!isBinary) onMessage(client, String(data));
+      });
+      ws.on('close', () => clients.delete(client));
+      ws.on('error', () => clients.delete(client));
+    });
+  };
+
+  server.on('upgrade', onUpgrade);
+
+  return {
+    close(): void {
+      server.off('upgrade', onUpgrade);
+      clearInterval(pulse);
+      for (const c of clients) c.ws.terminate();
+      clients.clear();
+      wss.close();
+    },
+  };
+}
