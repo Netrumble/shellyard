@@ -6,7 +6,7 @@ import { detectProfiles, parseWslList, resolveExecutable, toLaunch } from '../..
 
 let dir = '';
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'cvm-shells-'));
+  dir = mkdtempSync(join(tmpdir(), 'ttc-shells-'));
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 

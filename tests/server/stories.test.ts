@@ -218,7 +218,7 @@ describe('stories over http and websocket', () => {
   const sockets: WebSocket[] = [];
 
   const call = async (method: string, path: string, body?: unknown): Promise<{ status: number; json: any }> => {
-    const res = await fetch(base + path, { method, headers: { 'x-cvm-token': TOKEN, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const res = await fetch(base + path, { method, headers: { 'x-ttc-token': TOKEN, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
     const text = await res.text();
     return { status: res.status, json: text ? JSON.parse(text) : null };
   };
@@ -305,7 +305,7 @@ describe('stories over http and websocket', () => {
 
   it('pushes the story list to clients on connect and on every change', async () => {
     await call('POST', '/api/stories', { name: 'A' });
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, ['cvm', `cvm-token.${TOKEN}`], { headers: { origin: base } });
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, ['ttc', `ttc-token.${TOKEN}`], { headers: { origin: base } });
     sockets.push(ws);
     const messages: ServerMessage[] = [];
     ws.on('message', (d) => messages.push(JSON.parse(String(d))));

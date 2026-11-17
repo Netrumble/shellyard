@@ -10,8 +10,8 @@ import type { IncomingHttpHeaders } from 'node:http';
 // page keeps the token itself and sends it explicitly: in a header on API calls, and in the
 // subprotocol list of the WebSocket handshake (the one place a browser lets a page put it).
 
-export const WS_PROTOCOL = 'cvm';
-export const WS_TOKEN_PREFIX = 'cvm-token.';
+export const WS_PROTOCOL = 'ttc';
+export const WS_TOKEN_PREFIX = 'ttc-token.';
 
 export function newToken(): string {
   return randomBytes(32).toString('hex');
@@ -38,12 +38,12 @@ export function safeEqual(a: string, b: string): boolean {
 
 export function requestAuthorized(headers: IncomingHttpHeaders, token: string): boolean {
   if (!token) return false;
-  const given = headers['x-cvm-token'];
+  const given = headers['x-ttc-token'];
   return typeof given === 'string' && safeEqual(given, token);
 }
 
 /**
- * The token a WebSocket client offered in Sec-WebSocket-Protocol, as "cvm, cvm-token.<token>".
+ * The token a WebSocket client offered in Sec-WebSocket-Protocol, as "ttc, ttc-token.<token>".
  * Null unless both the protocol name and a token are there.
  */
 export function tokenFromProtocols(header: string | undefined): string | null {

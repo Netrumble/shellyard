@@ -15,7 +15,7 @@ describe('takeTokenFromHash', () => {
 });
 
 describe('wsProtocols', () => {
-  it('offers the cvm protocol and the token', () => {
-    expect(wsProtocols('abc')).toEqual(['cvm', 'cvm-token.abc']);
+  it('offers the ttc protocol and the token', () => {
+    expect(wsProtocols('abc')).toEqual(['ttc', 'ttc-token.abc']);
   });
 });

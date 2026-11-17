@@ -11,7 +11,7 @@ function runHook(env: Record<string, string>, stdin: string): Promise<{ code: nu
     const started = Date.now();
     const base: Record<string, string> = {};
     for (const [k, v] of Object.entries(process.env)) {
-      if (v !== undefined && !k.startsWith('CVM_')) base[k] = v;
+      if (v !== undefined && !k.startsWith('TTC_')) base[k] = v;
     }
     const child = spawn(process.execPath, ['--import', 'tsx', hookScript], { env: { ...base, ...env } });
     let stdout = '';
@@ -35,14 +35,14 @@ describe('hook forwarder', () => {
   it('posts the payload to the session endpoint with the hook token', async () => {
     const received: Array<{ url?: string; method?: string; token: unknown; body: string }> = [];
     const server = createServer(async (req, res) => {
-      received.push({ url: req.url, method: req.method, token: req.headers['x-cvm-hook-token'], body: await readBody(req) });
+      received.push({ url: req.url, method: req.method, token: req.headers['x-ttc-hook-token'], body: await readBody(req) });
       res.writeHead(204).end();
     });
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
     const port = (server.address() as AddressInfo).port;
     try {
       const result = await runHook(
-        { CVM_PORT: String(port), CVM_SESSION_ID: 'abc-123', CVM_HOOK_TOKEN: 'secret' },
+        { TTC_PORT: String(port), TTC_SESSION_ID: 'abc-123', TTC_HOOK_TOKEN: 'secret' },
         '{"hook_event_name":"Stop"}',
       );
       expect(result.code).toBe(0);
@@ -62,7 +62,7 @@ describe('hook forwarder', () => {
     const closedPort = (probe.address() as AddressInfo).port;
     await new Promise((r) => probe.close(r));
     const result = await runHook(
-      { CVM_PORT: String(closedPort), CVM_SESSION_ID: 'abc', CVM_HOOK_TOKEN: 't' },
+      { TTC_PORT: String(closedPort), TTC_SESSION_ID: 'abc', TTC_HOOK_TOKEN: 't' },
       '{"hook_event_name":"Stop"}',
     );
     expect(result).toMatchObject({ code: 0, stdout: '', stderr: '' });
@@ -76,7 +76,7 @@ describe('hook forwarder', () => {
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
     const port = (server.address() as AddressInfo).port;
     try {
-      const result = await runHook({ CVM_PORT: String(port), CVM_SESSION_ID: 'abc', CVM_HOOK_TOKEN: 't' }, '{}');
+      const result = await runHook({ TTC_PORT: String(port), TTC_SESSION_ID: 'abc', TTC_HOOK_TOKEN: 't' }, '{}');
       expect(result).toMatchObject({ code: 0, stdout: '', stderr: '' });
       expect(result.ms).toBeLessThan(6000);
     } finally {
@@ -91,7 +91,7 @@ describe('hook forwarder', () => {
   });
 
   it('exits 0 silently when stdin is not JSON', async () => {
-    const result = await runHook({ CVM_PORT: '1', CVM_SESSION_ID: 'abc', CVM_HOOK_TOKEN: 't' }, 'not json at all');
+    const result = await runHook({ TTC_PORT: '1', TTC_SESSION_ID: 'abc', TTC_HOOK_TOKEN: 't' }, 'not json at all');
     expect(result).toMatchObject({ code: 0, stdout: '', stderr: '' });
   });
 });

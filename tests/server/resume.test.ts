@@ -167,8 +167,8 @@ describe('over http, and across a restart of the server', () => {
   };
   const call = async (s: RunningServer, method: string, path: string, body?: unknown, hook = false): Promise<{ status: number; json: any }> => {
     const headers: Record<string, string> = { 'content-type': 'application/json' };
-    if (hook) headers['x-cvm-hook-token'] = JSON.parse(readFileSync(join(home.dir(), 'server.json'), 'utf8')).hookToken;
-    else headers['x-cvm-token'] = s.token;
+    if (hook) headers['x-ttc-hook-token'] = JSON.parse(readFileSync(join(home.dir(), 'server.json'), 'utf8')).hookToken;
+    else headers['x-ttc-token'] = s.token;
     const res = await fetch(`http://127.0.0.1:${s.port}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
     const text = await res.text();
     return { status: res.status, json: text ? JSON.parse(text) : null };
@@ -236,7 +236,7 @@ describe('over http, and across a restart of the server', () => {
         JSON.stringify({ parentUuid: null, type: 'user', message: { role: 'user', content: 'hello' }, cwd: work, timestamp: stamp, sessionId: id }),
         JSON.stringify({ type: 'cost-state', sessionId: id, modelUsage: { 'claude-m': { costUSD: cost, inputTokens: 100, outputTokens: 10 } } }),
       ].join('\n') + '\n';
-    // One conversation held outside CVM, and one that is open here in a story.
+    // One conversation held outside TTC, and one that is open here in a story.
     writeFileSync(join(dir, `${OTHER}.jsonl`), lines(OTHER, 2));
     writeFileSync(join(dir, `${CONV}.jsonl`), lines(CONV, 7));
     const c = (await call(s, 'POST', '/api/sessions', { resume: CONV, storyId: story.id })).json as SessionInfo;

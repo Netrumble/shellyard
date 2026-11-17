@@ -75,7 +75,7 @@ describe('token and connection in the browser', () => {
     vi.stubGlobal('history', { replaceState: (_s: unknown, _t: string, url: string) => void replaced.push(url) });
     vi.stubGlobal('WebSocket', FakeSocket);
     vi.stubGlobal('fetch', async (url: string, init?: { headers?: Record<string, string> }) => {
-      fetchCalls.push({ url, token: init?.headers?.['x-cvm-token'] });
+      fetchCalls.push({ url, token: init?.headers?.['x-ttc-token'] });
       if (fetchMode === 'network-error') throw new TypeError('Failed to fetch');
       if (fetchMode === 'unauthorized') return { ok: false, status: 401, statusText: 'Unauthorized', json: async () => ({ error: 'Unauthorized' }) };
       return { ok: true, status: 200, statusText: 'OK', json: async () => ({ profiles: [], models: [] }) };
@@ -100,7 +100,7 @@ describe('token and connection in the browser', () => {
     await start();
     await settle();
     expect(replaced).toEqual(['/']);
-    expect(FakeSocket.last().protocols).toEqual(['cvm', 'cvm-token.fresh-token']);
+    expect(FakeSocket.last().protocols).toEqual(['ttc', 'ttc-token.fresh-token']);
     expect(fetchCalls[0]).toEqual({ url: '/api/meta', token: 'fresh-token' });
   });
 
@@ -109,25 +109,25 @@ describe('token and connection in the browser', () => {
     fetchMode = 'network-error';
     await start();
     await settle();
-    expect(storage.get('cvm-token')).toBeUndefined();
+    expect(storage.get('ttc-token')).toBeUndefined();
     fetchMode = 'ok';
     FakeSocket.last().open();
     await settle();
-    expect(storage.get('cvm-token')).toBe('fresh-token');
+    expect(storage.get('ttc-token')).toBe('fresh-token');
   });
 
   it('a token planted in the address by another page does not replace the stored one', async () => {
-    storage.set('cvm-token', 'good-token');
+    storage.set('ttc-token', 'good-token');
     page('#token=planted');
     fetchMode = 'unauthorized';
     const store = await start();
     await settle();
     expect(store.getState().connection).toBe('unauthorized');
-    expect(storage.get('cvm-token')).toBe('good-token');
+    expect(storage.get('ttc-token')).toBe('good-token');
   });
 
   it('uses the stored token on a later visit', async () => {
-    storage.set('cvm-token', 'stored-token');
+    storage.set('ttc-token', 'stored-token');
     const store = await start();
     await settle();
     FakeSocket.last().open();
@@ -136,16 +136,16 @@ describe('token and connection in the browser', () => {
     expect(replaced).toEqual([]);
   });
 
-  it('a stale token on load ends on the "run cvm" state', async () => {
-    storage.set('cvm-token', 'stale-token');
+  it('a stale token on load ends on the "run ttc" state', async () => {
+    storage.set('ttc-token', 'stale-token');
     fetchMode = 'unauthorized';
     const store = await start();
     await settle();
     expect(store.getState().connection).toBe('unauthorized');
   });
 
-  it('a tab that outlives a server restart is told to run cvm, and stops retrying', async () => {
-    storage.set('cvm-token', 'old-token');
+  it('a tab that outlives a server restart is told to run ttc, and stops retrying', async () => {
+    storage.set('ttc-token', 'old-token');
     const store = await start();
     await settle();
     FakeSocket.last().open();
@@ -175,7 +175,7 @@ describe('token and connection in the browser', () => {
   });
 
   it('a server that comes back with the same token is simply reconnected', async () => {
-    storage.set('cvm-token', 'token');
+    storage.set('ttc-token', 'token');
     const store = await start();
     await settle();
     FakeSocket.last().open();

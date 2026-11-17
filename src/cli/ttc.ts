@@ -33,7 +33,7 @@ function version(): string {
 }
 
 /**
- * True only if a CVM server answers on the recorded port. The recorded pid is not trusted:
+ * True only if a TTC server answers on the recorded port. The recorded pid is not trusted:
  * after a crash or a reboot it may belong to some other program.
  */
 type Probe = 'ours' | 'other' | 'unreachable';
@@ -41,7 +41,7 @@ type Probe = 'ours' | 'other' | 'unreachable';
 /**
  * Asks the recorded port who is there. "ours" only if the very server that wrote the state
  * file answers (same start time): after a crash the port may be taken by another program,
- * or by another CVM instance, whose token we do not hold and whose pid is not the recorded one.
+ * or by another TTC instance, whose token we do not hold and whose pid is not the recorded one.
  */
 async function probe(state: ServerState): Promise<Probe> {
   let res: Response;
@@ -53,7 +53,7 @@ async function probe(state: ServerState): Promise<Probe> {
   try {
     if (!res.ok) return 'other';
     const body = (await res.json()) as { ok?: unknown; app?: unknown; startedAt?: unknown };
-    return body.ok === true && body.app === 'cvm' && body.startedAt === state.startedAt ? 'ours' : 'other';
+    return body.ok === true && body.app === 'ttc' && body.startedAt === state.startedAt ? 'ours' : 'other';
   } catch {
     return 'other';
   }
@@ -170,7 +170,7 @@ async function status(out: Out): Promise<number> {
   let count = '?';
   try {
     const res = await fetch(`http://127.0.0.1:${state.port}/api/sessions`, {
-      headers: { 'x-cvm-token': state.token },
+      headers: { 'x-ttc-token': state.token },
       signal: AbortSignal.timeout(2000),
     });
     if (res.ok) count = String(((await res.json()) as unknown[]).length);
@@ -191,7 +191,7 @@ async function stop(out: Out): Promise<number> {
   try {
     await fetch(`http://127.0.0.1:${state.port}/api/shutdown`, {
       method: 'POST',
-      headers: { 'x-cvm-token': state.token },
+      headers: { 'x-ttc-token': state.token },
       signal: AbortSignal.timeout(2000),
     });
   } catch {

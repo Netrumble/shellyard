@@ -1,6 +1,6 @@
-// Run by Claude Code as the status-line command of a session started by CVM. Claude Code
+// Run by Claude Code as the status-line command of a session started by TTC. Claude Code
 // hands it a JSON payload (plan limits, cost and tokens of the session, model in use) on
-// stdin. This forwards the payload to the local CVM server and stands aside: whatever the
+// stdin. This forwards the payload to the local TTC server and stands aside: whatever the
 // user's own status line would print is printed, unchanged. Like the hook forwarder it must
 // never disturb the session: exit 0 whatever happens, nothing on stderr.
 
@@ -11,7 +11,7 @@ import { join } from 'node:path';
 
 const USER_LINE_TIMEOUT_MS = 3000;
 /** Set on the command this runs, so that a copy of this script reached through it stops. */
-const NESTED = 'CVM_STATUSLINE';
+const NESTED = 'TTC_STATUSLINE';
 
 async function readStdin(): Promise<Buffer> {
   const chunks: Buffer[] = [];
@@ -20,13 +20,13 @@ async function readStdin(): Promise<Buffer> {
 }
 
 async function forward(body: Buffer): Promise<void> {
-  const port = process.env.CVM_PORT;
-  const sessionId = process.env.CVM_SESSION_ID;
-  const token = process.env.CVM_HOOK_TOKEN;
+  const port = process.env.TTC_PORT;
+  const sessionId = process.env.TTC_SESSION_ID;
+  const token = process.env.TTC_HOOK_TOKEN;
   if (!port || !sessionId || !token) return;
   await fetch(`http://127.0.0.1:${port}/api/status/${encodeURIComponent(sessionId)}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-cvm-hook-token': token },
+    headers: { 'content-type': 'application/json', 'x-ttc-hook-token': token },
     body: body.toString('utf8'),
     signal: AbortSignal.timeout(2000),
   });

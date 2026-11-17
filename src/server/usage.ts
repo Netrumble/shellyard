@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import type { LimitReading, UsageLine, UsagePeriod, UsageSummary } from '../shared/types.js';
 
-// Usage is what Claude Code itself reports. Each session CVM starts has a status-line command
+// Usage is what Claude Code itself reports. Each session TTC starts has a status-line command
 // that forwards Claude Code's status payload here. That payload carries the plan limits, and
 // running totals for the session: its estimated cost, its tokens, the model in use. Running
 // totals are turned into amounts per day, attributed to the model and the story of the moment.
@@ -280,7 +280,7 @@ export class UsageStore {
     let changed = false;
 
     // On resume Claude Code restores the running totals of the conversation's earlier runs.
-    // Those were counted (or predate CVM): the first report only sets where to count from.
+    // Those were counted (or predate TTC): the first report only sets where to count from.
     const first = !this.baselines.has(sessionId);
     const base =
       first && ctx.resumed

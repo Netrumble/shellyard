@@ -18,7 +18,7 @@ export function requestPermissionOnce(): void {
 export function notify(s: SessionInfo, onClick: () => void, sound: boolean): void {
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
   if (document.hasFocus()) return;
-  const n = new Notification(s.name, { body: reasonLabel(s), tag: `cvm-${s.id}`, silent: !sound });
+  const n = new Notification(s.name, { body: reasonLabel(s), tag: `ttc-${s.id}`, silent: !sound });
   n.onclick = () => {
     window.focus();
     onClick();

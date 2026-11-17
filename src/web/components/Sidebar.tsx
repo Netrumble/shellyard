@@ -9,7 +9,7 @@ import { ColorDot, SessionActions, StatusBadge } from './SessionBits.js';
 import { ProfileDialog } from './ProfileDialog.js';
 import { StoryDialog } from './StoryDialog.js';
 
-const COLLAPSED_KEY = 'cvm-collapsed-stories';
+const COLLAPSED_KEY = 'ttc-collapsed-stories';
 
 /** Which stories are folded is a convenience of this browser, not shared state. */
 function readCollapsed(): Set<string> {

@@ -37,8 +37,8 @@ describe('http api', () => {
   function call(method: string, path: string, opts: { body?: string; headers?: Record<string, string>; auth?: 'user' | 'none' | 'hook' } = {}): Promise<Res> {
     const headers: Record<string, string> = { host: `127.0.0.1:${port}`, ...opts.headers };
     const auth = opts.auth ?? 'user';
-    if (auth === 'user') headers['x-cvm-token'] = TOKEN;
-    if (auth === 'hook') headers['x-cvm-hook-token'] = HOOK_TOKEN;
+    if (auth === 'user') headers['x-ttc-token'] = TOKEN;
+    if (auth === 'hook') headers['x-ttc-hook-token'] = HOOK_TOKEN;
     if (opts.body !== undefined) headers['content-length'] = String(Buffer.byteLength(opts.body));
     return new Promise((resolve, reject) => {
       const req = request({ host: '127.0.0.1', port, method, path, headers }, (res) => {
@@ -56,7 +56,7 @@ describe('http api', () => {
     ptys = fakePtyFactory();
     webDir = join(home.dir(), 'web');
     mkdirSync(join(webDir, 'assets'), { recursive: true });
-    writeFileSync(join(webDir, 'index.html'), '<html>CVM APP</html>');
+    writeFileSync(join(webDir, 'index.html'), '<html>TTC APP</html>');
     writeFileSync(join(webDir, 'assets', 'app.js'), 'console.log(1)');
     writeFileSync(join(home.dir(), 'secret.txt'), 'TOP SECRET');
     server = createServer();
@@ -93,7 +93,7 @@ describe('http api', () => {
     it('answers health without credentials', async () => {
       const r = await call('GET', '/api/health', { auth: 'none' });
       expect(r.status).toBe(200);
-      expect(r.json()).toEqual({ ok: true, app: 'cvm', startedAt: 777 });
+      expect(r.json()).toEqual({ ok: true, app: 'ttc', startedAt: 777 });
     });
 
     it('refuses the api without credentials', async () => {
@@ -106,12 +106,12 @@ describe('http api', () => {
     it('serves the app itself without credentials: it holds no secret, the api does', async () => {
       const page = await call('GET', '/', { auth: 'none' });
       expect(page.status).toBe(200);
-      expect(page.text).toContain('CVM APP');
+      expect(page.text).toContain('TTC APP');
       expect((await call('GET', '/assets/app.js', { auth: 'none' })).status).toBe(200);
     });
 
     it('does not accept the hook token as a user token', async () => {
-      const r = await call('GET', '/api/sessions', { auth: 'none', headers: { 'x-cvm-token': HOOK_TOKEN } });
+      const r = await call('GET', '/api/sessions', { auth: 'none', headers: { 'x-ttc-token': HOOK_TOKEN } });
       expect(r.status).toBe(401);
     });
 
@@ -132,14 +132,14 @@ describe('http api', () => {
       // This is what stops another site from sending the token header at all.
       const r = await call('OPTIONS', '/api/sessions', {
         auth: 'none',
-        headers: { origin: 'http://evil.com', 'access-control-request-method': 'POST', 'access-control-request-headers': 'x-cvm-token' },
+        headers: { origin: 'http://evil.com', 'access-control-request-method': 'POST', 'access-control-request-headers': 'x-ttc-token' },
       });
       expect(r.status).toBe(401);
       for (const name of Object.keys(r.headers)) expect(name.startsWith('access-control-')).toBe(false);
     });
 
     it('does not accept a cookie as a credential', async () => {
-      const r = await call('GET', '/api/sessions', { auth: 'none', headers: { cookie: `cvm_auth=${TOKEN}` } });
+      const r = await call('GET', '/api/sessions', { auth: 'none', headers: { cookie: `ttc_auth=${TOKEN}` } });
       expect(r.status).toBe(401);
     });
 
@@ -301,7 +301,7 @@ describe('http api', () => {
     it('serves the app and its assets with a content type', async () => {
       const index = await call('GET', '/');
       expect(index.status).toBe(200);
-      expect(index.text).toContain('CVM APP');
+      expect(index.text).toContain('TTC APP');
       expect(String(index.headers['content-type'])).toContain('text/html');
       const js = await call('GET', '/assets/app.js');
       expect(js.text).toBe('console.log(1)');
@@ -323,7 +323,7 @@ describe('http api', () => {
     });
 
     it('falls back to the app for an unknown page path, but not for a missing asset', async () => {
-      expect((await call('GET', '/some/view')).text).toContain('CVM APP');
+      expect((await call('GET', '/some/view')).text).toContain('TTC APP');
       expect((await call('GET', '/assets/missing.js')).status).toBe(404);
     });
 

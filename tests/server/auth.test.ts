@@ -34,31 +34,31 @@ describe('originAllowed', () => {
 describe('requestAuthorized', () => {
   const token = 'a'.repeat(64);
   it('accepts the token header', () => {
-    expect(requestAuthorized({ 'x-cvm-token': token }, token)).toBe(true);
+    expect(requestAuthorized({ 'x-ttc-token': token }, token)).toBe(true);
   });
   it('rejects a wrong token, a token of another length, and no credentials', () => {
-    expect(requestAuthorized({ 'x-cvm-token': 'b'.repeat(64) }, token)).toBe(false);
-    expect(requestAuthorized({ 'x-cvm-token': 'short' }, token)).toBe(false);
-    expect(requestAuthorized({ 'x-cvm-token': '' }, token)).toBe(false);
+    expect(requestAuthorized({ 'x-ttc-token': 'b'.repeat(64) }, token)).toBe(false);
+    expect(requestAuthorized({ 'x-ttc-token': 'short' }, token)).toBe(false);
+    expect(requestAuthorized({ 'x-ttc-token': '' }, token)).toBe(false);
     expect(requestAuthorized({}, token)).toBe(false);
   });
   it('does not accept a cookie: the browser would send one to every local port', () => {
-    expect(requestAuthorized({ cookie: `cvm_auth=${token}` }, token)).toBe(false);
+    expect(requestAuthorized({ cookie: `ttc_auth=${token}` }, token)).toBe(false);
   });
   it('never authorizes against an empty expected token', () => {
-    expect(requestAuthorized({ 'x-cvm-token': '' }, '')).toBe(false);
+    expect(requestAuthorized({ 'x-ttc-token': '' }, '')).toBe(false);
   });
 });
 
 describe('tokenFromProtocols', () => {
-  it('reads the token offered beside the cvm protocol', () => {
-    expect(tokenFromProtocols('cvm, cvm-token.abc')).toBe('abc');
-    expect(tokenFromProtocols('cvm-token.abc,cvm')).toBe('abc');
+  it('reads the token offered beside the ttc protocol', () => {
+    expect(tokenFromProtocols('ttc, ttc-token.abc')).toBe('abc');
+    expect(tokenFromProtocols('ttc-token.abc,ttc')).toBe('abc');
   });
   it('returns null when either part is missing', () => {
-    expect(tokenFromProtocols('cvm-token.abc')).toBeNull();
-    expect(tokenFromProtocols('cvm')).toBeNull();
-    expect(tokenFromProtocols('cvm, cvm-token.')).toBeNull();
+    expect(tokenFromProtocols('ttc-token.abc')).toBeNull();
+    expect(tokenFromProtocols('ttc')).toBeNull();
+    expect(tokenFromProtocols('ttc, ttc-token.')).toBeNull();
     expect(tokenFromProtocols('')).toBeNull();
     expect(tokenFromProtocols(undefined)).toBeNull();
   });

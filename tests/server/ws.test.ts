@@ -62,7 +62,7 @@ describe('websocket', () => {
     await new Promise((r) => server.close(r));
   });
 
-  function open(headers: Record<string, string>, path = '/ws', protocols: string[] = ['cvm', `cvm-token.${TOKEN}`]): Promise<Client> {
+  function open(headers: Record<string, string>, path = '/ws', protocols: string[] = ['ttc', `ttc-token.${TOKEN}`]): Promise<Client> {
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(`ws://127.0.0.1:${port}${path}`, protocols, { headers });
       sockets.push(ws);
@@ -77,22 +77,22 @@ describe('websocket', () => {
   const shell = (): SessionInfo => mgr.create({ kind: 'shell', command: process.execPath, cwd: home.dir() });
 
   describe('upgrade checks', () => {
-    it('accepts the token offered in the subprotocol list and settles on the cvm protocol', async () => {
+    it('accepts the token offered in the subprotocol list and settles on the ttc protocol', async () => {
       const c = await connect();
-      expect(c.ws.protocol).toBe('cvm');
+      expect(c.ws.protocol).toBe('ttc');
     });
     it('refuses a connection that offers no token', async () => {
-      await expect(open(good(), '/ws', ['cvm'])).rejects.toThrow(/refused 401/);
+      await expect(open(good(), '/ws', ['ttc'])).rejects.toThrow(/refused 401/);
       await expect(open(good(), '/ws', [])).rejects.toThrow(/refused 401/);
     });
     it('refuses a wrong token', async () => {
-      await expect(open(good(), '/ws', ['cvm', 'cvm-token.' + 'b'.repeat(64)])).rejects.toThrow(/refused 401/);
+      await expect(open(good(), '/ws', ['ttc', 'ttc-token.' + 'b'.repeat(64)])).rejects.toThrow(/refused 401/);
     });
     it('refuses a cookie in place of the token', async () => {
-      await expect(open({ ...good(), cookie: `cvm_auth=${TOKEN}` }, '/ws', ['cvm'])).rejects.toThrow(/refused 401/);
+      await expect(open({ ...good(), cookie: `ttc_auth=${TOKEN}` }, '/ws', ['ttc'])).rejects.toThrow(/refused 401/);
     });
     it('refuses a foreign origin that offers the protocol name but no token', async () => {
-      await expect(open({ origin: 'http://evil.com' }, '/ws', ['cvm'])).rejects.toThrow(/refused 403/);
+      await expect(open({ origin: 'http://evil.com' }, '/ws', ['ttc'])).rejects.toThrow(/refused 403/);
     });
     it('refuses a foreign origin even with the token', async () => {
       await expect(open({ origin: 'http://evil.com' })).rejects.toThrow(/refused 403/);

@@ -2,7 +2,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
-import { isServerAlive, main, writeLauncherPage } from '../../src/cli/cvm.js';
+import { isServerAlive, main, writeLauncherPage } from '../../src/cli/ttc.js';
 import { readServerState, writeServerState } from '../../src/server/config.js';
 import { startServer, type RunningServer } from '../../src/server/index.js';
 import { fakePtyFactory, useTempHome } from '../helpers.js';
@@ -20,7 +20,7 @@ function capture(): { lines: string[]; out: (s: string) => void } {
   return { lines, out: (s) => lines.push(s) };
 }
 
-describe('cvm cli', () => {
+describe('ttc cli', () => {
   useTempHome();
   const running: RunningServer[] = [];
   const start = async (): Promise<RunningServer> => {
@@ -59,7 +59,7 @@ describe('cvm cli', () => {
       }
     });
 
-    it('is false when a different CVM server answers on the recorded port', async () => {
+    it('is false when a different TTC server answers on the recorded port', async () => {
       const s = await start();
       const stale = { ...readServerState()!, startedAt: 12345 };
       expect(await isServerAlive(stale)).toBe(false);
@@ -106,9 +106,9 @@ describe('cvm cli', () => {
       expect(await isServerAlive({ pid: process.pid, port: s.port, token: s.token, hookToken: 'h', startedAt: 0 })).toBe(false);
     });
 
-    it('does not stop, or kill the recorded pid, when the port now belongs to another CVM', async () => {
+    it('does not stop, or kill the recorded pid, when the port now belongs to another TTC', async () => {
       const s = await start();
-      // A stale file pointing at a live CVM that did not write it; its pid is this test process.
+      // A stale file pointing at a live TTC that did not write it; its pid is this test process.
       writeServerState({ pid: process.pid, port: s.port, token: 'stale-token', hookToken: 'h', startedAt: 12345 });
       const c = capture();
       expect(await main(['stop'], c.out)).toBe(0);
@@ -136,7 +136,6 @@ describe('cvm cli', () => {
       const help = capture();
       await main(['--help'], help.out);
       expect(help.lines.join('\n')).toMatch(/ttc start/);
-      expect(help.lines.join('\n')).not.toMatch(/cvm/i);
     });
 
     it('reuses a running server instead of starting another', async () => {
@@ -187,10 +186,10 @@ describe('cvm cli', () => {
   });
 });
 
-describe('the installed commands', () => {
-  it('are ttc, and cvm as the earlier name of the same thing', async () => {
+describe('the installed command', () => {
+  it('is ttc, and nothing else', async () => {
     const { readFileSync } = await import('node:fs');
     const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { bin: Record<string, string> };
-    expect(pkg.bin).toEqual({ ttc: 'dist/cli/cvm.js', cvm: 'dist/cli/cvm.js' });
+    expect(pkg.bin).toEqual({ ttc: 'dist/cli/ttc.js' });
   });
 });

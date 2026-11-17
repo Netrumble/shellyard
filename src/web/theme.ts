@@ -4,7 +4,7 @@
 export type Theme = 'light' | 'dark' | 'talentia';
 export type ThemeChoice = 'system' | Theme;
 
-const KEY = 'cvm-theme';
+const KEY = 'ttc-theme';
 
 export function toThemeChoice(saved: string | null): ThemeChoice {
   return saved === 'light' || saved === 'dark' || saved === 'talentia' ? saved : 'system';

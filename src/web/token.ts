@@ -2,7 +2,7 @@
 // browser never sends to any server. The page keeps it in localStorage, which is private to
 // this exact origin (scheme, host and port), and sends it explicitly on each request.
 
-const STORAGE_KEY = 'cvm-token';
+const STORAGE_KEY = 'ttc-token';
 
 export interface LoadedToken {
   token: string;
@@ -16,7 +16,7 @@ export function takeTokenFromHash(hash: string): string | null {
 }
 
 export function wsProtocols(token: string): string[] {
-  return ['cvm', `cvm-token.${token}`];
+  return ['ttc', `ttc-token.${token}`];
 }
 
 /**

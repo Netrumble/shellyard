@@ -1,4 +1,4 @@
-# TTC
+# Talentia Terminal Control (TTC)
 
 Run several Claude Code sessions and shells at once, in one browser page, and see at a glance
 which of them is waiting for you.
@@ -10,11 +10,11 @@ window: your profile, your PATH, your permissions. The page is its screen and ke
 ## Install
 
 ```
-npm install -g console-view-manager
+npm install -g talentia-terminal-control
 ttc
 ```
 
-Requires Node.js 22 or later. Works on Windows and Linux. `npx console-view-manager` runs it
+Requires Node.js 22 or later. Works on Windows and Linux. `npx talentia-terminal-control` runs it
 without installing.
 
 ## Commands
@@ -31,10 +31,6 @@ without installing.
 
 The server keeps running when you close the terminal you started it from, and your sessions keep
 running when you close the browser tab. Open the page again with `ttc`.
-
-The command was called `cvm` before, and `cvm` still works as another name for `ttc`. The npm
-package, the data folder (`~/.console-view-manager`) and the `CVM_HOME` variable keep their
-earlier names, so an existing installation carries on with its data.
 
 ## What you see
 
@@ -245,13 +241,13 @@ Known limits:
 
 ## Where things are kept
 
-Everything is in `~/.console-view-manager/`:
+Everything is in `~/.talentia-terminal-control/`:
 
 | File | Content |
 |---|---|
 | `config.json` | Your profiles, your stories, the model list, `silenceMs` |
 | `server.json` | The running server's port and access token (readable by you only) |
-| `cvm.log` | The server log |
+| `ttc.log` | The server log |
 | `sessions.json` | The sessions open right now, to bring them back after a restart |
 | `closed.json` | The last fifty sessions that ended or were closed, to reopen them |
 | `backgrounds/` | The images uploaded as terminal backgrounds |
@@ -260,7 +256,7 @@ Everything is in `~/.console-view-manager/`:
 | `open.html` | The private page `ttc` opens in your browser (readable by you only) |
 | `run/` | Per-session settings files, removed when a session ends |
 
-Set `CVM_HOME` to use another folder.
+Set `TTC_HOME` to use another folder.
 
 ## Security
 
@@ -280,7 +276,7 @@ After the server restarts, a tab left open from before is told to run `ttc` agai
 If you edit `config.json` by hand and it is not valid JSON at that moment, TTC keeps using the
 last settings that were valid and refuses to save changes from the page until the file is fixed.
 
-Any program running as you can read the token from `~/.console-view-manager/`; TTC does not
+Any program running as you can read the token from `~/.talentia-terminal-control/`; TTC does not
 protect you from your own account.
 
 Known gap, not yet closed:
@@ -297,5 +293,9 @@ from an elevated terminal.
 npm install
 npm test            # unit and integration tests
 npm run build       # server (tsc) and web UI (vite) into dist/
-node dist/cli/cvm.js --foreground
+node dist/cli/ttc.js --foreground
 ```
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).

@@ -12,7 +12,7 @@ export const HOOK_NAMES: readonly HookName[] = [
 ];
 
 /**
- * What is behind the text of a terminal: a colour, or an uploaded image (by the name CVM
+ * What is behind the text of a terminal: a colour, or an uploaded image (by the name TTC
  * stored it under) with a dark veil over it, 0 for none to nearly 1 for almost black.
  */
 export interface TerminalBackground {

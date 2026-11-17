@@ -30,7 +30,7 @@ export interface HttpDeps {
   token: string;
   hookToken: string;
   webDir: string;
-  /** Identifies this server instance to the cvm command. */
+  /** Identifies this server instance to the ttc command. */
   startedAt: number;
   onShutdown: () => void;
 }
@@ -250,7 +250,7 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
     const method = req.method ?? 'GET';
 
     if (path === '/api/health') {
-      send(res, 200, { ok: true, app: 'cvm', startedAt: deps.startedAt });
+      send(res, 200, { ok: true, app: 'ttc', startedAt: deps.startedAt });
       return;
     }
 
@@ -258,7 +258,7 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
     const hookMatch = /^\/api\/hooks\/([^/]+)$/.exec(path);
     if (hookMatch) {
       if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
-      const given = req.headers['x-cvm-hook-token'];
+      const given = req.headers['x-ttc-hook-token'];
       if (typeof given !== 'string' || !safeEqual(given, deps.hookToken)) throw new HttpError(403, 'Forbidden');
       const raw = await readJson(req);
       const parsed = parseHookBody(raw);
@@ -276,7 +276,7 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
     const statusMatch = /^\/api\/status\/([^/]+)$/.exec(path);
     if (statusMatch) {
       if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
-      const given = req.headers['x-cvm-hook-token'];
+      const given = req.headers['x-ttc-hook-token'];
       if (typeof given !== 'string' || !safeEqual(given, deps.hookToken)) throw new HttpError(403, 'Forbidden');
       const rawStatus = await readJson(req);
       const payload = parseStatusPayload(rawStatus);

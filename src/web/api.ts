@@ -22,7 +22,7 @@ export function configureApi(opts: { token: string; onUnauthorized: () => void }
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
     method,
-    headers: body === undefined ? { 'x-cvm-token': token } : { 'x-cvm-token': token, 'content-type': 'application/json' },
+    headers: body === undefined ? { 'x-ttc-token': token } : { 'x-ttc-token': token, 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (res.status === 401) onUnauthorized();
@@ -48,7 +48,7 @@ const imageUrls = new Map<string, Promise<string>>();
 export function backgroundUrl(name: string): Promise<string> {
   let url = imageUrls.get(name);
   if (!url) {
-    url = fetch(`/api/backgrounds/${encodeURIComponent(name)}`, { headers: { 'x-cvm-token': token } }).then(async (res) => {
+    url = fetch(`/api/backgrounds/${encodeURIComponent(name)}`, { headers: { 'x-ttc-token': token } }).then(async (res) => {
       if (!res.ok) throw new Error(`Could not load the background image (${res.status}).`);
       return URL.createObjectURL(await res.blob());
     });
@@ -60,7 +60,7 @@ export function backgroundUrl(name: string): Promise<string> {
 
 /** Sends an image file to be kept as a terminal background; returns the name it was given. */
 export async function uploadBackground(file: File): Promise<string> {
-  const res = await fetch('/api/backgrounds', { method: 'POST', headers: { 'x-cvm-token': token, 'content-type': 'application/octet-stream' }, body: file });
+  const res = await fetch('/api/backgrounds', { method: 'POST', headers: { 'x-ttc-token': token, 'content-type': 'application/octet-stream' }, body: file });
   if (res.status === 401) onUnauthorized();
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`;

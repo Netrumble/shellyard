@@ -5,22 +5,22 @@ import { afterEach, beforeEach } from 'vitest';
 import type { Launch } from '../src/server/shells.js';
 import type { PtyFactory, PtyLike } from '../src/server/pty-session.js';
 
-/** Gives each test its own data folder through CVM_HOME, so the real one is never touched. */
+/** Gives each test its own data folder through TTC_HOME, so the real one is never touched. */
 export function useTempHome(): { dir: () => string } {
   let dir = '';
   let previous: string | undefined;
   let previousClaude: string | undefined;
   beforeEach(() => {
-    previous = process.env.CVM_HOME;
+    previous = process.env.TTC_HOME;
     previousClaude = process.env.CLAUDE_CONFIG_DIR;
-    dir = mkdtempSync(join(tmpdir(), 'cvm-test-'));
-    process.env.CVM_HOME = dir;
+    dir = mkdtempSync(join(tmpdir(), 'ttc-test-'));
+    process.env.TTC_HOME = dir;
     // Stands in for ~/.claude: a server under test must not read the real conversations.
     process.env.CLAUDE_CONFIG_DIR = join(dir, 'claude-config');
   });
   afterEach(() => {
-    if (previous === undefined) delete process.env.CVM_HOME;
-    else process.env.CVM_HOME = previous;
+    if (previous === undefined) delete process.env.TTC_HOME;
+    else process.env.TTC_HOME = previous;
     if (previousClaude === undefined) delete process.env.CLAUDE_CONFIG_DIR;
     else process.env.CLAUDE_CONFIG_DIR = previousClaude;
     rmSync(dir, { recursive: true, force: true });

@@ -7,8 +7,8 @@ import type { SessionInfo } from '../shared/types.js';
 export type EffectsLevel = 'full' | 'reduced' | 'off';
 
 const LEVELS: readonly string[] = ['full', 'reduced', 'off'];
-const EFFECTS_KEY = 'cvm-effects';
-const SOUND_KEY = 'cvm-sound';
+const EFFECTS_KEY = 'ttc-effects';
+const SOUND_KEY = 'ttc-sound';
 
 /** The saved choice if there is one; otherwise the system's preference about motion. */
 export function resolveEffects(saved: string | null, prefersReducedMotion: boolean): EffectsLevel {

@@ -29,9 +29,9 @@ export function defaultConfig(): Config {
   return { profiles: [], models: [...DEFAULT_MODELS], silenceMs: DEFAULT_SILENCE_MS, stories: [], restoreSessions: true };
 }
 
-/** CVM_HOME overrides the location, which is how tests avoid the real folder. */
+/** TTC_HOME overrides the location, which is how tests avoid the real folder. */
 export function dataDir(): string {
-  const dir = process.env.CVM_HOME || join(homedir(), '.console-view-manager');
+  const dir = process.env.TTC_HOME || join(homedir(), '.talentia-terminal-control');
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -43,7 +43,7 @@ export function runDir(): string {
 }
 
 export function logPath(): string {
-  return join(dataDir(), 'cvm.log');
+  return join(dataDir(), 'ttc.log');
 }
 
 function configPath(): string {

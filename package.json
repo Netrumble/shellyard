@@ -1,14 +1,15 @@
 {
-  "name": "console-view-manager",
+  "name": "talentia-terminal-control",
   "version": "0.1.0",
-  "description": "Manage Claude Code and shell terminals from a local browser UI, and see which one needs you.",
+  "description": "Talentia Terminal Control (TTC): run Claude Code sessions and shells in one local browser page, and see which one needs you.",
   "type": "module",
   "bin": {
-    "ttc": "dist/cli/cvm.js",
-    "cvm": "dist/cli/cvm.js"
+    "ttc": "dist/cli/ttc.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "README.md"
   ],
   "engines": {
     "node": ">=22"
@@ -18,7 +19,7 @@
     "build:server": "tsc -p tsconfig.server.json",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "dev:server": "tsx src/cli/cvm.ts --foreground",
+    "dev:server": "tsx src/cli/ttc.ts --foreground",
     "dev:web": "vite",
     "prepublishOnly": "npm run build && npm test"
   },
@@ -28,7 +29,15 @@
     "pty",
     "xterm"
   ],
-  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Talentia-Software-OSS/talentia-terminal-control.git"
+  },
+  "homepage": "https://github.com/Talentia-Software-OSS/talentia-terminal-control#readme",
+  "bugs": {
+    "url": "https://github.com/Talentia-Software-OSS/talentia-terminal-control/issues"
+  },
+  "license": "MIT",
   "dependencies": {
     "@lydell/node-pty": "1.2.0-beta.18",
     "@xterm/addon-serialize": "^0.14.0",

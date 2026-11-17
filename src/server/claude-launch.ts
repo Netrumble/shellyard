@@ -26,18 +26,18 @@ function settingsPathFor(sessionId: string): string {
 }
 
 /**
- * Builds what a Claude Code session needs to report its state to CVM. The hooks go in a
- * settings file of CVM's own, passed with --settings, so the user's Claude settings are
+ * Builds what a Claude Code session needs to report its state to TTC. The hooks go in a
+ * settings file of TTC's own, passed with --settings, so the user's Claude settings are
  * never modified; Claude Code adds these hooks to whatever the user already has.
  */
 export function prepareClaudeLaunch(i: ClaudeLaunchInput): ClaudeLaunchOutput {
   const settingsPath = settingsPathFor(i.sessionId);
-  // The Node running CVM, by full path: "node" on PATH may be another version or absent.
+  // The Node running TTC, by full path: "node" on PATH may be another version or absent.
   const command = `"${process.execPath}" "${i.hookScriptPath}"`;
   const hooks: Record<string, unknown> = {};
   for (const name of HOOK_NAMES) hooks[name] = [{ hooks: [{ type: 'command', command }] }];
   // Claude Code hands its status payload (plan limits, cost, tokens, model) to this command.
-  // It forwards the payload to CVM and then prints what the user's own status line prints.
+  // It forwards the payload to TTC and then prints what the user's own status line prints.
   const statusLine = { type: 'command', command: `"${process.execPath}" "${i.statusScriptPath}"` };
   writeFileSync(settingsPath, JSON.stringify({ hooks, statusLine }, null, 2));
 
@@ -51,9 +51,9 @@ export function prepareClaudeLaunch(i: ClaudeLaunchInput): ClaudeLaunchOutput {
       ...i.extraArgs,
     ],
     env: {
-      CVM_SESSION_ID: i.sessionId,
-      CVM_PORT: String(i.port),
-      CVM_HOOK_TOKEN: i.hookToken,
+      TTC_SESSION_ID: i.sessionId,
+      TTC_PORT: String(i.port),
+      TTC_HOOK_TOKEN: i.hookToken,
     },
   };
 }
@@ -89,7 +89,7 @@ export function parseHookBody(body: unknown): { name: HookName; idleReminder: bo
 
 /**
  * Environment variables that mark a process as running inside another Claude Code session.
- * If CVM itself was started from a Claude Code terminal they would leak into every session
+ * If TTC itself was started from a Claude Code terminal they would leak into every session
  * it hosts, and Claude Code then treats those as child sessions (for one thing, it stops
  * saving their transcripts).
  */
