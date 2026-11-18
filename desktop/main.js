@@ -1,9 +1,9 @@
-// The desktop app: a window on the TTC server. The server itself is the one `ttc` starts, a
+// The desktop app: a window on the ShellYard server. The server itself is the one `shellyard` starts, a
 // background process that outlives the window, so closing the app never stops a session.
 import { app, BrowserWindow, dialog, Menu, nativeImage, Notification, shell, Tray } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ensureServer, writeLauncherPage } from 'talentia-terminal-control/launcher';
+import { ensureServer, writeLauncherPage } from 'shellyard/launcher';
 import { findNode } from './find-node.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -26,10 +26,10 @@ function showWindow() {
 function createTray() {
   if (tray) return;
   tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon.resize({ width: 16, height: 16 }));
-  tray.setToolTip('TTC');
+  tray.setToolTip('ShellYard');
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: 'Show TTC', click: showWindow },
+      { label: 'Show ShellYard', click: showWindow },
       { label: 'Open in the browser', click: () => serverState && void shell.openPath(writeLauncherPage(serverState)) },
       { type: 'separator' },
       { label: 'Quit (sessions keep running)', click: () => app.quit() },
@@ -47,13 +47,13 @@ function portFromArgs(argv) {
 async function openWindow() {
   const node = findNode();
   if (!node) {
-    dialog.showErrorBox('TTC', 'Node.js was not found on PATH. TTC runs its server on Node 22 or later: install it, then start the app again.');
+    dialog.showErrorBox('ShellYard', 'Node.js was not found on PATH. ShellYard runs its server on Node 22 or later: install it, then start the app again.');
     app.quit();
     return;
   }
   const started = await ensureServer({ port: portFromArgs(process.argv), node });
   if (!started.ok) {
-    dialog.showErrorBox('TTC did not start', started.error);
+    dialog.showErrorBox('ShellYard did not start', started.error);
     app.quit();
     return;
   }
@@ -63,7 +63,7 @@ async function openWindow() {
   win = new BrowserWindow({
     width: 1400,
     height: 900,
-    title: 'TTC',
+    title: 'ShellYard',
     icon: icon.isEmpty() ? undefined : icon,
     autoHideMenuBar: true,
     backgroundColor: '#181b21',
@@ -88,7 +88,7 @@ async function openWindow() {
     win.hide();
     if (!toldAboutTray && Notification.isSupported()) {
       toldAboutTray = true;
-      new Notification({ title: 'TTC is still running', body: 'It stays in the notification area and tells you when a session needs you. Quit it from there.', icon }).show();
+      new Notification({ title: 'ShellYard is still running', body: 'It stays in the notification area and tells you when a session needs you. Quit it from there.', icon }).show();
     }
   });
   win.on('closed', () => {
@@ -109,7 +109,7 @@ if (!app.requestSingleInstanceLock()) {
     quitting = true;
   });
   // Windows shows notifications only for an app with an id.
-  app.setAppUserModelId('com.talentia.ttc');
+  app.setAppUserModelId('com.talentia.shellyard');
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
       { role: 'editMenu' },
@@ -118,7 +118,7 @@ if (!app.requestSingleInstanceLock()) {
     ]),
   );
   app.whenReady().then(openWindow, (e) => {
-    dialog.showErrorBox('TTC', String(e?.message ?? e));
+    dialog.showErrorBox('ShellYard', String(e?.message ?? e));
     app.quit();
   });
   app.on('activate', showWindow);

@@ -6,7 +6,7 @@ import { detectProfiles, parseWslList, resolveExecutable, toLaunch } from '../..
 
 let dir = '';
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'ttc-shells-'));
+  dir = mkdtempSync(join(tmpdir(), 'shellyard-shells-'));
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 

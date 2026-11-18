@@ -35,8 +35,8 @@ describe('visibleCards', () => {
 
 describe('titleFor', () => {
   it('shows the count only when something waits', () => {
-    expect(titleFor(0)).toBe('TTC');
-    expect(titleFor(2)).toBe('(2) TTC');
+    expect(titleFor(0)).toBe('ShellYard');
+    expect(titleFor(2)).toBe('(2) ShellYard');
   });
 });
 

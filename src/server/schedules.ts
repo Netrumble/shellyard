@@ -6,7 +6,7 @@ import { nextRun, parseCron, parseTime } from './schedule-time.js';
 // Schedules: a prompt given to a new Claude Code session at set times. This file decides
 // when a run is due and keeps the record; starting the session is handed in from outside.
 //
-// They run only while TTC is running. What happens to a run missed in the meantime is each
+// They run only while ShellYard is running. What happens to a run missed in the meantime is each
 // schedule's own choice (`catchUp`).
 
 export type LaunchResult = { sessionId: string } | { error: string };
@@ -270,7 +270,7 @@ export class ScheduleStore {
   }
 
   /**
-   * Called once when TTC starts: settles the runs whose time passed while it was not running.
+   * Called once when ShellYard starts: settles the runs whose time passed while it was not running.
    * A schedule that catches up is left due, and runs at the first tick; another has the
    * miss recorded and waits for its next time.
    */
@@ -279,7 +279,7 @@ export class ScheduleStore {
     let any = false;
     for (const s of this.schedules) {
       if (!s.enabled || s.nextRunAt === null || s.nextRunAt > now - LATE_GRACE_MS || s.catchUp) continue;
-      this.record(s, { at: now, outcome: 'skipped', detail: `TTC was not running at the time of this run (${new Date(s.nextRunAt).toLocaleString('en-GB')}).`, sessionId: null, manual: false });
+      this.record(s, { at: now, outcome: 'skipped', detail: `ShellYard was not running at the time of this run (${new Date(s.nextRunAt).toLocaleString('en-GB')}).`, sessionId: null, manual: false });
       this.plan(s, now);
       any = true;
     }

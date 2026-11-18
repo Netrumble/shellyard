@@ -32,7 +32,7 @@ export interface HttpDeps {
   token: string;
   hookToken: string;
   webDir: string;
-  /** Identifies this server instance to the ttc command. */
+  /** Identifies this server instance to the shellyard command. */
   startedAt: number;
   onShutdown: () => void;
 }
@@ -252,7 +252,7 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
     const method = req.method ?? 'GET';
 
     if (path === '/api/health') {
-      send(res, 200, { ok: true, app: 'ttc', startedAt: deps.startedAt });
+      send(res, 200, { ok: true, app: 'shellyard', startedAt: deps.startedAt });
       return;
     }
 
@@ -260,7 +260,7 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
     const hookMatch = /^\/api\/hooks\/([^/]+)$/.exec(path);
     if (hookMatch) {
       if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
-      const given = req.headers['x-ttc-hook-token'];
+      const given = req.headers['x-shellyard-hook-token'];
       if (typeof given !== 'string' || !safeEqual(given, deps.hookToken)) throw new HttpError(403, 'Forbidden');
       const raw = await readJson(req);
       const parsed = parseHookBody(raw);
@@ -278,7 +278,7 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
     const statusMatch = /^\/api\/status\/([^/]+)$/.exec(path);
     if (statusMatch) {
       if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
-      const given = req.headers['x-ttc-hook-token'];
+      const given = req.headers['x-shellyard-hook-token'];
       if (typeof given !== 'string' || !safeEqual(given, deps.hookToken)) throw new HttpError(403, 'Forbidden');
       const rawStatus = await readJson(req);
       const payload = parseStatusPayload(rawStatus);
@@ -396,7 +396,7 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
     if (path === '/api/backgrounds') {
       if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
       const name = saveImage(await readBytes(req, MAX_IMAGE_BYTES));
-      if (!name) throw new HttpError(400, 'Not an image TTC can use. Use a PNG, JPEG, WebP or GIF file.');
+      if (!name) throw new HttpError(400, 'Not an image ShellYard can use. Use a PNG, JPEG, WebP or GIF file.');
       return send(res, 201, { image: name });
     }
 

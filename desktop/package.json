@@ -1,11 +1,12 @@
 {
-  "name": "talentia-terminal-control-desktop",
+  "name": "shellyard-desktop",
+  "productName": "ShellYard",
   "version": "0.1.0",
-  "description": "TTC as a desktop app: the same terminals and Claude Code sessions in their own window instead of a browser tab.",
+  "description": "ShellYard as a desktop app: the same terminals and Claude Code sessions in their own window instead of a browser tab.",
   "type": "module",
   "main": "main.js",
   "bin": {
-    "ttc-desktop": "bin/ttc-desktop.js"
+    "shellyard-desktop": "bin/shellyard-desktop.js"
   },
   "files": [
     "bin",
@@ -18,7 +19,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "installer": "node scripts/build-installer.mjs"
   },
   "keywords": [
     "claude-code",
@@ -28,12 +30,15 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Talentia-Software-OSS/talentia-terminal-control.git",
+    "url": "git+https://github.com/Talentia-Software-OSS/shellyard.git",
     "directory": "desktop"
   },
   "license": "MIT",
   "dependencies": {
     "electron": "^45.3.4",
-    "talentia-terminal-control": "^0.1.0"
+    "shellyard": "^0.1.0"
+  },
+  "devDependencies": {
+    "electron-builder": "^26.18.0"
   }
 }

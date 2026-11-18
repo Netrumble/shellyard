@@ -48,7 +48,7 @@ describe('fonts over http', () => {
     return port;
   }
   const call = async (method: string, path: string, body?: unknown): Promise<{ status: number; json: any }> => {
-    const res = await fetch(`http://127.0.0.1:${s.port}${path}`, { method, headers: { 'x-ttc-token': s.token, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const res = await fetch(`http://127.0.0.1:${s.port}${path}`, { method, headers: { 'x-shellyard-token': s.token, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
     const text = await res.text();
     return { status: res.status, json: text ? JSON.parse(text) : null };
   };

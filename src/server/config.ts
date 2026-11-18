@@ -29,9 +29,9 @@ export function defaultConfig(): Config {
   return { profiles: [], models: [...DEFAULT_MODELS], silenceMs: DEFAULT_SILENCE_MS, stories: [], restoreSessions: true };
 }
 
-/** TTC_HOME overrides the location, which is how tests avoid the real folder. */
+/** SHELLYARD_HOME overrides the location, which is how tests avoid the real folder. */
 export function dataDir(): string {
-  const dir = process.env.TTC_HOME || join(homedir(), '.talentia-terminal-control');
+  const dir = process.env.SHELLYARD_HOME || join(homedir(), '.shellyard');
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -43,7 +43,7 @@ export function runDir(): string {
 }
 
 export function logPath(): string {
-  return join(dataDir(), 'ttc.log');
+  return join(dataDir(), 'shellyard.log');
 }
 
 function configPath(): string {

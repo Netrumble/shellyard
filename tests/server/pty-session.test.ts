@@ -108,7 +108,7 @@ describe('PtySession with a fake pty', () => {
 
 describe.skipIf(process.platform !== 'win32')('a .cmd shim on Windows, through a real pty', () => {
   it('runs from a folder with a space in its name and receives arguments with spaces intact', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ttc shim '));
+    const dir = mkdtempSync(join(tmpdir(), 'shellyard shim '));
     try {
       const shim = join(dir, 'echoargs.cmd');
       writeFileSync(shim, '@echo off\r\necho ARGS:%*\r\n');

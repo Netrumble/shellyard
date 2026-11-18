@@ -4,3 +4,5 @@ spikes
 .superpowers
 *.tgz
 .remember
+desktop/.installer
+desktop/release

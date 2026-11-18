@@ -216,7 +216,7 @@ function ScheduleDialog({ schedule, onClose }: { schedule?: Schedule; onClose: (
 
         <label className="check">
           <input type="checkbox" checked={catchUp} onChange={(e) => setCatchUp(e.target.checked)} />
-          <span>If TTC was not running at the time, run once when it next starts</span>
+          <span>If ShellYard was not running at the time, run once when it next starts</span>
         </label>
 
         {error && (
@@ -245,7 +245,7 @@ function nextText(s: Schedule, now: number): string {
   return wait <= 0 ? 'Due now' : `${whenLabel(s.nextRunAt)} (in ${durationLabel(wait)})`;
 }
 
-/** The prompts TTC gives to new Claude Code sessions at set times. */
+/** The prompts ShellYard gives to new Claude Code sessions at set times. */
 export function SchedulesView(): React.JSX.Element {
   const { schedules, sessions, stories, meta } = useStore();
   const [dialog, setDialog] = useState<{ schedule?: Schedule } | null>(null);
@@ -276,7 +276,7 @@ export function SchedulesView(): React.JSX.Element {
     <div className="schedules">
       <p>
         A schedule starts a new Claude Code session at set times and gives it a prompt, as if you had typed it. The session appears on the
-        board like any other. Schedules run only while TTC is running on this computer.
+        board like any other. Schedules run only while ShellYard is running on this computer.
       </p>
       <div className="view-tools">
         <button type="button" className="primary" onClick={() => setDialog({})}>

@@ -15,7 +15,7 @@ describe('takeTokenFromHash', () => {
 });
 
 describe('wsProtocols', () => {
-  it('offers the ttc protocol and the token', () => {
-    expect(wsProtocols('abc')).toEqual(['ttc', 'ttc-token.abc']);
+  it('offers the shellyard protocol and the token', () => {
+    expect(wsProtocols('abc')).toEqual(['shellyard', 'shellyard-token.abc']);
   });
 });

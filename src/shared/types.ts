@@ -12,7 +12,7 @@ export const HOOK_NAMES: readonly HookName[] = [
 ];
 
 /**
- * What is behind the text of a terminal: a colour, or an uploaded image (by the name TTC
+ * What is behind the text of a terminal: a colour, or an uploaded image (by the name ShellYard
  * stored it under) with a dark veil over it, 0 for none to nearly 1 for almost black.
  */
 export interface TerminalBackground {
@@ -173,7 +173,7 @@ export type ClientMessage =
   | { t: 'input'; id: string; data: string }
   | { t: 'resize'; id: string; cols: number; rows: number };
 
-/** When a schedule runs. Times are the local time of the machine TTC runs on. */
+/** When a schedule runs. Times are the local time of the machine ShellYard runs on. */
 export type ScheduleWhen =
   | { kind: 'once'; at: number }
   /** `time` is "HH:MM"; `days` are weekdays, 0 for Sunday to 6 for Saturday. */
@@ -218,7 +218,7 @@ export interface Schedule {
   storyId: string | null;
   when: ScheduleWhen;
   enabled: boolean;
-  /** Whether a run missed while TTC was not running is made up for at the next start. */
+  /** Whether a run missed while ShellYard was not running is made up for at the next start. */
   catchUp: boolean;
   permissionMode: SchedulePermissionMode;
   createdAt: number;

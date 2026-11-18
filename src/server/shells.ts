@@ -133,7 +133,7 @@ export function listWslDistros(): string[] {
   return names;
 }
 
-/** The profiles TTC offers without any configuration: whatever is installed on this machine. */
+/** The profiles ShellYard offers without any configuration: whatever is installed on this machine. */
 export function detectProfiles(env: Env = process.env, platform: NodeJS.Platform = process.platform, wslDistros: () => string[] = listWslDistros): Profile[] {
   const found: Profile[] = [];
   const has = (cmd: string): boolean => resolveExecutable(cmd, env, platform) !== null;

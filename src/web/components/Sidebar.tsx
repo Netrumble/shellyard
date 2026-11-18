@@ -9,7 +9,7 @@ import { ColorDot, SessionActions, StatusBadge } from './SessionBits.js';
 import { ProfileDialog } from './ProfileDialog.js';
 import { StoryDialog } from './StoryDialog.js';
 
-const COLLAPSED_KEY = 'ttc-collapsed-stories';
+const COLLAPSED_KEY = 'shellyard-collapsed-stories';
 
 /** Which stories are folded is a convenience of this browser, not shared state. */
 function readCollapsed(): Set<string> {
@@ -57,6 +57,7 @@ export function Sidebar({ onNewSession }: { onNewSession: (storyId?: string) => 
   const [storyDialog, setStoryDialog] = useState<{ story?: Story } | null>(null);
   const [profileDialog, setProfileDialog] = useState<string | null>(null);
   const editedProfile = meta.profiles.find((p) => p.id === profileDialog);
+  const [creatingProfile, setCreatingProfile] = useState(false);
   const groups = groupByStory(sessions, stories);
   const selectedId = view.kind === 'single' ? view.id : null;
   const storyFilter = view.kind === 'grid' ? view.storyFilter : undefined;
@@ -90,7 +91,7 @@ export function Sidebar({ onNewSession }: { onNewSession: (storyId?: string) => 
 
   return (
     <aside className="sidebar">
-      <div className="brand">TTC</div>
+      <div className="brand">ShellYard</div>
 
       <nav>
         <button type="button" className={view.kind === 'board' ? 'nav active' : 'nav'} onClick={() => setView({ kind: 'board' })}>
@@ -203,11 +204,15 @@ export function Sidebar({ onNewSession }: { onNewSession: (storyId?: string) => 
           </li>
         ))}
       </ul>
+      <button type="button" className="icon add-launcher" title="New launcher" aria-label="New launcher" onClick={() => setCreatingProfile(true)}>
+        +
+      </button>
 
       <p className="powered-by">Powered by Talentia Software</p>
 
       {storyDialog && <StoryDialog story={storyDialog.story} onClose={() => setStoryDialog(null)} />}
       {editedProfile && <ProfileDialog profile={editedProfile} onClose={() => setProfileDialog(null)} />}
+      {creatingProfile && <ProfileDialog onClose={() => setCreatingProfile(false)} />}
     </aside>
   );
 }

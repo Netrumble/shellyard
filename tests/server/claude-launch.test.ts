@@ -19,7 +19,7 @@ describe('prepareClaudeLaunch', () => {
     expect(out.args).toEqual(['--settings', out.settingsPath, '--session-id', 'sess-1', '--model', 'opus', '--verbose']);
   });
 
-  it('registers a status line that reports usage to TTC', () => {
+  it('registers a status line that reports usage to ShellYard', () => {
     const out = prepareClaudeLaunch({ ...base, model: null });
     const settings = JSON.parse(readFileSync(out.settingsPath, 'utf8'));
     expect(settings.statusLine).toEqual({ type: 'command', command: `"${process.execPath}" "C:\\pkg\\dist\\hook\\statusline.js"` });
@@ -38,7 +38,7 @@ describe('prepareClaudeLaunch', () => {
 
   it('hands the session its identity through the environment', () => {
     const out = prepareClaudeLaunch({ ...base, model: null });
-    expect(out.env).toEqual({ TTC_SESSION_ID: 'sess-1', TTC_PORT: '7717', TTC_HOOK_TOKEN: 'hook-token' });
+    expect(out.env).toEqual({ SHELLYARD_SESSION_ID: 'sess-1', SHELLYARD_PORT: '7717', SHELLYARD_HOOK_TOKEN: 'hook-token' });
   });
 
   it('cleans up, and is silent when there is nothing to clean', () => {

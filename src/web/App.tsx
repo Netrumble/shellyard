@@ -27,9 +27,9 @@ export function App(): React.JSX.Element {
   if (connection === 'unauthorized') {
     return (
       <main className="down">
-        <h1>Open TTC from a terminal</h1>
+        <h1>Open ShellYard from a terminal</h1>
         <p>
-          Run <code>ttc</code> in a terminal: it opens this page with the access it needs.
+          Run <code>shellyard</code> in a terminal: it opens this page with the access it needs.
         </p>
       </main>
     );
@@ -38,9 +38,9 @@ export function App(): React.JSX.Element {
   if (connection === 'down') {
     return (
       <main className="down">
-        <h1>TTC is not running</h1>
+        <h1>ShellYard is not running</h1>
         <p>
-          Run <code>ttc</code> in a terminal to start it. This page reconnects by itself.
+          Run <code>shellyard</code> in a terminal to start it. This page reconnects by itself.
         </p>
       </main>
     );

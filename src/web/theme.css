@@ -2303,3 +2303,8 @@ button.day.on {
   display: inline-block;
   vertical-align: -2px;
 }
+
+.add-launcher {
+  align-self: flex-start;
+  margin: 2px 0 0 6px;
+}

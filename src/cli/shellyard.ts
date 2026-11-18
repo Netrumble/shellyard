@@ -10,18 +10,18 @@ const here = dirname(fileURLToPath(import.meta.url));
 const START_TIMEOUT_MS = 10_000;
 const STOP_TIMEOUT_MS = 5_000;
 
-const USAGE = `TTC
+const USAGE = `ShellYard
 
 Usage:
-  ttc start           Start the server in the background (if needed) and open the browser
-  ttc                 The same as ttc start
-  ttc --port <n>      Start on this port, or the next free one (default ${DEFAULT_PORT})
-  ttc --no-open       Do not open the browser
-  ttc --foreground    Run attached to this terminal, with logs on screen
-  ttc status          Say whether the server is running
-  ttc stop            Stop the server and every session it hosts
-  ttc --version       Print the version
-  ttc --help          Print this help`;
+  shellyard start           Start the server in the background (if needed) and open the browser
+  shellyard                 The same as shellyard start
+  shellyard --port <n>      Start on this port, or the next free one (default ${DEFAULT_PORT})
+  shellyard --no-open       Do not open the browser
+  shellyard --foreground    Run attached to this terminal, with logs on screen
+  shellyard status          Say whether the server is running
+  shellyard stop            Stop the server and every session it hosts
+  shellyard --version       Print the version
+  shellyard --help          Print this help`;
 
 type Out = (line: string) => void;
 
@@ -33,7 +33,7 @@ function version(): string {
 }
 
 /**
- * True only if a TTC server answers on the recorded port. The recorded pid is not trusted:
+ * True only if a ShellYard server answers on the recorded port. The recorded pid is not trusted:
  * after a crash or a reboot it may belong to some other program.
  */
 type Probe = 'ours' | 'other' | 'unreachable';
@@ -41,7 +41,7 @@ type Probe = 'ours' | 'other' | 'unreachable';
 /**
  * Asks the recorded port who is there. "ours" only if the very server that wrote the state
  * file answers (same start time): after a crash the port may be taken by another program,
- * or by another TTC instance, whose token we do not hold and whose pid is not the recorded one.
+ * or by another ShellYard instance, whose token we do not hold and whose pid is not the recorded one.
  */
 async function probe(state: ServerState): Promise<Probe> {
   let res: Response;
@@ -53,7 +53,7 @@ async function probe(state: ServerState): Promise<Probe> {
   try {
     if (!res.ok) return 'other';
     const body = (await res.json()) as { ok?: unknown; app?: unknown; startedAt?: unknown };
-    return body.ok === true && body.app === 'ttc' && body.startedAt === state.startedAt ? 'ours' : 'other';
+    return body.ok === true && body.app === 'shellyard' && body.startedAt === state.startedAt ? 'ours' : 'other';
   } catch {
     return 'other';
   }
@@ -102,7 +102,7 @@ export function writeLauncherPage(state: ServerState): string {
   rmSync(file, { force: true });
   writeFileSync(
     file,
-    `<!doctype html><meta charset="utf-8"><title>TTC</title><meta http-equiv="refresh" content="0;url=${url}"><script>location.replace(${JSON.stringify(url)})</script>`,
+    `<!doctype html><meta charset="utf-8"><title>ShellYard</title><meta http-equiv="refresh" content="0;url=${url}"><script>location.replace(${JSON.stringify(url)})</script>`,
     { mode: 0o600 },
   );
   return file;
@@ -148,7 +148,7 @@ export type EnsureResult = { ok: true; state: ServerState } | { ok: false; error
 
 /**
  * Returns the running server, starting one in the background first if there is none.
- * Used by `ttc start` and by the desktop app, which passes the Node program to run it with.
+ * Used by `shellyard start` and by the desktop app, which passes the Node program to run it with.
  */
 export async function ensureServer(options: { port?: number; node?: string } = {}): Promise<EnsureResult> {
   let state = await liveState();
@@ -160,7 +160,7 @@ export async function ensureServer(options: { port?: number; node?: string } = {
       await sleep(150);
       state = await liveState();
     }
-    if (!state) return { ok: false, error: `TTC did not start. Last lines of the log:
+    if (!state) return { ok: false, error: `ShellYard did not start. Last lines of the log:
 ${tailLog(15) || `(no log at ${logPath()})`}` };
   }
   return { ok: true, state };
@@ -174,7 +174,7 @@ async function start(port: number, openBrowser: boolean, out: Out): Promise<numb
   }
   const state = started.state;
   const base = `http://127.0.0.1:${state.port}`;
-  out(`TTC running at ${base}`);
+  out(`ShellYard running at ${base}`);
   if (openBrowser) await openBrowserOn(state, out);
   return 0;
 }
@@ -182,20 +182,20 @@ async function start(port: number, openBrowser: boolean, out: Out): Promise<numb
 async function status(out: Out): Promise<number> {
   const state = await liveState();
   if (!state) {
-    out('TTC is not running.');
+    out('ShellYard is not running.');
     return 1;
   }
   let count = '?';
   try {
     const res = await fetch(`http://127.0.0.1:${state.port}/api/sessions`, {
-      headers: { 'x-ttc-token': state.token },
+      headers: { 'x-shellyard-token': state.token },
       signal: AbortSignal.timeout(2000),
     });
     if (res.ok) count = String(((await res.json()) as unknown[]).length);
   } catch {
     // The count is a courtesy; the server did answer the health check.
   }
-  out(`TTC is running at http://127.0.0.1:${state.port} (${count} sessions, pid ${state.pid}).`);
+  out(`ShellYard is running at http://127.0.0.1:${state.port} (${count} sessions, pid ${state.pid}).`);
   return 0;
 }
 
@@ -203,13 +203,13 @@ async function stop(out: Out): Promise<number> {
   const state = await liveState();
   if (!state) {
     clearServerState();
-    out('TTC is not running.');
+    out('ShellYard is not running.');
     return 0;
   }
   try {
     await fetch(`http://127.0.0.1:${state.port}/api/shutdown`, {
       method: 'POST',
-      headers: { 'x-ttc-token': state.token },
+      headers: { 'x-shellyard-token': state.token },
       signal: AbortSignal.timeout(2000),
     });
   } catch {
@@ -219,7 +219,7 @@ async function stop(out: Out): Promise<number> {
   while (Date.now() < deadline) {
     if (!(await isServerAlive(state))) {
       clearServerState();
-      out('TTC stopped.');
+      out('ShellYard stopped.');
       return 0;
     }
     await sleep(150);
@@ -232,7 +232,7 @@ async function stop(out: Out): Promise<number> {
     // Already gone.
   }
   clearServerState();
-  out('TTC did not stop on request and was terminated.');
+  out('ShellYard did not stop on request and was terminated.');
   return 0;
 }
 
@@ -274,7 +274,7 @@ export async function main(argv: string[], out: Out = console.log): Promise<numb
   if (foreground) {
     const existing = await liveState();
     if (existing) {
-      out(`TTC is already running at http://127.0.0.1:${existing.port}. Stop it first with: ttc stop`);
+      out(`ShellYard is already running at http://127.0.0.1:${existing.port}. Stop it first with: shellyard stop`);
       return 1;
     }
     // One failing session must not take the server, and every other session, down with it.
@@ -284,7 +284,7 @@ export async function main(argv: string[], out: Out = console.log): Promise<numb
     const shutdown = (): void => void running.stop();
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);
-    out(`TTC running at http://127.0.0.1:${running.port} (Ctrl+C to stop)`);
+    out(`ShellYard running at http://127.0.0.1:${running.port} (Ctrl+C to stop)`);
     const state = readServerState();
     if (openBrowser && state) await openBrowserOn(state, out);
     await running.stopped;

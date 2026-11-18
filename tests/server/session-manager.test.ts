@@ -114,7 +114,7 @@ describe('SessionManager', () => {
       const args = p.launch.args;
       expect(args.slice(args.indexOf('--session-id'), args.indexOf('--session-id') + 2)).toEqual(['--session-id', s.id]);
       expect(args.slice(args.indexOf('--model'), args.indexOf('--model') + 2)).toEqual(['--model', 'opus']);
-      expect(p.opts.env).toMatchObject({ TTC_SESSION_ID: s.id, TTC_PORT: '7717', TTC_HOOK_TOKEN: 'hook-token' });
+      expect(p.opts.env).toMatchObject({ SHELLYARD_SESSION_ID: s.id, SHELLYARD_PORT: '7717', SHELLYARD_HOOK_TOKEN: 'hook-token' });
       expect(existsSync(join(home.dir(), 'run', `${s.id}.settings.json`))).toBe(true);
       expect(s.model).toBe('opus');
     });
@@ -122,7 +122,7 @@ describe('SessionManager', () => {
     it('does not pass Claude flags to a shell', () => {
       shell({ model: 'opus' });
       expect(ptys.last().launch.args).toEqual([]);
-      expect(ptys.last().opts.env.TTC_SESSION_ID).toBeUndefined();
+      expect(ptys.last().opts.env.SHELLYARD_SESSION_ID).toBeUndefined();
     });
 
     it('does not leak nested-session markers into hosted sessions', () => {

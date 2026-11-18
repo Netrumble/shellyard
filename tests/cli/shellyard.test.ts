@@ -2,7 +2,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
-import { isServerAlive, main, writeLauncherPage } from '../../src/cli/ttc.js';
+import { isServerAlive, main, writeLauncherPage } from '../../src/cli/shellyard.js';
 import { readServerState, writeServerState } from '../../src/server/config.js';
 import { startServer, type RunningServer } from '../../src/server/index.js';
 import { fakePtyFactory, useTempHome } from '../helpers.js';
@@ -20,7 +20,7 @@ function capture(): { lines: string[]; out: (s: string) => void } {
   return { lines, out: (s) => lines.push(s) };
 }
 
-describe('ttc cli', () => {
+describe('shellyard cli', () => {
   useTempHome();
   const running: RunningServer[] = [];
   const start = async (): Promise<RunningServer> => {
@@ -59,7 +59,7 @@ describe('ttc cli', () => {
       }
     });
 
-    it('is false when a different TTC server answers on the recorded port', async () => {
+    it('is false when a different ShellYard server answers on the recorded port', async () => {
       const s = await start();
       const stale = { ...readServerState()!, startedAt: 12345 };
       expect(await isServerAlive(stale)).toBe(false);
@@ -106,9 +106,9 @@ describe('ttc cli', () => {
       expect(await isServerAlive({ pid: process.pid, port: s.port, token: s.token, hookToken: 'h', startedAt: 0 })).toBe(false);
     });
 
-    it('does not stop, or kill the recorded pid, when the port now belongs to another TTC', async () => {
+    it('does not stop, or kill the recorded pid, when the port now belongs to another ShellYard', async () => {
       const s = await start();
-      // A stale file pointing at a live TTC that did not write it; its pid is this test process.
+      // A stale file pointing at a live ShellYard that did not write it; its pid is this test process.
       writeServerState({ pid: process.pid, port: s.port, token: 'stale-token', hookToken: 'h', startedAt: 12345 });
       const c = capture();
       expect(await main(['stop'], c.out)).toBe(0);
@@ -135,7 +135,7 @@ describe('ttc cli', () => {
       expect(c.lines.join('\n')).toContain(`http://127.0.0.1:${s.port}`);
       const help = capture();
       await main(['--help'], help.out);
-      expect(help.lines.join('\n')).toMatch(/ttc start/);
+      expect(help.lines.join('\n')).toMatch(/shellyard start/);
     });
 
     it('reuses a running server instead of starting another', async () => {
@@ -169,7 +169,7 @@ describe('ttc cli', () => {
     it('prints usage', async () => {
       const c = capture();
       expect(await main(['--help'], c.out)).toBe(0);
-      expect(c.lines.join('\n')).toMatch(/ttc stop/);
+      expect(c.lines.join('\n')).toMatch(/shellyard stop/);
     });
 
     it('rejects an unknown command with usage and exit 1', async () => {
@@ -187,9 +187,9 @@ describe('ttc cli', () => {
 });
 
 describe('the installed command', () => {
-  it('is ttc, and nothing else', async () => {
+  it('is shellyard, and nothing else', async () => {
     const { readFileSync } = await import('node:fs');
     const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { bin: Record<string, string> };
-    expect(pkg.bin).toEqual({ ttc: 'dist/cli/ttc.js' });
+    expect(pkg.bin).toEqual({ shellyard: 'dist/cli/shellyard.js' });
   });
 });

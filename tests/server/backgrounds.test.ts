@@ -69,12 +69,12 @@ describe('backgrounds over http', () => {
   }
   const url = (p: string): string => `http://127.0.0.1:${s.port}${p}`;
   const call = async (method: string, path: string, body?: unknown): Promise<{ status: number; json: any }> => {
-    const res = await fetch(url(path), { method, headers: { 'x-ttc-token': s.token, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const res = await fetch(url(path), { method, headers: { 'x-shellyard-token': s.token, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
     const text = await res.text();
     return { status: res.status, json: text ? JSON.parse(text) : null };
   };
   const upload = (bytes: Buffer, token = true): Promise<Response> =>
-    fetch(url('/api/backgrounds'), { method: 'POST', headers: { ...(token ? { 'x-ttc-token': s.token } : {}), 'content-type': 'application/octet-stream' }, body: new Uint8Array(bytes) });
+    fetch(url('/api/backgrounds'), { method: 'POST', headers: { ...(token ? { 'x-shellyard-token': s.token } : {}), 'content-type': 'application/octet-stream' }, body: new Uint8Array(bytes) });
   const profile = (over: Partial<Profile> = {}): Profile => ({ id: 'mine', name: 'Mine', kind: 'shell', command: node, args: [], cwd: work, color: '#123456', env: {}, model: null, ...over });
 
   beforeEach(async () => {
@@ -97,7 +97,7 @@ describe('backgrounds over http', () => {
     expect(readFileSync(join(home.dir(), 'backgrounds', image))).toEqual(PNG);
 
     expect((await fetch(url(`/api/backgrounds/${image}`))).status).toBe(401);
-    const got = await fetch(url(`/api/backgrounds/${image}`), { headers: { 'x-ttc-token': s.token } });
+    const got = await fetch(url(`/api/backgrounds/${image}`), { headers: { 'x-shellyard-token': s.token } });
     expect(got.status).toBe(200);
     expect(got.headers.get('content-type')).toBe('image/png');
     expect(got.headers.get('x-content-type-options')).toBe('nosniff');
@@ -114,7 +114,7 @@ describe('backgrounds over http', () => {
   it('serves only its own images', async () => {
     writeFileSync(join(home.dir(), 'secret.png'), PNG);
     for (const name of ['..%2Fsecret.png', '%2e%2e%2fsecret.png', 'nope.png', 'server.json', 'x.svg']) {
-      const res = await fetch(url(`/api/backgrounds/${name}`), { headers: { 'x-ttc-token': s.token } });
+      const res = await fetch(url(`/api/backgrounds/${name}`), { headers: { 'x-shellyard-token': s.token } });
       expect([400, 404], name).toContain(res.status);
     }
   });

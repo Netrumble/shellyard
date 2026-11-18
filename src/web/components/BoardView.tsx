@@ -9,7 +9,7 @@ import { statusLabel } from '../selectors.js';
 import { setView, useStore } from '../store.js';
 import { StoryDialog } from './StoryDialog.js';
 
-const DRAG_TYPE = 'application/x-ttc-session';
+const DRAG_TYPE = 'application/x-shellyard-session';
 const report = (e: unknown): void => window.alert((e as Error).message);
 
 /** One terminal on the board: a light for its state and its name. Not the terminal itself. */

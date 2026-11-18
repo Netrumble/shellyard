@@ -1,0 +1,22 @@
+{
+  "appId": "com.talentia.shellyard",
+  "productName": "ShellYard",
+  "copyright": "Talentia Software",
+  "asar": false,
+  "files": ["main.js", "find-node.js", "icon.png", "package.json", "node_modules/**/*", "!*.tgz"],
+  "win": {
+    "target": "nsis",
+    "icon": "icon.png",
+    "artifactName": "ShellYard-Setup-${version}.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "ShellYard",
+    "uninstallDisplayName": "ShellYard",
+    "runAfterFinish": true
+  }
+}

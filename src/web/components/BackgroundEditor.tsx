@@ -100,7 +100,7 @@ export function BackgroundEditor({ value, onChange }: { value: TerminalBackgroun
           )}
         </div>
       )}
-      {picked === 'image' && !value?.image && !error && <p className="hint">PNG, JPEG, WebP or GIF, up to 8 MB. It is copied into TTC&apos;s own folder.</p>}
+      {picked === 'image' && !value?.image && !error && <p className="hint">PNG, JPEG, WebP or GIF, up to 8 MB. It is copied into ShellYard&apos;s own folder.</p>}
       {error && (
         <p className="error" role="alert">
           {error}

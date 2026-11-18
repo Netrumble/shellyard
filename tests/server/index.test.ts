@@ -36,7 +36,7 @@ describe('startServer', () => {
     expect(state!.hookToken).toMatch(/^[0-9a-f]{64}$/);
     expect(state!.hookToken).not.toBe(state!.token);
     const res = await fetch(`http://127.0.0.1:${port}/api/health`);
-    expect(await res.json()).toEqual({ ok: true, app: 'ttc', startedAt: state!.startedAt });
+    expect(await res.json()).toEqual({ ok: true, app: 'shellyard', startedAt: state!.startedAt });
 
     await s.stop();
     running.length = 0;
@@ -75,13 +75,13 @@ describe('startServer', () => {
   it('starts with defaults when config.json is corrupt', async () => {
     writeFileSync(join(home.dir(), 'config.json'), '{broken');
     const s = await start(await freePort());
-    const res = await fetch(`http://127.0.0.1:${s.port}/api/meta`, { headers: { 'x-ttc-token': s.token } });
+    const res = await fetch(`http://127.0.0.1:${s.port}/api/meta`, { headers: { 'x-shellyard-token': s.token } });
     expect((await res.json()).models).toEqual(['opus', 'sonnet', 'haiku']);
   });
 
   it('applies hook events end to end with the hook token from the state file', async () => {
     const s = await start(await freePort());
-    const headers = { 'x-ttc-token': s.token, 'content-type': 'application/json' };
+    const headers = { 'x-shellyard-token': s.token, 'content-type': 'application/json' };
     const created = await fetch(`http://127.0.0.1:${s.port}/api/sessions`, {
       method: 'POST',
       headers,
@@ -90,7 +90,7 @@ describe('startServer', () => {
     const session = await created.json();
     const hook = await fetch(`http://127.0.0.1:${s.port}/api/hooks/${session.id}`, {
       method: 'POST',
-      headers: { 'x-ttc-hook-token': readServerState()!.hookToken },
+      headers: { 'x-shellyard-hook-token': readServerState()!.hookToken },
       body: JSON.stringify({ hook_event_name: 'Stop' }),
     });
     expect(hook.status).toBe(204);

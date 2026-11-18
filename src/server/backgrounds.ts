@@ -5,8 +5,8 @@ import type { TerminalBackground } from '../shared/types.js';
 import { dataDir } from './config.js';
 
 // What is behind the text of a terminal: a colour, or an image the user uploaded, with a
-// dark veil over it so that text stays readable. Images are kept in TTC's own folder under
-// names TTC makes up, and a background can only ever refer to one of those names: nothing
+// dark veil over it so that text stays readable. Images are kept in ShellYard's own folder under
+// names ShellYard makes up, and a background can only ever refer to one of those names: nothing
 // in a background is a path or an address.
 
 const HEX = /^#[0-9a-f]{6}$/i;

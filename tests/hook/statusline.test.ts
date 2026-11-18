@@ -13,7 +13,7 @@ function run(env: Record<string, string>, stdin: string): Promise<{ code: number
     const started = Date.now();
     const base: Record<string, string> = {};
     for (const [k, v] of Object.entries(process.env)) {
-      if (v !== undefined && !k.startsWith('TTC_') && k !== 'CLAUDE_CONFIG_DIR' && k !== 'SHELL') base[k] = v;
+      if (v !== undefined && !k.startsWith('SHELLYARD_') && k !== 'CLAUDE_CONFIG_DIR' && k !== 'SHELL') base[k] = v;
     }
     const child = spawn(process.execPath, ['--import', 'tsx', script], { env: { ...base, ...env } });
     let stdout = '';
@@ -36,7 +36,7 @@ describe('status-line forwarder', () => {
   let configDir = '';
   beforeEach(() => {
     // Stands in for ~/.claude, so the real one is never read.
-    configDir = mkdtempSync(join(tmpdir(), 'ttc-claude-'));
+    configDir = mkdtempSync(join(tmpdir(), 'shellyard-claude-'));
   });
   afterEach(() => rmSync(configDir, { recursive: true, force: true }));
 
@@ -45,13 +45,13 @@ describe('status-line forwarder', () => {
   it('posts the payload to the session with the hook token, and prints nothing when the user has no status line', async () => {
     const received: Array<{ url?: string; token: unknown; body: string }> = [];
     const server = createServer(async (req, res) => {
-      received.push({ url: req.url, token: req.headers['x-ttc-hook-token'], body: await readBody(req) });
+      received.push({ url: req.url, token: req.headers['x-shellyard-hook-token'], body: await readBody(req) });
       res.writeHead(204).end();
     });
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
     try {
       const port = String((server.address() as AddressInfo).port);
-      const r = await run({ TTC_PORT: port, TTC_SESSION_ID: 'abc-123', TTC_HOOK_TOKEN: 'secret', CLAUDE_CONFIG_DIR: configDir }, payload);
+      const r = await run({ SHELLYARD_PORT: port, SHELLYARD_SESSION_ID: 'abc-123', SHELLYARD_HOOK_TOKEN: 'secret', CLAUDE_CONFIG_DIR: configDir }, payload);
       expect(r).toMatchObject({ code: 0, stdout: '', stderr: '' });
       expect(received).toEqual([{ url: '/api/status/abc-123', token: 'secret', body: payload }]);
     } finally {
@@ -63,13 +63,13 @@ describe('status-line forwarder', () => {
     const echo = join(configDir, 'echo.cjs');
     writeFileSync(echo, "let b='';process.stdin.on('data',d=>b+=d).on('end',()=>process.stdout.write('mine:'+JSON.parse(b).session_id))");
     writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ statusLine: { type: 'command', command: `"${process.execPath}" "${echo}"` } }));
-    const r = await run({ TTC_PORT: '1', TTC_SESSION_ID: 'abc', TTC_HOOK_TOKEN: 't', CLAUDE_CONFIG_DIR: configDir }, payload);
+    const r = await run({ SHELLYARD_PORT: '1', SHELLYARD_SESSION_ID: 'abc', SHELLYARD_HOOK_TOKEN: 't', CLAUDE_CONFIG_DIR: configDir }, payload);
     expect(r).toMatchObject({ code: 0, stdout: 'mine:abc', stderr: '' });
   });
 
   it('stays silent and exits 0 when the user’s status line fails', async () => {
     writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ statusLine: { type: 'command', command: 'definitely-not-a-command-xyz --flag' } }));
-    const r = await run({ TTC_PORT: '1', TTC_SESSION_ID: 'abc', TTC_HOOK_TOKEN: 't', CLAUDE_CONFIG_DIR: configDir }, payload);
+    const r = await run({ SHELLYARD_PORT: '1', SHELLYARD_SESSION_ID: 'abc', SHELLYARD_HOOK_TOKEN: 't', CLAUDE_CONFIG_DIR: configDir }, payload);
     expect(r).toMatchObject({ code: 0, stdout: '', stderr: '' });
   });
 
@@ -77,7 +77,7 @@ describe('status-line forwarder', () => {
   const gitBash = 'C:\\Program Files\\Git\\bin\\bash.exe';
   const posixShell = process.platform === 'win32' ? gitBash : '/bin/sh';
   const user = (command: string): void => writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ statusLine: { type: 'command', command } }));
-  const envFor = (extra: Record<string, string> = {}): Record<string, string> => ({ TTC_PORT: '1', TTC_SESSION_ID: 'abc', TTC_HOOK_TOKEN: 't', CLAUDE_CONFIG_DIR: configDir, SHELL: posixShell, ...extra });
+  const envFor = (extra: Record<string, string> = {}): Record<string, string> => ({ SHELLYARD_PORT: '1', SHELLYARD_SESSION_ID: 'abc', SHELLYARD_HOOK_TOKEN: 't', CLAUDE_CONFIG_DIR: configDir, SHELL: posixShell, ...extra });
 
   describe.skipIf(!existsSync(posixShell))('with the shell Claude Code uses', () => {
     it('runs the user’s command in that shell, so shell syntax means what it means in Claude Code', async () => {
@@ -95,13 +95,13 @@ describe('status-line forwarder', () => {
     it('does not run itself in a loop when the user’s status line is this very script', async () => {
       const marker = join(configDir, 'ran.txt');
       user(`echo ran >> "${marker.replace(/\\/g, '/')}"; printf inner`);
-      const r = await run(envFor({ TTC_STATUSLINE: '1' }), payload);
+      const r = await run(envFor({ SHELLYARD_STATUSLINE: '1' }), payload);
       expect(r).toMatchObject({ code: 0, stdout: '', stderr: '' });
       expect(existsSync(marker)).toBe(false);
     });
 
     it('marks the command it runs, so a nested copy of itself stops', async () => {
-      user('printf "%s" "$TTC_STATUSLINE"');
+      user('printf "%s" "$SHELLYARD_STATUSLINE"');
       expect((await run(envFor(), payload)).stdout).toBe('1');
     });
 
@@ -128,7 +128,7 @@ describe('status-line forwarder', () => {
 
   it('survives a settings file that is not valid JSON, a stopped server, and no environment', async () => {
     writeFileSync(join(configDir, 'settings.json'), '{ nope');
-    expect(await run({ TTC_PORT: '1', TTC_SESSION_ID: 'abc', TTC_HOOK_TOKEN: 't', CLAUDE_CONFIG_DIR: configDir }, payload)).toMatchObject({ code: 0, stdout: '', stderr: '' });
+    expect(await run({ SHELLYARD_PORT: '1', SHELLYARD_SESSION_ID: 'abc', SHELLYARD_HOOK_TOKEN: 't', CLAUDE_CONFIG_DIR: configDir }, payload)).toMatchObject({ code: 0, stdout: '', stderr: '' });
     expect(await run({ CLAUDE_CONFIG_DIR: configDir }, payload)).toMatchObject({ code: 0, stdout: '', stderr: '' });
     expect(await run({ CLAUDE_CONFIG_DIR: configDir }, 'not json')).toMatchObject({ code: 0, stdout: '', stderr: '' });
   });
@@ -137,7 +137,7 @@ describe('status-line forwarder', () => {
     const server = createServer(() => undefined);
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
     try {
-      const r = await run({ TTC_PORT: String((server.address() as AddressInfo).port), TTC_SESSION_ID: 'abc', TTC_HOOK_TOKEN: 't', CLAUDE_CONFIG_DIR: configDir }, payload);
+      const r = await run({ SHELLYARD_PORT: String((server.address() as AddressInfo).port), SHELLYARD_SESSION_ID: 'abc', SHELLYARD_HOOK_TOKEN: 't', CLAUDE_CONFIG_DIR: configDir }, payload);
       expect(r.code).toBe(0);
       expect(r.ms).toBeLessThan(6000);
     } finally {

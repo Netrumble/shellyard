@@ -1,13 +1,13 @@
 {
-  "name": "talentia-terminal-control",
+  "name": "shellyard",
   "version": "0.1.0",
-  "description": "Talentia Terminal Control (TTC): run Claude Code sessions and shells in one local browser page, and see which one needs you.",
+  "description": "ShellYard: run Claude Code sessions and shells in one local browser page, and see which one needs you.",
   "type": "module",
   "bin": {
-    "ttc": "dist/cli/ttc.js"
+    "shellyard": "dist/cli/shellyard.js"
   },
   "exports": {
-    "./launcher": "./dist/cli/ttc.js",
+    "./launcher": "./dist/cli/shellyard.js",
     "./package.json": "./package.json"
   },
   "files": [
@@ -23,7 +23,7 @@
     "build:server": "tsc -p tsconfig.server.json",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "dev:server": "tsx src/cli/ttc.ts --foreground",
+    "dev:server": "tsx src/cli/shellyard.ts --foreground",
     "dev:web": "vite",
     "prepublishOnly": "npm run build && npm test"
   },
@@ -35,11 +35,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Talentia-Software-OSS/talentia-terminal-control.git"
+    "url": "git+https://github.com/Talentia-Software-OSS/shellyard.git"
   },
-  "homepage": "https://github.com/Talentia-Software-OSS/talentia-terminal-control#readme",
+  "homepage": "https://github.com/Talentia-Software-OSS/shellyard#readme",
   "bugs": {
-    "url": "https://github.com/Talentia-Software-OSS/talentia-terminal-control/issues"
+    "url": "https://github.com/Talentia-Software-OSS/shellyard/issues"
   },
   "license": "MIT",
   "dependencies": {

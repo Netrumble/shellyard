@@ -8,7 +8,7 @@ export interface AreaSize {
 
 export type AreaSizes = Record<string, AreaSize>;
 
-const KEY = 'ttc-area-sizes';
+const KEY = 'shellyard-area-sizes';
 const LIMITS = { minWidth: 220, minHeight: 130, maxWidth: 2400, maxHeight: 1600 };
 /** The key under which the box for sessions with no area keeps its size. */
 export const NO_AREA_KEY = '(none)';

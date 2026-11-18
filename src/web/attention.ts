@@ -18,7 +18,7 @@ export function visibleCards(attention: SessionInfo[], previous: string[], focus
 }
 
 export function titleFor(count: number): string {
-  return count > 0 ? `(${count}) TTC` : 'TTC';
+  return count > 0 ? `(${count}) ShellYard` : 'ShellYard';
 }
 
 /** Sessions that started waiting between two snapshots of the list. */

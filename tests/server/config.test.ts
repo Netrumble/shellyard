@@ -14,7 +14,7 @@ import { useTempHome } from '../helpers.js';
 describe('config', () => {
   const home = useTempHome();
 
-  it('uses TTC_HOME as the data folder', () => {
+  it('uses SHELLYARD_HOME as the data folder', () => {
     expect(dataDir()).toBe(home.dir());
   });
 

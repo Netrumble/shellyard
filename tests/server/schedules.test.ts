@@ -216,7 +216,7 @@ describe('ScheduleStore', () => {
       expect(again.list()[0]!.id).toBe(s.id);
     });
 
-    it('records a run missed while TTC was off as skipped, and waits for the next one', () => {
+    it('records a run missed while ShellYard was off as skipped, and waits for the next one', () => {
       const store = fresh();
       store.create(input());
       const missed = now + HOUR;
@@ -226,7 +226,7 @@ describe('ScheduleStore', () => {
       again.tick();
       expect(launches).toEqual([]);
       expect(again.list()[0]!.runs[0]).toMatchObject({ at: now, outcome: 'skipped', sessionId: null });
-      expect(again.list()[0]!.runs[0]!.detail).toMatch(/TTC was not running/);
+      expect(again.list()[0]!.runs[0]!.detail).toMatch(/ShellYard was not running/);
       expect(again.list()[0]!.nextRunAt).toBe(now + HOUR);
       expect(missed).toBeLessThan(now);
     });
@@ -244,7 +244,7 @@ describe('ScheduleStore', () => {
       expect(launches).toHaveLength(1);
     });
 
-    it('switches off a one-off whose time passed while TTC was off', () => {
+    it('switches off a one-off whose time passed while ShellYard was off', () => {
       const store = fresh();
       store.create(input({ when: { kind: 'once', at: now + HOUR } }));
       now += 5 * HOUR;

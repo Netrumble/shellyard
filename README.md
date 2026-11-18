@@ -1,36 +1,65 @@
-# Talentia Terminal Control (TTC)
+# ShellYard
 
 Run several Claude Code sessions and shells at once, in one browser page, and see at a glance
 which of them is waiting for you.
 
-TTC starts real terminal processes on your machine (PowerShell, bash, `claude`, anything else)
+ShellYard starts real terminal processes on your machine (PowerShell, bash, `claude`, anything else)
 and shows them in a local web page. Each process is the same one you would get in a terminal
 window: your profile, your PATH, your permissions. The page is its screen and keyboard.
 
 ## Install
 
+There are two ways to install ShellYard. Both need Node.js 22 or later on PATH: the server that runs
+your sessions is a Node process.
+
+### In the browser, from npm (Windows and Linux)
+
 ```
-npm install -g talentia-terminal-control
-ttc
+npm install -g shellyard
+shellyard
 ```
 
-Requires Node.js 22 or later. Works on Windows and Linux. `npx talentia-terminal-control` runs it
-without installing.
+ShellYard opens in your default browser. `npx shellyard` runs it without installing.
+
+### As a desktop app (Windows)
+
+1. Download `ShellYard-Setup-<version>.exe` from the
+   [latest release](https://github.com/Talentia-Software-OSS/shellyard/releases/latest).
+2. Run it. The installer is not code-signed yet, so Windows SmartScreen says "Windows protected your
+   PC": click **More info**, then **Run anyway**.
+3. Pick the folder (the default is `%LOCALAPPDATA%\Programs\ShellYard`, no administrator rights
+   needed) and finish. ShellYard is added to the Start menu and the desktop.
+
+ShellYard then runs in its own window, with an icon in the notification area: closing the window
+keeps it there, and it still tells you when a session needs you. To uninstall it, use **Settings →
+Apps → Installed apps → ShellYard**. Uninstalling leaves your data in `~/.shellyard`.
+
+The desktop app is also on npm, for any OS Electron runs on: `npm install -g shellyard-desktop`,
+then `shellyard-desktop` (see [desktop/README.md](desktop/README.md)).
+
+The browser and the desktop app are two views of the same server: you can use both at once, and
+they show the same sessions.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `ttc start` | Starts the server in the background (if it is not running) and opens the browser |
-| `ttc` | The same as `ttc start` |
-| `ttc --port <n>` | Starts on that port, or the next free one (default 7717) |
-| `ttc --no-open` | Does not open the browser |
-| `ttc --foreground` | Runs attached to the terminal, with logs on screen |
-| `ttc status` | Says whether the server is running, where, and with how many sessions |
-| `ttc stop` | Stops the server and every session it hosts |
+| `shellyard start` | Starts the server in the background (if it is not running) and opens the browser |
+| `shellyard` | The same as `shellyard start` |
+| `shellyard --port <n>` | Starts on that port, or the next free one (default 7717) |
+| `shellyard --no-open` | Does not open the browser |
+| `shellyard --foreground` | Runs attached to the terminal, with logs on screen |
+| `shellyard status` | Says whether the server is running, where, and with how many sessions |
+| `shellyard stop` | Stops the server and every session it hosts |
 
 The server keeps running when you close the terminal you started it from, and your sessions keep
-running when you close the browser tab. Open the page again with `ttc`.
+running when you close the browser tab. Open the page again with `shellyard`.
+
+> **Shells stay open until you close them in ShellYard.** Closing the browser tab, or quitting the
+> desktop app (also from its tray menu), leaves the server running in the background with every
+> shell and Claude Code session in it. A session ends only when you close it with its `✕` in
+> ShellYard. `shellyard stop` stops the server and its sessions, but the ones still open then are
+> started again at the next start (see below), so close in ShellYard the shells you no longer want.
 
 ## What you see
 
@@ -68,10 +97,10 @@ When you start a Claude Code session you can choose its model.
 
 ### Conversations, and what comes back after a restart
 
-TTC can only show terminals it started itself: a session running in another window belongs to
+ShellYard can only show terminals it started itself: a session running in another window belongs to
 that window and cannot be taken over. What it can do is continue the *conversation*, because
 Claude Code saves every conversation on disk. **Conversations** in the sidebar lists the recent
-ones, whichever window they were held in, and **Resume here** starts a new session in TTC with
+ones, whichever window they were held in, and **Resume here** starts a new session in ShellYard with
 the whole conversation in it, in the folder it was held in. Close the conversation in the other
 window first.
 
@@ -96,7 +125,7 @@ A schedule gives a prompt to a new Claude Code session at set times, as if you h
 - when it runs: on chosen days of the week at a time, every so many minutes or hours (5 minutes
   at least, counted from the last run), once at a date and time, or a cron expression of five
   fields (minute, hour, day of month, month, weekday). Times are the local time of the computer
-  TTC runs on;
+  ShellYard runs on;
 - the Claude Code launcher, optionally a model, an area and a folder;
 - how the session asks before acting: as Claude Code is set up, or one of its modes (ask before
   every action, edit files without asking, auto, plan only). The modes that never ask are not
@@ -113,8 +142,8 @@ now** starts a run at once without moving the timetable; the **On** box pauses a
 
 Things to know:
 
-- Schedules run only while TTC is running. A run whose time passed while it was not is recorded
-  as skipped, unless the schedule is set to run once when TTC next starts.
+- Schedules run only while ShellYard is running. A run whose time passed while it was not is recorded
+  as skipped, unless the schedule is set to run once when ShellYard next starts.
 - A run is skipped while the session of the previous run is still working or waiting on a
   permission, so that runs do not pile up.
 - Sessions a schedule opened stay open until you close them.
@@ -139,7 +168,7 @@ Its sessions are a Linux shell in that distribution. They start in the session's
 other, which Linux shows under `/mnt/c/...`; type `cd` to go to your Linux home. Docker's own
 distributions are not listed.
 
-Claude Code started by hand inside a WSL shell runs, but TTC does not see its status: the
+Claude Code started by hand inside a WSL shell runs, but ShellYard does not see its status: the
 status lights, the attention panel and schedules work with the Claude Code launcher, which runs
 on Windows.
 
@@ -154,18 +183,18 @@ that decides.
 ### Open in VS Code
 
 Every session has a VS Code button, in its title bar and in its sidebar row. It opens VS Code on
-the folder the session was started in, on the computer TTC runs on. For a WSL session the folder
+the folder the session was started in, on the computer ShellYard runs on. For a WSL session the folder
 is opened inside its distribution, through VS Code's WSL extension, also when it is a Windows
 folder (seen there as `/mnt/c/...`) or the Linux home. VS Code is found through its `code` command
 on the PATH. The folder is the one the session started in: where its shell has moved to since is
-not known to TTC.
+not known to ShellYard.
 
 ### Terminal background
 
 A terminal normally follows the theme. In a launcher's settings you can give its sessions another
 background: a colour, or an image of yours (PNG, JPEG, WebP or GIF, up to 8 MB) shown under a
 grey-black veil whose strength you set, so that text stays readable. The image is copied into
-TTC's own folder. The `◐` button in the title bar of a terminal changes the background of that
+ShellYard's own folder. The `◐` button in the title bar of a terminal changes the background of that
 one terminal while it is open, without touching the launcher.
 
 ### Terminal font and text size
@@ -185,14 +214,14 @@ If terminal text looks small or soft, check the browser's zoom first (Ctrl+0 put
 The header shows how much of your Claude plan limits is used: the 5-hour limit and the weekly
 limit, as two small dials and a row of lights that fills up and turns red near the end. The
 Usage view shows the same on large dials, with the time left before each limit resets, and
-what the sessions started from TTC have cost: today, over 7 days and over 30 days, by model and
+what the sessions started from ShellYard have cost: today, over 7 days and over 30 days, by model and
 by story.
 
 What these figures are, and are not:
 
 - They come from Claude Code itself, and cover all Claude Code use on this machine, in whatever
-  window, going back 30 days. Sessions running in TTC are counted as they go, from what Claude
-  Code reports to TTC. Sessions in other windows are read from the conversation files Claude
+  window, going back 30 days. Sessions running in ShellYard are counted as they go, from what Claude
+  Code reports to ShellYard. Sessions in other windows are read from the conversation files Claude
   Code keeps, where it writes a conversation's cost only when the session ends or is resumed:
   so a session still running in another window is not in today's figure until it ends.
   In the table by model, a cost goes to the model in use when it was reported, so a switch of
@@ -231,14 +260,14 @@ session's status is already written beside its name.
 
 ## How the status of a Claude Code session is known
 
-TTC starts `claude` with an extra settings file of its own (passed with `--settings`) that
-registers hooks and a status line. Claude Code then tells TTC when a prompt is submitted, when a
+ShellYard starts `claude` with an extra settings file of its own (passed with `--settings`) that
+registers hooks and a status line. Claude Code then tells ShellYard when a prompt is submitted, when a
 tool runs, when it asks for permission and when it finishes, and reports its usage figures. Your
 own Claude Code settings are not modified, your own hooks keep working, and if you have a status
-line of your own it is still shown: TTC's passes your status line's output through unchanged.
+line of your own it is still shown: ShellYard's passes your status line's output through unchanged.
 
 Claude Code sends no event when you deny a permission or interrupt a turn with Esc. For those
-cases TTC watches the terminal: a session that is supposedly working but has printed nothing for
+cases ShellYard watches the terminal: a session that is supposedly working but has printed nothing for
 5 seconds is shown as "possibly waiting". The delay is `silenceMs` in the config file.
 
 Known limits:
@@ -258,29 +287,29 @@ Known limits:
 
 ## Where things are kept
 
-Everything is in `~/.talentia-terminal-control/`:
+Everything is in `~/.shellyard/`:
 
 | File | Content |
 |---|---|
 | `config.json` | Your launchers (`profiles`), your stories, the model list, `silenceMs` |
 | `server.json` | The running server's port and access token (readable by you only) |
-| `ttc.log` | The server log |
+| `shellyard.log` | The server log |
 | `sessions.json` | The sessions open right now, to bring them back after a restart |
 | `closed.json` | The last fifty sessions that ended or were closed, to reopen them |
 | `backgrounds/` | The images uploaded as terminal backgrounds |
 | `schedules.json` | The schedules, with the last twenty runs of each |
 | `usage.json` | Usage history: cost and tokens per day, model and story (90 days), and how far each of Claude Code's conversation files has been read |
-| `open.html` | The private page `ttc` opens in your browser (readable by you only) |
+| `open.html` | The private page `shellyard` opens in your browser (readable by you only) |
 | `run/` | Per-session settings files, removed when a session ends |
 
-Set `TTC_HOME` to use another folder.
+Set `SHELLYARD_HOME` to use another folder.
 
 ## Security
 
 Whoever can reach the server gets a shell as you, so:
 
 - it listens on `127.0.0.1` only, never on the network;
-- every request needs a random token created at each start. `ttc` hands it to your browser in
+- every request needs a random token created at each start. `shellyard` hands it to your browser in
   the fragment of the address (the part after `#`, which browsers never send to a server); the
   page keeps it and sends it explicitly with each request. No cookie is used, so the token is
   not sent to other programs listening on this machine;
@@ -288,12 +317,12 @@ Whoever can reach the server gets a shell as you, so:
 - the browser is started on a private file, not on the address, so the token does not appear on
   a command line that other users of the machine could read.
 
-After the server restarts, a tab left open from before is told to run `ttc` again.
+After the server restarts, a tab left open from before is told to run `shellyard` again.
 
-If you edit `config.json` by hand and it is not valid JSON at that moment, TTC keeps using the
+If you edit `config.json` by hand and it is not valid JSON at that moment, ShellYard keeps using the
 last settings that were valid and refuses to save changes from the page until the file is fixed.
 
-Any program running as you can read the token from `~/.talentia-terminal-control/`; TTC does not
+Any program running as you can read the token from `~/.shellyard/`; ShellYard does not
 protect you from your own account.
 
 Known gap, not yet closed:
@@ -301,7 +330,7 @@ Known gap, not yet closed:
 - A program that prints without pause for a very long time is not slowed down to the pace of
   the browser; a stalled tab makes the server use more memory.
 
-Sessions run with the privileges `ttc` was started with. To get an elevated shell, start `ttc`
+Sessions run with the privileges `shellyard` was started with. To get an elevated shell, start `shellyard`
 from an elevated terminal.
 
 ## Development
@@ -310,7 +339,7 @@ from an elevated terminal.
 npm install
 npm test            # unit and integration tests
 npm run build       # server (tsc) and web UI (vite) into dist/
-node dist/cli/ttc.js --foreground
+node dist/cli/shellyard.js --foreground
 ```
 
 ## Licence

@@ -7,7 +7,7 @@ import { resolveExecutable } from './shells.js';
 // opened inside its distribution (VS Code's WSL remote), not as a Windows folder.
 //
 // The folder is the one the session was started in. Where its shell has moved to since is
-// not known to TTC.
+// not known to ShellYard.
 
 export type EditorTarget = { kind: 'local'; path: string } | { kind: 'wsl'; distro: string; path: string } | { kind: 'error'; message: string };
 
