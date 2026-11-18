@@ -8,7 +8,7 @@ On Windows the simplest way is the setup program: download `ShellYard-Setup-<ver
 Otherwise, from npm:
 
 ```
-npm install -g shellyard-desktop
+npm install -g @talentiaoss/shellyard-desktop
 shellyard-desktop
 ```
 

@@ -15,11 +15,11 @@ your sessions is a Node process.
 ### In the browser, from npm (Windows and Linux)
 
 ```
-npm install -g shellyard
+npm install -g @talentiaoss/shellyard
 shellyard
 ```
 
-ShellYard opens in your default browser. `npx shellyard` runs it without installing.
+ShellYard opens in your default browser. `npx @talentiaoss/shellyard` runs it without installing.
 
 ### As a desktop app (Windows)
 
@@ -34,7 +34,7 @@ ShellYard then runs in its own window, with an icon in the notification area: cl
 keeps it there, and it still tells you when a session needs you. To uninstall it, use **Settings →
 Apps → Installed apps → ShellYard**. Uninstalling leaves your data in `~/.shellyard`.
 
-The desktop app is also on npm, for any OS Electron runs on: `npm install -g shellyard-desktop`,
+The desktop app is also on npm, for any OS Electron runs on: `npm install -g @talentiaoss/shellyard-desktop`,
 then `shellyard-desktop` (see [desktop/README.md](desktop/README.md)).
 
 The browser and the desktop app are two views of the same server: you can use both at once, and

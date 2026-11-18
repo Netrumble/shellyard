@@ -42,7 +42,7 @@ writeFileSync(
       license: pkg.license,
       type: 'module',
       main: 'main.js',
-      dependencies: { shellyard: `file:./${packed}` },
+      dependencies: { '@talentiaoss/shellyard': `file:./${packed}` },
       devDependencies: { electron: electronVersion },
     },
     null,

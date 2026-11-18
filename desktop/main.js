@@ -3,7 +3,7 @@
 import { app, BrowserWindow, dialog, Menu, nativeImage, Notification, shell, Tray } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ensureServer, writeLauncherPage } from 'shellyard/launcher';
+import { ensureServer, writeLauncherPage } from '@talentiaoss/shellyard/launcher';
 import { findNode } from './find-node.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
