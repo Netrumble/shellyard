@@ -7,10 +7,24 @@ ShellYard starts real terminal processes on your machine (PowerShell, bash, `cla
 and shows them in a local web page. Each process is the same one you would get in a terminal
 window: your profile, your PATH, your permissions. The page is its screen and keyboard.
 
+> [!NOTE]
+> **Is it safe?** ShellYard stays on your machine and is built so that nothing else can use it:
+> - **Nothing leaves your PC.** The server listens on `127.0.0.1` only: no other computer can
+>   reach it, and ShellYard itself sends nothing to the internet (the programs you run in it, such
+>   as Claude Code, connect as they always do).
+> - **Only your page gets in.** Every request needs a secret token, created anew at each start;
+>   requests from other websites or other host names are refused.
+> - **No cookies.** The token is never kept in a cookie, so it is never sent to anything else.
+> - **The desktop app is locked down.** Its window cannot run code on your PC by itself, cannot
+>   browse to other sites (links open in your browser), and stores no cookies.
+> - **Your sessions run as you,** with your usual permissions, never more.
+>
+> Details, and what ShellYard does not protect against, in [Security](#security).
+
 ## Install
 
-There are two ways to install ShellYard. Both need Node.js 22 or later on PATH: the server that runs
-your sessions is a Node process.
+ShellYard comes in the browser or as a desktop app (see [Which one to pick](#which-one-to-pick)).
+Every way needs Node.js 22 or later on PATH: the server that runs your sessions is a Node process.
 
 ### In the browser, from npm (Windows and Linux)
 
@@ -21,7 +35,7 @@ shellyard
 
 ShellYard opens in your default browser. `npx @talentiaoss/shellyard` runs it without installing.
 
-### As a desktop app (Windows)
+### As a desktop app, with the setup program (Windows)
 
 1. Download `ShellYard-Setup-<version>.exe` from the
    [latest release](https://github.com/Talentia-Software-OSS/shellyard/releases/latest).
@@ -34,11 +48,35 @@ ShellYard then runs in its own window, with an icon in the notification area: cl
 keeps it there, and it still tells you when a session needs you. To uninstall it, use **Settings →
 Apps → Installed apps → ShellYard**. Uninstalling leaves your data in `~/.shellyard`.
 
-The desktop app is also on npm, for any OS Electron runs on: `npm install -g @talentiaoss/shellyard-desktop`,
-then `shellyard-desktop` (see [desktop/README.md](desktop/README.md)).
+### As a desktop app, from npm (Linux, or Windows from a terminal)
 
-The browser and the desktop app are two views of the same server: you can use both at once, and
-they show the same sessions.
+```
+npm install -g @talentiaoss/shellyard-desktop
+shellyard-desktop
+```
+
+This is the same desktop app as the Windows setup program, installed the npm way. It is meant for
+Linux, where there is no setup program, and for people who prefer to manage their tools with npm.
+The first install downloads Electron (about 100 MB). See [desktop/README.md](desktop/README.md).
+
+### Which one to pick
+
+| | `shellyard` (npm) | Setup program (`.exe`) | `shellyard-desktop` (npm) |
+|---|---|---|---|
+| Where ShellYard shows | a tab in your browser | its own window | its own window |
+| Icon in the notification area, notifications when the window is closed | no | yes | yes |
+| Start menu and desktop shortcuts | no | yes | no: start it with `shellyard-desktop` |
+| Uninstall | `npm uninstall -g @talentiaoss/shellyard` | Settings → Apps | `npm uninstall -g @talentiaoss/shellyard-desktop` |
+| Update | `npm update -g @talentiaoss/shellyard` | run the new setup program | `npm update -g @talentiaoss/shellyard-desktop` |
+| Systems | Windows, Linux | Windows | Windows, Linux |
+| Size | small | about 120 MB (includes Electron) | about 100 MB (downloads Electron) |
+
+On Windows, the setup program is the simplest choice for a desktop window; `shellyard` alone is enough
+if a browser tab suits you.
+
+All three are views of the same server: you can use them at once, and they show the same sessions.
+Both desktop variants carry their own copy of the server, so you do not need to install `shellyard`
+as well; install it only if you also want its commands (`shellyard status`, `shellyard stop`, …).
 
 ## Commands
 
@@ -324,6 +362,16 @@ last settings that were valid and refuses to save changes from the page until th
 
 Any program running as you can read the token from `~/.shellyard/`; ShellYard does not
 protect you from your own account.
+
+The desktop app adds no way in:
+
+- its window runs the page isolated from your system (`contextIsolation` and `sandbox` on, no Node
+  access), and cannot navigate away from the ShellYard server: links open in your browser;
+- it uses the same token as the browser, kept in the app's own folder (`%APPDATA%\ShellYard` on
+  Windows), which only your account can read. It stores no cookies;
+- the setup program installs for your account only and needs no administrator rights. It is not
+  code-signed yet: download it only from this repository's
+  [releases](https://github.com/Talentia-Software-OSS/shellyard/releases).
 
 Known gap, not yet closed:
 
