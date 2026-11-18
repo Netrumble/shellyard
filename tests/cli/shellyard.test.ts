@@ -67,6 +67,21 @@ describe('shellyard cli', () => {
       expect(s.port).toBe(stale.port);
     });
 
+    it('does not take the old start-time answer for a state file a newer server wrote', async () => {
+      const real = await start();
+      const state = readServerState()!;
+      expect(state.pageHost).toBeDefined();
+      await real.stop();
+      running.length = 0;
+      const impostor = createServer((_req, res) => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, app: 'shellyard', startedAt: state.startedAt })));
+      await new Promise<void>((r) => impostor.listen(state.port, '127.0.0.1', r));
+      try {
+        expect(await isServerAlive(state)).toBe(false);
+      } finally {
+        await new Promise((r) => impostor.close(r));
+      }
+    });
+
     it('is false for an impostor that repeats the start time, and it is never sent the token', async () => {
       const real = await start();
       const state = readServerState()!;

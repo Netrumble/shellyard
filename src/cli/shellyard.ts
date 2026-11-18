@@ -59,9 +59,10 @@ async function probe(state: ServerState): Promise<{ who: Probe; version: string 
     const body = (await res.json()) as { ok?: unknown; app?: unknown; proof?: unknown; version?: unknown; startedAt?: unknown };
     const proven = typeof body.proof === 'string' && safeEqual(body.proof, healthProof(state.token, challenge));
     // Servers up to 0.1.2 cannot answer the challenge and named their start time instead. That
-    // is still accepted, so that an update can stop the server it replaces; it proves little
-    // only for a state file such a server wrote, since newer servers never publish the time.
-    const legacy = body.proof === undefined && typeof body.startedAt === 'number' && body.startedAt === state.startedAt;
+    // is still accepted, so that an update can stop the server it replaces, but only for a state
+    // file such a server wrote (it has no page host): one written by a newer server is always
+    // proven with the challenge.
+    const legacy = state.pageHost === undefined && body.proof === undefined && typeof body.startedAt === 'number' && body.startedAt === state.startedAt;
     const ours = body.ok === true && body.app === 'shellyard' && (proven || legacy);
     return ours ? { who: 'ours', version: typeof body.version === 'string' ? body.version : null } : { who: 'other', version: null };
   } catch {
