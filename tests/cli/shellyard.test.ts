@@ -2,7 +2,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
-import { isServerAlive, main, writeLauncherPage } from '../../src/cli/shellyard.js';
+import { ensureServer, isServerAlive, main, stopServer, writeLauncherPage } from '../../src/cli/shellyard.js';
 import { readServerState, writeServerState } from '../../src/server/config.js';
 import { startServer, type RunningServer } from '../../src/server/index.js';
 import { fakePtyFactory, useTempHome } from '../helpers.js';
@@ -144,6 +144,67 @@ describe('shellyard cli', () => {
       expect(await main(['--no-open'], c.out)).toBe(0);
       expect(c.lines.join('\n')).toContain(`http://127.0.0.1:${s.port}`);
       expect(readServerState()!.pid).toBe(process.pid);
+    });
+  });
+
+  describe('version of the running server', () => {
+    const appVersion = (): string => JSON.parse(readFileSync('package.json', 'utf8')).version;
+
+    /** A server as an earlier ShellYard would answer: no version in its health check. */
+    async function olderServer(): Promise<{ port: number; close: () => Promise<void> }> {
+      const startedAt = 4242;
+      const other = createServer((req, res) => {
+        if (req.url === '/api/health') return void res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, app: 'shellyard', startedAt }));
+        if (req.url === '/api/shutdown') {
+          res.writeHead(204).end();
+          return void setTimeout(() => other.close(), 20);
+        }
+        res.writeHead(404).end();
+      });
+      await new Promise<void>((r) => other.listen(0, '127.0.0.1', r));
+      const port = (other.address() as AddressInfo).port;
+      writeServerState({ pid: process.pid, port, token: 't', hookToken: 'h', startedAt });
+      return { port, close: () => new Promise<void>((r) => (other.listening ? other.close(() => r()) : r())) };
+    }
+
+    it('is not outdated when the server runs this version', async () => {
+      await start();
+      const r = await ensureServer();
+      expect(r.ok && r.serverVersion).toBe(appVersion());
+      expect(r.ok && r.outdated).toBe(false);
+    });
+
+    it('is outdated when the server does not report a version', async () => {
+      const old = await olderServer();
+      try {
+        const r = await ensureServer();
+        expect(r.ok && r.state.port).toBe(old.port);
+        expect(r.ok && r.serverVersion).toBeNull();
+        expect(r.ok && r.outdated).toBe(true);
+      } finally {
+        await old.close();
+      }
+    });
+
+    it('says so on start, with the way to restart', async () => {
+      const old = await olderServer();
+      try {
+        const c = capture();
+        expect(await main(['--no-open'], c.out)).toBe(0);
+        expect(c.lines.join('\n')).toMatch(/earlier version.*shellyard stop/);
+      } finally {
+        await old.close();
+      }
+    });
+
+    it('stopServer asks the server to stop and clears the state file', async () => {
+      const old = await olderServer();
+      try {
+        expect(await stopServer()).toBe('stopped');
+        expect(readServerState()).toBeNull();
+      } finally {
+        await old.close();
+      }
     });
   });
 

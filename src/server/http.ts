@@ -34,6 +34,8 @@ export interface HttpDeps {
   webDir: string;
   /** Identifies this server instance to the shellyard command. */
   startedAt: number;
+  /** The package version this server runs, so a newer app can tell it is talking to an older server. */
+  version?: string;
   onShutdown: () => void;
 }
 
@@ -252,7 +254,7 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
     const method = req.method ?? 'GET';
 
     if (path === '/api/health') {
-      send(res, 200, { ok: true, app: 'shellyard', startedAt: deps.startedAt });
+      send(res, 200, { ok: true, app: 'shellyard', startedAt: deps.startedAt, version: deps.version });
       return;
     }
 

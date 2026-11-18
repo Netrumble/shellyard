@@ -144,13 +144,59 @@ function spawnDetachedServer(port: number, node: string = process.execPath): voi
   child.unref();
 }
 
-export type EnsureResult = { ok: true; state: ServerState } | { ok: false; error: string };
+/**
+ * The version the server reports, or null when it does not say (servers before this check) or
+ * cannot be reached.
+ */
+export async function serverVersion(state: ServerState): Promise<string | null> {
+  try {
+    const res = await fetch(`http://127.0.0.1:${state.port}/api/health`, { signal: AbortSignal.timeout(1000) });
+    const body = (await res.json()) as { version?: unknown };
+    return typeof body.version === 'string' ? body.version : null;
+  } catch {
+    return null;
+  }
+}
+
+export type EnsureResult =
+  | {
+      ok: true;
+      state: ServerState;
+      /** The version of the running server; null if it is older than version reporting. */
+      serverVersion: string | null;
+      /** The version of this package, the one a new server would run. */
+      appVersion: string;
+      /**
+       * True when the server already running is another version. It was started from files an
+       * update may have replaced or removed, so its page can be broken until it is restarted.
+       */
+      outdated: boolean;
+    }
+  | { ok: false; error: string };
 
 /**
  * Returns the running server, starting one in the background first if there is none.
  * Used by `shellyard start` and by the desktop app, which passes the Node program to run it with.
  */
 export async function ensureServer(options: { port?: number; node?: string } = {}): Promise<EnsureResult> {
+  const started = await ensureRunning(options);
+  if (!started.ok) return started;
+  const appVersion = version();
+  const running = await serverVersion(started.state);
+  return { ok: true, state: started.state, serverVersion: running, appVersion, outdated: running !== appVersion };
+}
+
+/**
+ * Stops the running server and starts the one of this package. The sessions open in the old
+ * server are started again by the new one, as after any stop; what was running inside them ends.
+ */
+export async function restartServer(options: { port?: number; node?: string } = {}): Promise<EnsureResult> {
+  const previous = readServerState();
+  await stopServer();
+  return ensureServer({ port: options.port ?? previous?.port, node: options.node });
+}
+
+async function ensureRunning(options: { port?: number; node?: string }): Promise<{ ok: true; state: ServerState } | { ok: false; error: string }> {
   let state = await liveState();
   if (!state) {
     clearServerState();
@@ -175,6 +221,12 @@ async function start(port: number, openBrowser: boolean, out: Out): Promise<numb
   const state = started.state;
   const base = `http://127.0.0.1:${state.port}`;
   out(`ShellYard running at ${base}`);
+  if (started.outdated) {
+    out(
+      `This server runs ShellYard ${started.serverVersion ?? 'from an earlier version'}, not ${started.appVersion}. ` +
+        'Restart it to use this version: shellyard stop, then shellyard. Open sessions are started again.',
+    );
+  }
   if (openBrowser) await openBrowserOn(state, out);
   return 0;
 }
@@ -200,11 +252,23 @@ async function status(out: Out): Promise<number> {
 }
 
 async function stop(out: Out): Promise<number> {
+  const result = await stopServer();
+  out(
+    result === 'not-running'
+      ? 'ShellYard is not running.'
+      : result === 'stopped'
+        ? 'ShellYard stopped.'
+        : 'ShellYard did not stop on request and was terminated.',
+  );
+  return 0;
+}
+
+/** Stops the running server, if any, and every session it hosts. */
+export async function stopServer(): Promise<'not-running' | 'stopped' | 'terminated'> {
   const state = await liveState();
   if (!state) {
     clearServerState();
-    out('ShellYard is not running.');
-    return 0;
+    return 'not-running';
   }
   try {
     await fetch(`http://127.0.0.1:${state.port}/api/shutdown`, {
@@ -219,8 +283,7 @@ async function stop(out: Out): Promise<number> {
   while (Date.now() < deadline) {
     if (!(await isServerAlive(state))) {
       clearServerState();
-      out('ShellYard stopped.');
-      return 0;
+      return 'stopped';
     }
     await sleep(150);
   }
@@ -232,8 +295,7 @@ async function stop(out: Out): Promise<number> {
     // Already gone.
   }
   clearServerState();
-  out('ShellYard did not stop on request and was terminated.');
-  return 0;
+  return 'terminated';
 }
 
 export async function main(argv: string[], out: Out = console.log): Promise<number> {

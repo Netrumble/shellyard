@@ -3,7 +3,7 @@
 import { app, BrowserWindow, dialog, Menu, nativeImage, Notification, shell, Tray } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ensureServer, writeLauncherPage } from '@talentiaoss/shellyard/launcher';
+import { ensureServer, restartServer, writeLauncherPage } from '@talentiaoss/shellyard/launcher';
 import { findNode } from './find-node.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -44,6 +44,30 @@ function portFromArgs(argv) {
   return Number.isInteger(n) && n > 0 && n < 65536 ? n : undefined;
 }
 
+/**
+ * The server already running is another version, usually the one before an update: its files
+ * may be gone, and its page broken. Restarting it is the user's call, because whatever runs in
+ * the open sessions ends (the sessions themselves are started again).
+ */
+async function offerRestart(started, node) {
+  const { response } = await dialog.showMessageBox({
+    type: 'question',
+    title: 'ShellYard was updated',
+    message: 'ShellYard was updated. Restart its server to use the new version?',
+    detail:
+      `The server running now is ${started.serverVersion ? `version ${started.serverVersion}` : 'from an earlier version'}; ` +
+      `this app is version ${started.appVersion}. Until it is restarted, the page may not work.\n\n` +
+      'Restarting starts your open shells and Claude Code sessions again, but anything running in them now (a command, an answer being written) is stopped.',
+    buttons: ['Restart now', 'Not now'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+    icon: icon.isEmpty() ? undefined : icon,
+  });
+  if (response !== 0) return started;
+  return restartServer({ port: started.state.port, node });
+}
+
 async function openWindow() {
   const node = findNode();
   if (!node) {
@@ -51,7 +75,8 @@ async function openWindow() {
     app.quit();
     return;
   }
-  const started = await ensureServer({ port: portFromArgs(process.argv), node });
+  let started = await ensureServer({ port: portFromArgs(process.argv), node });
+  if (started.ok && started.outdated) started = await offerRestart(started, node);
   if (!started.ok) {
     dialog.showErrorBox('ShellYard did not start', started.error);
     app.quit();

@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
@@ -36,7 +36,8 @@ describe('startServer', () => {
     expect(state!.hookToken).toMatch(/^[0-9a-f]{64}$/);
     expect(state!.hookToken).not.toBe(state!.token);
     const res = await fetch(`http://127.0.0.1:${port}/api/health`);
-    expect(await res.json()).toEqual({ ok: true, app: 'shellyard', startedAt: state!.startedAt });
+    const pkgVersion = (JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string }).version;
+    expect(await res.json()).toEqual({ ok: true, app: 'shellyard', startedAt: state!.startedAt, version: pkgVersion });
 
     await s.stop();
     running.length = 0;

@@ -1,7 +1,7 @@
 {
   "name": "@talentiaoss/shellyard-desktop",
   "productName": "ShellYard",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "ShellYard as a desktop app: the same terminals and Claude Code sessions in their own window instead of a browser tab.",
   "type": "module",
   "main": "main.js",
@@ -39,7 +39,7 @@
   "license": "MIT",
   "dependencies": {
     "electron": "^45.3.4",
-    "@talentiaoss/shellyard": "^0.1.1"
+    "@talentiaoss/shellyard": "^0.1.2"
   },
   "devDependencies": {
     "electron-builder": "^26.18.0"

@@ -1,4 +1,4 @@
-import { realpathSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { dirname, join } from 'node:path';
@@ -22,6 +22,12 @@ import type { Schedule } from '../shared/types.js';
 import { attachWebSocket } from './ws.js';
 
 export const DEFAULT_PORT = 7717;
+
+/** The version of the package this file belongs to (from dist/server or src/server alike). */
+export function packageVersion(): string {
+  const file = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'package.json');
+  return (JSON.parse(readFileSync(file, 'utf8')) as { version: string }).version;
+}
 const HOST = '127.0.0.1';
 const PORT_ATTEMPTS = 51;
 /** How much transcript is read in one go; small enough not to be felt while typing. */
@@ -256,6 +262,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
       hookToken,
       webDir: join(here, '..', 'web'),
       startedAt,
+      version: packageVersion(),
       // Let the 204 reach the caller before the sockets are torn down.
       onShutdown: () => void setTimeout(() => void stop(), 50),
     }),
