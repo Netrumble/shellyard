@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { delimiter, isAbsolute, join } from 'node:path';
+import { delimiter, isAbsolute, join, win32 } from 'node:path';
 import type { Profile, SessionKind } from '../shared/types.js';
 
 export interface Launch {
@@ -67,29 +67,58 @@ export function resolveExecutable(
     for (const c of candidates(name, env, platform)) if (isFile(c)) return c;
     return null;
   }
-  const dirs = (envGet(env, 'PATH') || '').split(delimiter).filter(Boolean);
+  // A relative entry (".", or an empty one) would make the answer depend on the folder the
+  // server happens to run in: a folder anyone can drop a program into is not a place to look.
+  const dirs = (envGet(env, 'PATH') || '').split(delimiter).filter((d) => d && isAbsolute(d));
   for (const dir of dirs) {
     for (const c of candidates(join(dir, name), env, platform)) if (isFile(c)) return c;
   }
   return null;
 }
 
-function quoteForCmd(arg: string): string {
-  if (arg === '') return '""';
-  if (!/[\s&|<>^%()"]/.test(arg)) return arg;
-  return `"${arg.replace(/"/g, '\\"')}"`;
+/**
+ * A program of Windows itself, by full path. A bare name such as "wsl.exe" is looked up in the
+ * current folder before System32, so a program planted in the folder ShellYard runs in, or in a
+ * session's folder, would run instead.
+ */
+export function systemProgram(name: string, env: Env = process.env): string {
+  const root = envGet(env, 'SystemRoot') || envGet(env, 'windir') || 'C:\\Windows';
+  return win32.join(root, 'System32', name);
+}
+
+/** The characters cmd.exe acts on, each escaped with a caret. */
+const CMD_META = /([()\][%!^"`<>&|;, *?])/g;
+
+/**
+ * One argument for the command line cmd.exe runs. It is quoted the way the program behind the
+ * script will split it (Microsoft C runtime rules), then every character cmd.exe acts on is
+ * escaped. Twice: cmd.exe reads the line once, and the script reads its arguments (%*) again
+ * when it passes them on, as the shims npm installs do. A line break cannot be passed through
+ * cmd.exe at all, so it is refused.
+ */
+export function quoteForCmd(arg: string): string {
+  if (/[\r\n\0]/.test(arg)) throw new Error('An argument for a .cmd or .bat program cannot contain a line break.');
+  let a = arg;
+  if (a === '' || /[\s"]/.test(a)) {
+    // Backslashes count only before a quote: double those, and those before the closing one.
+    a = a.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, '$1$1');
+    a = `"${a}"`;
+  }
+  return a.replace(CMD_META, '^^^$1');
 }
 
 /**
  * A .cmd or .bat file is not an executable image; it has to be run by cmd.exe. The command
  * line is built here as a single string: with /s, cmd strips one pair of quotes around the
  * whole line and keeps the inner ones, which is the only form that survives a shim path or
- * an argument containing spaces (C:\Program Files\nodejs\claude.cmd).
+ * an argument containing spaces (C:\Program Files\nodejs\claude.cmd). cmd.exe itself is
+ * started by full path, never looked up in the session's folder.
  */
-export function toLaunch(resolvedPath: string, args: string[], platform: NodeJS.Platform = process.platform): Launch {
+export function toLaunch(resolvedPath: string, args: string[], platform: NodeJS.Platform = process.platform, env: Env = process.env): Launch {
   if (platform === 'win32' && /\.(cmd|bat)$/i.test(resolvedPath)) {
+    if (/["%\r\n]/.test(resolvedPath)) throw new Error(`Cannot run this script through cmd.exe: ${resolvedPath}`);
     const line = [`"${resolvedPath}"`, ...args.map(quoteForCmd)].join(' ');
-    return { file: 'cmd.exe', args: `/d /s /c "${line}"` };
+    return { file: systemProgram('cmd.exe', env), args: `/d /s /c "${line}"` };
   }
   return { file: resolvedPath, args };
 }
@@ -125,7 +154,7 @@ export function listWslDistros(): string[] {
   if (wslCache && now - wslCache.at < WSL_LIST_TTL_MS) return wslCache.names;
   let names: string[] = [];
   try {
-    names = parseWslList(execFileSync('wsl.exe', ['--list', '--quiet'], { timeout: 4000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }));
+    names = parseWslList(execFileSync(systemProgram('wsl.exe'), ['--list', '--quiet'], { timeout: 4000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }));
   } catch {
     // WSL is not set up, or did not answer in time: no WSL profiles this time.
   }

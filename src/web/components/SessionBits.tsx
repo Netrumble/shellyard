@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { SessionInfo } from '../../shared/types.js';
 import { api } from '../api.js';
 import { elapsedLabel } from '../attention.js';
@@ -81,13 +82,84 @@ function CodeIcon(): React.JSX.Element {
   );
 }
 
+/**
+ * Asks for a new name. A dialog of the page's own: window.prompt() does nothing in the desktop
+ * app (Electron does not implement it), so the button seemed dead there.
+ */
+function RenameDialog({ session, onClose }: { session: SessionInfo; onClose: () => void }): React.JSX.Element {
+  const [name, setName] = useState(session.name);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const submit = async (e: React.FormEvent): Promise<void> => {
+    e.preventDefault();
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setError('Give the session a name.');
+      return;
+    }
+    if (trimmed === session.name) return onClose();
+    setBusy(true);
+    setError(null);
+    try {
+      await api.updateSession(session.id, { name: trimmed });
+      onClose();
+    } catch (err) {
+      setError((err as Error).message);
+      setBusy(false);
+    }
+  };
+
+  // In a portal, so that no row or header around the button clips it; events are stopped here,
+  // so that a click in the dialog does not also reach the row (which would open the session).
+  return createPortal(
+    <div
+      className="overlay"
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+      onMouseDown={(e) => {
+        e.stopPropagation();
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <form className="dialog" onSubmit={(e) => void submit(e)} aria-label="Rename session">
+        <h2>Rename session</h2>
+        <label>
+          <span>Name</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} autoFocus onFocus={(e) => e.target.select()} />
+        </label>
+        {error && (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="dialog-buttons">
+          <button type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" className="primary" disabled={busy}>
+            Rename
+          </button>
+        </div>
+      </form>
+    </div>,
+    document.body,
+  );
+}
+
 /** `onMinimize`, where given, adds a "_" before the close button that leaves the terminal for the board. */
 export function SessionActions({ session, onMinimize }: { session: SessionInfo; onMinimize?: () => void }): React.JSX.Element {
   const report = (e: unknown): void => window.alert((e as Error).message);
-  const rename = (): void => {
-    const name = window.prompt('Session name', session.name);
-    if (name && name.trim()) api.updateSession(session.id, { name }).catch(report);
-  };
+  const [renaming, setRenaming] = useState(false);
+  const rename = (): void => setRenaming(true);
   const close = (): void => {
     const running = session.status !== 'exited';
     if (running && !window.confirm(`Close "${session.name}"? Its process will be stopped.`)) return;
@@ -125,6 +197,7 @@ export function SessionActions({ session, onMinimize }: { session: SessionInfo; 
       <button type="button" className="icon" title="Close" aria-label={`Close ${session.name}`} onClick={close}>
         ✕
       </button>
+      {renaming && <RenameDialog session={session} onClose={() => setRenaming(false)} />}
     </span>
   );
 }

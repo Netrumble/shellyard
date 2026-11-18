@@ -48,11 +48,17 @@ ShellYard to the Start menu and the desktop, and registers an uninstaller in Win
 apps. Node.js 22 or later must still be on PATH on the machine it is installed on. The installer
 is not code-signed, so Windows warns about an unknown publisher on the first run.
 
-To publish it, attach the `.exe` to a GitHub release whose tag matches the version (`v0.1.0` for
-`0.1.0`):
+The dependencies of the main package are installed with `npm ci` from the repository's
+`package-lock.json`, so the installer holds exactly the locked versions. Next to the `.exe` the
+build writes `ShellYard-Setup-<version>.exe.sha256`, its SHA-256 checksum.
+`npm run installer -- --stage-only` prepares `.installer/`, the folder that would be packed, and
+stops there.
+
+To publish it, attach the `.exe` and its `.sha256` to a GitHub release whose tag matches the
+version (`v0.1.0` for `0.1.0`):
 
 ```
-gh release create v0.1.0 release/ShellYard-Setup-0.1.0.exe --title "ShellYard 0.1.0" --notes "..."
+gh release create v0.1.0 release/ShellYard-Setup-0.1.0.exe release/ShellYard-Setup-0.1.0.exe.sha256 --title "ShellYard 0.1.0" --notes "..."
 ```
 
 The README links to the latest release, so the download link never needs updating.

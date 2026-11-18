@@ -2,7 +2,7 @@ import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { ClientMessage, ServerMessage } from '../shared/types.js';
-import { hostAllowed, originAllowed, safeEqual, tokenFromProtocols, WS_PROTOCOL } from './auth.js';
+import { classifyHost, originAllowed, safeEqual, tokenFromProtocols, WS_PROTOCOL } from './auth.js';
 import type { SessionManager } from './session-manager.js';
 import type { ActivityMeter } from './activity.js';
 import type { ClosedStore } from './closed.js';
@@ -53,7 +53,7 @@ function parseMessage(raw: string): ClientMessage | null {
 
 export function attachWebSocket(
   server: Server,
-  deps: { manager: SessionManager; stories?: StoryStore; closed?: ClosedStore; schedules?: ScheduleStore; usage?: UsageStore; activity?: ActivityMeter; port: number; token: string },
+  deps: { manager: SessionManager; stories?: StoryStore; closed?: ClosedStore; schedules?: ScheduleStore; usage?: UsageStore; activity?: ActivityMeter; port: number; pageHost: string; token: string },
 ): { close(): void } {
   const { manager } = deps;
   const wss = new WebSocketServer({
@@ -169,9 +169,12 @@ export function attachWebSocket(
   const onUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
     const path = (req.url ?? '').split('?')[0];
     if (path !== '/ws') return refuse(socket, 404, 'Not Found');
-    if (!hostAllowed(req.headers.host, deps.port)) return refuse(socket, 403, 'Forbidden');
+    // Only the page of this start connects; a tab from an earlier start is refused as unauthorized.
+    const hostKind = classifyHost(req.headers.host, deps.port, deps.pageHost);
+    if (hostKind === 'stale-page') return refuse(socket, 401, 'Unauthorized');
+    if (hostKind !== 'page') return refuse(socket, 403, 'Forbidden');
     // A page on any site can open a WebSocket to localhost; the Origin check is what stops it.
-    if (!originAllowed(req.headers.origin, deps.port)) return refuse(socket, 403, 'Forbidden');
+    if (!originAllowed(req.headers.origin, deps.port, deps.pageHost)) return refuse(socket, 403, 'Forbidden');
     // A browser cannot add headers to a WebSocket handshake, so the page offers the token as
     // a subprotocol. Unlike a cookie, it is sent only because the page chose to send it.
     const offered = tokenFromProtocols(req.headers['sec-websocket-protocol']);

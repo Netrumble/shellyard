@@ -3,6 +3,7 @@ import { createServer, request, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { healthProof, newChallenge } from '../../src/server/auth.js';
 import { loadConfig } from '../../src/server/config.js';
 import { createRequestHandler } from '../../src/server/http.js';
 import { SessionManager } from '../../src/server/session-manager.js';
@@ -14,6 +15,7 @@ import { fakePtyFactory, useTempHome } from '../helpers.js';
 
 const TOKEN = 't'.repeat(64);
 const HOOK_TOKEN = 'h'.repeat(64);
+const PAGE = 'c'.repeat(32) + '.localhost';
 const builtin: Profile = { id: 'builtin-node', name: 'Node', kind: 'shell', command: process.execPath, args: [], cwd: '', color: '#123456', env: {}, model: null };
 
 interface Res {
@@ -35,7 +37,7 @@ describe('http api', () => {
 
   /** Raw request so the Host header and the path can be anything. */
   function call(method: string, path: string, opts: { body?: string; headers?: Record<string, string>; auth?: 'user' | 'none' | 'hook' } = {}): Promise<Res> {
-    const headers: Record<string, string> = { host: `127.0.0.1:${port}`, ...opts.headers };
+    const headers: Record<string, string> = { host: `${PAGE}:${port}`, ...opts.headers };
     const auth = opts.auth ?? 'user';
     if (auth === 'user') headers['x-shellyard-token'] = TOKEN;
     if (auth === 'hook') headers['x-shellyard-hook-token'] = HOOK_TOKEN;
@@ -73,7 +75,7 @@ describe('http api', () => {
       hookScriptPath: '/h.js', statusScriptPath: '/s.js',
       builtins: () => [builtin],
     });
-    server.on('request', createRequestHandler({ manager: mgr, stories, usage: new UsageStore({ now: Date.now, file: join(home.dir(), 'usage.json') }), closed: new ClosedStore({ now: Date.now, file: join(home.dir(), 'closed.json') }), port, token: TOKEN, hookToken: HOOK_TOKEN, webDir, startedAt: 777, onShutdown: () => shutdowns++ }));
+    server.on('request', createRequestHandler({ manager: mgr, stories, usage: new UsageStore({ now: Date.now, file: join(home.dir(), 'usage.json') }), closed: new ClosedStore({ now: Date.now, file: join(home.dir(), 'closed.json') }), port, pageHost: PAGE, token: TOKEN, hookToken: HOOK_TOKEN, webDir, onShutdown: () => shutdowns++ }));
   });
 
   afterEach(async () => {
@@ -90,10 +92,18 @@ describe('http api', () => {
       expect(r.status).toBe(403);
     });
 
-    it('answers health without credentials', async () => {
+    it('answers health without credentials, saying nothing that identifies this server', async () => {
       const r = await call('GET', '/api/health', { auth: 'none' });
       expect(r.status).toBe(200);
-      expect(r.json()).toEqual({ ok: true, app: 'shellyard', startedAt: 777 });
+      expect(r.json()).toEqual({ ok: true, app: 'shellyard' });
+    });
+
+    it('answers a health challenge with a proof that it holds the token', async () => {
+      const challenge = newChallenge();
+      const r = await call('GET', `/api/health?challenge=${challenge}`, { auth: 'none' });
+      expect(r.json()).toEqual({ ok: true, app: 'shellyard', proof: healthProof(TOKEN, challenge) });
+      // A malformed challenge gets no proof at all.
+      expect((await call('GET', '/api/health?challenge=xyz', { auth: 'none' })).json()).toEqual({ ok: true, app: 'shellyard' });
     });
 
     it('refuses the api without credentials', async () => {
@@ -154,7 +164,7 @@ describe('http api', () => {
 
     it('accepts a state-changing request from its own origin', async () => {
       const body = JSON.stringify({ kind: 'shell', command: process.execPath, cwd: home.dir() });
-      const r = await call('POST', '/api/sessions', { body, headers: { origin: `http://127.0.0.1:${port}` } });
+      const r = await call('POST', '/api/sessions', { body, headers: { origin: `http://${PAGE}:${port}` } });
       expect(r.status).toBe(201);
     });
 
@@ -311,7 +321,7 @@ describe('http api', () => {
     it('sends a content security policy that allows its own websocket and nothing foreign', async () => {
       const csp = String((await call('GET', '/', { auth: 'none' })).headers['content-security-policy']);
       expect(csp).toContain("default-src 'self'");
-      expect(csp).toContain(`connect-src 'self' ws://127.0.0.1:${port} ws://localhost:${port}`);
+      expect(csp).toContain(`connect-src 'self' ws://${PAGE}:${port};`);
       expect(csp).toContain("frame-ancestors 'none'");
       expect(csp).toContain("base-uri 'none'");
       expect(csp).toContain("form-action 'none'");
@@ -320,6 +330,35 @@ describe('http api', () => {
 
     it('refuses to change anything through a static path', async () => {
       expect((await call('POST', '/', { auth: 'none', body: '{}' })).status).toBe(405);
+    });
+
+    it('serves the app only on the page host of this start; 127.0.0.1 only says how to open it', async () => {
+      const r = await call('GET', '/', { auth: 'none', headers: { host: `127.0.0.1:${port}` } });
+      expect(r.status).toBe(200);
+      expect(r.text).not.toContain('ShellYard APP');
+      expect(r.text).toContain('shellyard');
+      expect(String(r.headers['content-security-policy'])).toContain("default-src 'none'");
+      expect((await call('GET', '/assets/app.js', { auth: 'none', headers: { host: `127.0.0.1:${port}` } })).text).not.toContain('console.log');
+    });
+
+    it('tells a tab from an earlier start that the server was restarted, and refuses its api calls', async () => {
+      const stale = { host: `${'d'.repeat(32)}.localhost:${port}` };
+      const page = await call('GET', '/', { auth: 'none', headers: stale });
+      expect(page.text).toMatch(/restarted/);
+      expect(page.text).not.toContain('ShellYard APP');
+      // Even holding the token, an old page gets the answer that makes it say "run shellyard".
+      expect((await call('GET', '/api/sessions', { headers: stale })).status).toBe(401);
+    });
+
+    it('still answers the shellyard command on 127.0.0.1', async () => {
+      expect((await call('GET', '/api/sessions', { headers: { host: `127.0.0.1:${port}` } })).status).toBe(200);
+      expect((await call('GET', '/api/sessions', { auth: 'none', headers: { host: `127.0.0.1:${port}` } })).status).toBe(401);
+    });
+
+    it('refuses a state-changing request from the 127.0.0.1 origin', async () => {
+      const r = await call('POST', '/api/shutdown', { headers: { host: `127.0.0.1:${port}`, origin: `http://127.0.0.1:${port}` } });
+      expect(r.status).toBe(403);
+      expect(shutdowns).toBe(0);
     });
 
     it('falls back to the app for an unknown page path, but not for a missing asset', async () => {

@@ -1,8 +1,9 @@
 import { createReadStream, statSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { pipeline } from 'node:stream';
 import { extname, resolve, sep } from 'node:path';
 import type { ConversationItem, CreateSessionRequest, Meta } from '../shared/types.js';
-import { hostAllowed, originAllowed, requestAuthorized, safeEqual } from './auth.js';
+import { classifyHost, healthProof, isChallenge, originAllowed, requestAuthorized, safeEqual } from './auth.js';
 import { MAX_IMAGE_BYTES, readImage, saveImage } from './backgrounds.js';
 import { parseHookBody } from './claude-launch.js';
 import type { ClosedStore } from './closed.js';
@@ -29,11 +30,11 @@ export interface HttpDeps {
   /** A hosted Claude session took a prompt. */
   onPromptSubmitted?: (sessionId: string) => void;
   port: number;
+  /** The host name the page is served on in this start (see newPageHost). */
+  pageHost: string;
   token: string;
   hookToken: string;
   webDir: string;
-  /** Identifies this server instance to the shellyard command. */
-  startedAt: number;
   /** The package version this server runs, so a newer app can tell it is talking to an older server. */
   version?: string;
   onShutdown: () => void;
@@ -179,7 +180,26 @@ function toStoryInput(b: Record<string, unknown>): StoryInput {
   return { name: str(b.name), ticket: str(b.ticket), cwd: str(b.cwd), color: str(b.color) };
 }
 
-function serveStatic(webDir: string, pathname: string, res: ServerResponse, port: number): void {
+/**
+ * The page of any address other than this start's own: the app is not served there, so a
+ * bookmark or an old tab says how to open it instead of failing silently.
+ */
+function sendOpenNotice(res: ServerResponse, stale: boolean, method: string): void {
+  const text = stale
+    ? 'ShellYard was restarted since this page was opened. Run <code>shellyard</code> (or open the ShellYard app) to open it again.'
+    : 'Open ShellYard with the <code>shellyard</code> command or the ShellYard app: each start opens it on an address of its own.';
+  const html = `<!doctype html><meta charset="utf-8"><title>ShellYard</title><body style="font:16px system-ui,sans-serif;margin:3rem;max-width:40rem"><h1>ShellYard</h1><p>${text}</p></body>`;
+  res.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
+    'referrer-policy': 'no-referrer',
+    'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+  });
+  res.end(method === 'HEAD' ? undefined : html);
+}
+
+function serveStatic(webDir: string, pathname: string, method: string, res: ServerResponse, port: number, pageHost: string): void {
   const root = resolve(webDir);
   let decoded: string;
   try {
@@ -226,13 +246,17 @@ function serveStatic(webDir: string, pathname: string, res: ServerResponse, port
     headers['content-security-policy'] =
       // blob: is how the page shows a terminal background it fetched with its token.
       "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; " +
-      `connect-src 'self' ws://127.0.0.1:${port} ws://localhost:${port}; ` +
+      `connect-src 'self' ws://${pageHost}:${port}; ` +
       "frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
   }
   res.writeHead(200, headers);
-  const stream = createReadStream(file);
-  stream.on('error', () => res.destroy());
-  stream.pipe(res);
+  if (method === 'HEAD') {
+    res.end();
+    return;
+  }
+  // pipeline closes the file when the client goes away mid-transfer; a plain pipe would keep
+  // it open, and a few aborted downloads would use up the server's file descriptors.
+  pipeline(createReadStream(file), res, () => undefined);
 }
 
 export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res: ServerResponse) => void {
@@ -245,7 +269,8 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    if (!hostAllowed(req.headers.host, deps.port)) {
+    const hostKind = classifyHost(req.headers.host, deps.port, deps.pageHost);
+    if (hostKind === 'foreign') {
       send(res, 403, { error: 'Forbidden host' });
       return;
     }
@@ -254,7 +279,11 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
     const method = req.method ?? 'GET';
 
     if (path === '/api/health') {
-      send(res, 200, { ok: true, app: 'shellyard', startedAt: deps.startedAt, version: deps.version });
+      // Open to anyone, so it says nothing that identifies this instance. The shellyard
+      // command tells its own server apart by the proof, which only the token holder can make.
+      const challenge = url.searchParams.get('challenge');
+      const proof = isChallenge(challenge) ? healthProof(deps.token, challenge) : undefined;
+      send(res, 200, { ok: true, app: 'shellyard', version: deps.version, ...(proof ? { proof } : {}) });
       return;
     }
 
@@ -308,10 +337,19 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
     }
 
     // The app's own files hold no secret, so they need no credential. The page receives the
-    // token in the fragment of its address, which browsers never send to a server.
+    // token in the fragment of its address, which browsers never send to a server. It is
+    // served only on the host name of this start; on any other address the browser is only
+    // told how to open it.
     if (!path.startsWith('/api/')) {
       if (method !== 'GET' && method !== 'HEAD') throw new HttpError(405, 'Method not allowed');
-      serveStatic(deps.webDir, path, res, deps.port);
+      if (hostKind === 'page') serveStatic(deps.webDir, path, method, res, deps.port, deps.pageHost);
+      else sendOpenNotice(res, hostKind === 'stale-page', method);
+      return;
+    }
+
+    // A tab left open from an earlier start: told, like a stale token, to open ShellYard again.
+    if (hostKind === 'stale-page') {
+      send(res, 401, { error: 'Unauthorized' });
       return;
     }
 
@@ -322,7 +360,7 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
 
     // The token header already cannot be set by another site without a preflight we never
     // approve. Refusing a foreign Origin as well costs nothing and guards against mistakes.
-    if (method !== 'GET' && req.headers.origin !== undefined && !originAllowed(req.headers.origin, deps.port)) {
+    if (method !== 'GET' && req.headers.origin !== undefined && !originAllowed(req.headers.origin, deps.port, deps.pageHost)) {
       throw new HttpError(403, 'Forbidden origin');
     }
 

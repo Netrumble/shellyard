@@ -1,33 +1,48 @@
 import { describe, expect, it } from 'vitest';
-import { hostAllowed, newToken, originAllowed, requestAuthorized, tokenFromProtocols } from '../../src/server/auth.js';
+import { classifyHost, healthProof, isChallenge, newChallenge, newPageHost, newToken, originAllowed, pageOrigin, requestAuthorized, tokenFromProtocols } from '../../src/server/auth.js';
 
-describe('hostAllowed', () => {
-  it('accepts the loopback names on the server port', () => {
-    expect(hostAllowed('127.0.0.1:7717', 7717)).toBe(true);
-    expect(hostAllowed('localhost:7717', 7717)).toBe(true);
-    expect(hostAllowed('LOCALHOST:7717', 7717)).toBe(true);
+const PAGE = '0123456789abcdef0123456789abcdef.localhost';
+
+describe('newPageHost', () => {
+  it('is a new unguessable name under .localhost at every call', () => {
+    const a = newPageHost();
+    expect(a).toMatch(/^[0-9a-f]{32}\.localhost$/);
+    expect(newPageHost()).not.toBe(a);
+    expect(pageOrigin(a, 7717)).toBe(`http://${a}:7717`);
   });
-  it('rejects everything else', () => {
-    expect(hostAllowed('evil.com:7717', 7717)).toBe(false);
-    expect(hostAllowed('127.0.0.1:7718', 7717)).toBe(false);
-    expect(hostAllowed('127.0.0.1', 7717)).toBe(false);
-    expect(hostAllowed('127.0.0.1.evil.com:7717', 7717)).toBe(false);
-    expect(hostAllowed(undefined, 7717)).toBe(false);
-    expect(hostAllowed('', 7717)).toBe(false);
+});
+
+describe('classifyHost', () => {
+  it('knows the page host of this start, in any case', () => {
+    expect(classifyHost(`${PAGE}:7717`, 7717, PAGE)).toBe('page');
+    expect(classifyHost(`${PAGE.toUpperCase()}:7717`, 7717, PAGE)).toBe('page');
+  });
+  it('accepts the loopback address, which the command and the hooks use', () => {
+    expect(classifyHost('127.0.0.1:7717', 7717, PAGE)).toBe('loopback');
+  });
+  it('recognises the page host of an earlier start', () => {
+    expect(classifyHost(`${'f'.repeat(32)}.localhost:7717`, 7717, PAGE)).toBe('stale-page');
+  });
+  it('refuses everything else, localhost included', () => {
+    for (const h of ['localhost:7717', 'LOCALHOST:7717', 'evil.com:7717', '127.0.0.1:7718', '127.0.0.1', '127.0.0.1.evil.com:7717', `${PAGE}:7718`, `x.${PAGE}:7717`, 'abc.localhost:7717', '', undefined]) {
+      expect(classifyHost(h, 7717, PAGE)).toBe('foreign');
+    }
   });
 });
 
 describe('originAllowed', () => {
-  it('accepts its own origin', () => {
-    expect(originAllowed('http://127.0.0.1:7717', 7717)).toBe(true);
-    expect(originAllowed('http://localhost:7717', 7717)).toBe(true);
+  it('accepts only the page origin of this start', () => {
+    expect(originAllowed(`http://${PAGE}:7717`, 7717, PAGE)).toBe(true);
+    expect(originAllowed('http://127.0.0.1:7717', 7717, PAGE)).toBe(false);
+    expect(originAllowed('http://localhost:7717', 7717, PAGE)).toBe(false);
+    expect(originAllowed(`http://${'f'.repeat(32)}.localhost:7717`, 7717, PAGE)).toBe(false);
   });
   it('rejects other origins, null and none', () => {
-    expect(originAllowed('https://evil.com', 7717)).toBe(false);
-    expect(originAllowed('http://127.0.0.1:9999', 7717)).toBe(false);
-    expect(originAllowed('https://127.0.0.1:7717', 7717)).toBe(false);
-    expect(originAllowed('null', 7717)).toBe(false);
-    expect(originAllowed(undefined, 7717)).toBe(false);
+    expect(originAllowed('https://evil.com', 7717, PAGE)).toBe(false);
+    expect(originAllowed(`http://${PAGE}:9999`, 7717, PAGE)).toBe(false);
+    expect(originAllowed(`https://${PAGE}:7717`, 7717, PAGE)).toBe(false);
+    expect(originAllowed('null', 7717, PAGE)).toBe(false);
+    expect(originAllowed(undefined, 7717, PAGE)).toBe(false);
   });
 });
 
@@ -71,5 +86,21 @@ describe('newToken', () => {
     expect(a).toMatch(/^[0-9a-f]{64}$/);
     expect(b).toMatch(/^[0-9a-f]{64}$/);
     expect(a).not.toBe(b);
+  });
+});
+
+describe('healthProof', () => {
+  it('depends on the token and on the challenge', () => {
+    const c = newChallenge();
+    expect(isChallenge(c)).toBe(true);
+    expect(healthProof('t1', c)).toMatch(/^[0-9a-f]{64}$/);
+    expect(healthProof('t1', c)).toBe(healthProof('t1', c));
+    expect(healthProof('t1', c)).not.toBe(healthProof('t2', c));
+    expect(healthProof('t1', c)).not.toBe(healthProof('t1', newChallenge()));
+  });
+  it('accepts only a well-formed challenge', () => {
+    expect(isChallenge('abc')).toBe(false);
+    expect(isChallenge('A'.repeat(64))).toBe(false);
+    expect(isChallenge(undefined)).toBe(false);
   });
 });

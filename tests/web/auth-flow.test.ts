@@ -96,16 +96,16 @@ describe('token and connection in the browser', () => {
   });
 
   it('takes the token from the address, removes it from the address bar, and sends it explicitly', async () => {
-    page('#token=fresh-token');
+    page('#token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
     await start();
     await settle();
     expect(replaced).toEqual(['/']);
-    expect(FakeSocket.last().protocols).toEqual(['shellyard', 'shellyard-token.fresh-token']);
-    expect(fetchCalls[0]).toEqual({ url: '/api/meta', token: 'fresh-token' });
+    expect(FakeSocket.last().protocols).toEqual(['shellyard', 'shellyard-token.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']);
+    expect(fetchCalls[0]).toEqual({ url: '/api/meta', token: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' });
   });
 
   it('keeps a token from the address only once the server has accepted it', async () => {
-    page('#token=fresh-token');
+    page('#token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
     fetchMode = 'network-error';
     await start();
     await settle();
@@ -113,12 +113,12 @@ describe('token and connection in the browser', () => {
     fetchMode = 'ok';
     FakeSocket.last().open();
     await settle();
-    expect(storage.get('shellyard-token')).toBe('fresh-token');
+    expect(storage.get('shellyard-token')).toBe('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
   });
 
   it('a token planted in the address by another page does not replace the stored one', async () => {
     storage.set('shellyard-token', 'good-token');
-    page('#token=planted');
+    page('#token=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
     fetchMode = 'unauthorized';
     const store = await start();
     await settle();

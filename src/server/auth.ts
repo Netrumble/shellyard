@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { IncomingHttpHeaders } from 'node:http';
 
 // Whoever reaches this server gets a shell as the user. It only listens on loopback, but a
@@ -17,16 +17,65 @@ export function newToken(): string {
   return randomBytes(32).toString('hex');
 }
 
-export function hostAllowed(hostHeader: string | undefined, port: number): boolean {
-  if (!hostHeader) return false;
-  const host = hostHeader.toLowerCase();
-  return host === `127.0.0.1:${port}` || host === `localhost:${port}`;
+/** A challenge the shellyard command sends to /api/health: 32 random bytes as hex. */
+export function newChallenge(): string {
+  return randomBytes(32).toString('hex');
 }
 
-export function originAllowed(origin: string | undefined, port: number): boolean {
+export function isChallenge(v: unknown): v is string {
+  return typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
+}
+
+/**
+ * What the server answers to a health challenge: proof that it holds the token, without
+ * sending the token. Anything can listen on the recorded port after a crash; only the server
+ * that wrote the state file can compute this, and nothing it returns can be replayed.
+ */
+export function healthProof(token: string, challenge: string): string {
+  return createHmac('sha256', token).update(`shellyard-health:${challenge}`).digest('hex');
+}
+
+// The page is never served on a fixed address. An origin that is the same at every start
+// (http://127.0.0.1:7717) can be prepared in advance: whoever holds the port while ShellYard is
+// down (another user of the machine can) may leave a service worker there, and at the next
+// start that worker, not the server, answers the launcher and reads the token from the
+// address. So each start picks a new host name nobody can guess, under .localhost, which
+// browsers resolve to the loopback address by themselves: http://<32 hex>.localhost:<port>.
+
+/** A fresh host name for the page: 16 random bytes as hex, under .localhost. */
+export function newPageHost(): string {
+  return `${randomBytes(16).toString('hex')}.localhost`;
+}
+
+/** The address the page is served on. */
+export function pageOrigin(pageHost: string, port: number): string {
+  return `http://${pageHost}:${port}`;
+}
+
+/**
+ * What a Host header names:
+ * - "page": the page's host of this start;
+ * - "loopback": 127.0.0.1, which the shellyard command, the hooks and the status line use;
+ * - "stale-page": the page's host of an earlier start, from a tab left open, which is told
+ *   that the server was restarted;
+ * - "foreign": anything else (DNS rebinding, another port), refused.
+ */
+export type HostKind = 'page' | 'loopback' | 'stale-page' | 'foreign';
+
+export function classifyHost(hostHeader: string | undefined, port: number, pageHost: string): HostKind {
+  if (!hostHeader) return 'foreign';
+  const host = hostHeader.toLowerCase();
+  if (host === `${pageHost}:${port}`) return 'page';
+  // Not "localhost": the system may resolve that name to something else (a hosts file, IPv6).
+  if (host === `127.0.0.1:${port}`) return 'loopback';
+  if (new RegExp(`^[0-9a-f]{32}\\.localhost:${port}$`).test(host)) return 'stale-page';
+  return 'foreign';
+}
+
+/** Only the page of this start may send requests that change something. */
+export function originAllowed(origin: string | undefined, port: number, pageHost: string): boolean {
   if (!origin) return false;
-  const o = origin.toLowerCase();
-  return o === `http://127.0.0.1:${port}` || o === `http://localhost:${port}`;
+  return origin.toLowerCase() === pageOrigin(pageHost, port);
 }
 
 export function safeEqual(a: string, b: string): boolean {

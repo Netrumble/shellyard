@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { Schedule } from '../../src/shared/types.js';
-import { ScheduleError, ScheduleStore, type LaunchResult } from '../../src/server/schedules.js';
+import { launcherFingerprint, ScheduleError, ScheduleStore, type LaunchResult } from '../../src/server/schedules.js';
 import { useTempHome } from '../helpers.js';
 
 const MIN = 60_000;
@@ -277,5 +277,92 @@ describe('ScheduleStore', () => {
       writeFileSync(file, JSON.stringify(raw));
       expect(make().list().map((x) => x.id)).toEqual([s.id]);
     });
+  });
+});
+
+describe('a schedule tied to its launcher', () => {
+  const home = useTempHome();
+  let now = new Date(2026, 10, 17, 10, 0).getTime();
+  let launches: Schedule[] = [];
+  const profiles = new Map<string, { kind: string; command: string; args: string[]; env: Record<string, string> }>();
+
+  const make = (): ScheduleStore =>
+    new ScheduleStore({
+      file: join(home.dir(), 'schedules.json'),
+      now: () => now,
+      launch: (s) => {
+        launches.push(s);
+        return { sessionId: `session-${launches.length}` };
+      },
+      busy: () => false,
+      fingerprint: (id) => {
+        const p = profiles.get(id);
+        return p ? launcherFingerprint(p) : null;
+      },
+    });
+  const input = { name: 'Nightly', prompt: 'Run the checks.', profileId: 'mine', when: { kind: 'interval', minutes: 60 } };
+  const reset = (): void => {
+    now = new Date(2026, 10, 17, 10, 0).getTime();
+    launches = [];
+    profiles.clear();
+    profiles.set('mine', { kind: 'claude', command: 'claude', args: [], env: {} });
+  };
+
+  it('runs while the launcher is the one it was saved with', () => {
+    reset();
+    const store = make();
+    const s = store.create(input);
+    expect(s.launcher).toMatch(/^[0-9a-f]{64}$/);
+    expect(store.runNow(s.id)!.outcome).toBe('started');
+  });
+
+  it('refuses to run, timetable or by hand, once the launcher runs something else', () => {
+    reset();
+    const store = make();
+    const s = store.create(input);
+    profiles.set('mine', { kind: 'claude', command: 'C:\other\tool.exe', args: [], env: {} });
+    const run = store.runNow(s.id)!;
+    expect(run.outcome).toBe('failed');
+    expect(run.detail).toMatch(/launcher was changed/);
+    now += 61 * MIN;
+    store.tick();
+    expect(store.list()[0]!.runs[0]!.outcome).toBe('failed');
+    expect(launches).toHaveLength(0);
+  });
+
+  it('notices changed arguments and environment too, but not the order of the variables', () => {
+    reset();
+    profiles.set('mine', { kind: 'claude', command: 'claude', args: [], env: { A: '1', B: '2' } });
+    const store = make();
+    const s = store.create(input);
+    profiles.set('mine', { kind: 'claude', command: 'claude', args: [], env: { B: '2', A: '1' } });
+    expect(store.runNow(s.id)!.outcome).toBe('started');
+    profiles.set('mine', { kind: 'claude', command: 'claude', args: ['--dangerously-skip-permissions'], env: { A: '1', B: '2' } });
+    expect(store.runNow(s.id)!.outcome).toBe('failed');
+  });
+
+  it('is tied to the launcher as it is now when saved again from its dialog, not when switched on or off', () => {
+    reset();
+    const store = make();
+    const s = store.create(input);
+    profiles.set('mine', { kind: 'claude', command: 'claude', args: ['--verbose'], env: {} });
+    store.update(s.id, { enabled: false });
+    store.update(s.id, { enabled: true });
+    expect(store.runNow(s.id)!.outcome).toBe('failed');
+    store.update(s.id, { ...input });
+    expect(store.runNow(s.id)!.outcome).toBe('started');
+  });
+
+  it('ties a schedule saved before this check to its launcher as it is at load', () => {
+    reset();
+    const s = make().create(input);
+    const file = join(home.dir(), 'schedules.json');
+    const raw = JSON.parse(readFileSync(file, 'utf8'));
+    delete raw.schedules[0].launcher;
+    writeFileSync(file, JSON.stringify(raw));
+    profiles.set('mine', { kind: 'claude', command: 'claude', args: ['--verbose'], env: {} });
+    const store = make();
+    expect(store.list()[0]!.launcher).toBe(launcherFingerprint(profiles.get('mine')!));
+    expect(store.runNow(s.id)!.outcome).toBe('started');
   });
 });

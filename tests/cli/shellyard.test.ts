@@ -61,9 +61,48 @@ describe('shellyard cli', () => {
 
     it('is false when a different ShellYard server answers on the recorded port', async () => {
       const s = await start();
-      const stale = { ...readServerState()!, startedAt: 12345 };
+      // Another server: it cannot prove it holds the recorded token.
+      const stale = { ...readServerState()!, token: 'f'.repeat(64) };
       expect(await isServerAlive(stale)).toBe(false);
       expect(s.port).toBe(stale.port);
+    });
+
+    it('does not take the old start-time answer for a state file a newer server wrote', async () => {
+      const real = await start();
+      const state = readServerState()!;
+      expect(state.pageHost).toBeDefined();
+      await real.stop();
+      running.length = 0;
+      const impostor = createServer((_req, res) => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, app: 'shellyard', startedAt: state.startedAt })));
+      await new Promise<void>((r) => impostor.listen(state.port, '127.0.0.1', r));
+      try {
+        expect(await isServerAlive(state)).toBe(false);
+      } finally {
+        await new Promise((r) => impostor.close(r));
+      }
+    });
+
+    it('is false for an impostor that repeats the start time, and it is never sent the token', async () => {
+      const real = await start();
+      const state = readServerState()!;
+      await real.stop();
+      running.length = 0;
+      writeServerState(state);
+      const seen: string[] = [];
+      const impostor = createServer((req, res) => {
+        seen.push(String(req.headers['x-shellyard-token'] ?? ''));
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, app: 'shellyard', startedAt: state.startedAt, proof: '0'.repeat(64) }));
+      });
+      await new Promise<void>((r) => impostor.listen(state.port, '127.0.0.1', r));
+      try {
+        expect(await isServerAlive(state)).toBe(false);
+        const c = capture();
+        expect(await main(['status'], c.out)).toBe(1);
+        expect(seen.length).toBeGreaterThan(0);
+        expect(seen.every((t) => t === '')).toBe(true);
+      } finally {
+        await new Promise((r) => impostor.close(r));
+      }
     });
 
     it('is true for a real server', async () => {
@@ -132,7 +171,7 @@ describe('shellyard cli', () => {
       const s = await start();
       const c = capture();
       expect(await main(['start', '--no-open'], c.out)).toBe(0);
-      expect(c.lines.join('\n')).toContain(`http://127.0.0.1:${s.port}`);
+      expect(c.lines.join('\n')).toContain(`http://${s.pageHost}:${s.port}`);
       const help = capture();
       await main(['--help'], help.out);
       expect(help.lines.join('\n')).toMatch(/shellyard start/);
@@ -142,7 +181,7 @@ describe('shellyard cli', () => {
       const s = await start();
       const c = capture();
       expect(await main(['--no-open'], c.out)).toBe(0);
-      expect(c.lines.join('\n')).toContain(`http://127.0.0.1:${s.port}`);
+      expect(c.lines.join('\n')).toContain(`http://${s.pageHost}:${s.port}`);
       expect(readServerState()!.pid).toBe(process.pid);
     });
   });
@@ -154,7 +193,7 @@ describe('shellyard cli', () => {
     async function olderServer(): Promise<{ port: number; close: () => Promise<void> }> {
       const startedAt = 4242;
       const other = createServer((req, res) => {
-        if (req.url === '/api/health') return void res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, app: 'shellyard', startedAt }));
+        if (req.url?.startsWith('/api/health')) return void res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, app: 'shellyard', startedAt }));
         if (req.url === '/api/shutdown') {
           res.writeHead(204).end();
           return void setTimeout(() => other.close(), 20);
@@ -217,6 +256,25 @@ describe('shellyard cli', () => {
       // In the fragment, the token is never sent to any server, not even ours.
       expect(html).not.toContain('?token=');
       if (process.platform !== 'win32') expect(statSync(file).mode & 0o777).toBe(0o600);
+    });
+
+    it('sends the browser to the page host of this start', () => {
+      const pageHost = `${'9'.repeat(32)}.localhost`;
+      const html = readFileSync(writeLauncherPage({ pid: 1, port: 7717, pageHost, token: 'tok123', hookToken: 'h', startedAt: 1 }), 'utf8');
+      expect(html).toContain(`http://${pageHost}:7717/#token=tok123`);
+      expect(html).not.toContain('127.0.0.1');
+    });
+
+    it('opens the browser on a new host name at every start', async () => {
+      const first = await start();
+      const a = readServerState()!.pageHost;
+      await first.stop();
+      running.length = 0;
+      await start();
+      const b = readServerState()!.pageHost;
+      expect(a).toMatch(/^[0-9a-f]{32}\.localhost$/);
+      expect(b).toMatch(/^[0-9a-f]{32}\.localhost$/);
+      expect(b).not.toBe(a);
     });
   });
 

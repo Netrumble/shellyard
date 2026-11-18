@@ -129,6 +129,29 @@ describe.skipIf(process.platform !== 'win32')('a .cmd shim on Windows, through a
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('passes characters cmd.exe acts on as plain text, through the script as well', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'shellyard-meta-'));
+    try {
+      const shim = join(dir, 'echoargs.cmd');
+      writeFileSync(shim, '@echo off\r\necho ARGS:%*\r\n');
+      const s = new PtySession(realPtyFactory, toLaunch(shim, ['a&echo INJECTED', '%USERNAME%', 'x|y', '(z)'], 'win32'), {
+        cwd: dir,
+        env: process.env as Record<string, string>,
+        cols: 200,
+        rows: 24,
+      });
+      let out = '';
+      s.onOutput((d) => (out += d));
+      let exited = false;
+      s.onExit(() => (exited = true));
+      await waitUntil(() => exited, 10000);
+      expect(out).toContain('ARGS:"a&echo INJECTED" %USERNAME% x|y (z)');
+      expect(out).not.toMatch(/^INJECTED/m);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('PtySession with a real pty', () => {

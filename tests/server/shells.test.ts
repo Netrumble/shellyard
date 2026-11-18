@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { detectProfiles, parseWslList, resolveExecutable, toLaunch } from '../../src/server/shells.js';
+import { detectProfiles, parseWslList, quoteForCmd, resolveExecutable, systemProgram, toLaunch } from '../../src/server/shells.js';
 
 let dir = '';
 beforeEach(() => {
@@ -66,29 +66,68 @@ describe('resolveExecutable', () => {
 });
 
 describe('toLaunch', () => {
-  it('wraps a .cmd shim through cmd.exe on Windows, as one quoted command line', () => {
-    expect(toLaunch('C:\\x\\claude.cmd', ['--v'], 'win32')).toEqual({
-      file: 'cmd.exe',
+  const env = { SystemRoot: 'C:\\Windows' };
+  const cmd = 'C:\\Windows\\System32\\cmd.exe';
+  it('wraps a .cmd shim through cmd.exe, started by full path, as one quoted command line', () => {
+    expect(toLaunch('C:\\x\\claude.cmd', ['--v'], 'win32', env)).toEqual({
+      file: cmd,
       args: '/d /s /c ""C:\\x\\claude.cmd" --v"',
     });
   });
   it('quotes a shim path and arguments that contain spaces', () => {
-    expect(toLaunch('C:\\Program Files\\nodejs\\claude.cmd', ['--settings', 'C:\\Users\\John Smith\\s.json', '--model', 'opus'], 'win32')).toEqual({
-      file: 'cmd.exe',
-      args: '/d /s /c ""C:\\Program Files\\nodejs\\claude.cmd" --settings "C:\\Users\\John Smith\\s.json" --model opus"',
+    expect(toLaunch('C:\\Program Files\\nodejs\\claude.cmd', ['--settings', 'C:\\Users\\John Smith\\s.json', '--model', 'opus'], 'win32', env)).toEqual({
+      file: cmd,
+      args: '/d /s /c ""C:\\Program Files\\nodejs\\claude.cmd" --settings ^^^"C:\\Users\\John^^^ Smith\\s.json^^^" --model opus"',
     });
   });
-  it('quotes arguments holding characters cmd would act on', () => {
-    expect(toLaunch('C:\\x\\a.cmd', ['a&b', 'x|y', ''], 'win32').args).toBe('/d /s /c ""C:\\x\\a.cmd" "a&b" "x|y" """');
+  it('escapes, twice, the characters cmd would act on', () => {
+    expect(toLaunch('C:\\x\\a.cmd', ['a&b', 'x|y', ''], 'win32', env).args).toBe('/d /s /c ""C:\\x\\a.cmd" a^^^&b x^^^|y ^^^"^^^""');
   });
   it('wraps a .BAT whatever its case', () => {
-    expect(toLaunch('C:\\x\\run.BAT', [], 'win32').file).toBe('cmd.exe');
+    expect(toLaunch('C:\\x\\run.BAT', [], 'win32', env).file).toBe(cmd);
+  });
+  it('refuses a script path cmd.exe would read as something else', () => {
+    expect(() => toLaunch('C:\\x\\%PATH%.cmd', [], 'win32', env)).toThrow(/cmd\.exe/);
   });
   it('leaves an .exe alone on Windows', () => {
     expect(toLaunch('C:\\x\\pwsh.exe', ['-NoLogo'], 'win32')).toEqual({ file: 'C:\\x\\pwsh.exe', args: ['-NoLogo'] });
   });
   it('leaves everything alone on Linux', () => {
     expect(toLaunch('/usr/bin/claude', ['--v'], 'linux')).toEqual({ file: '/usr/bin/claude', args: ['--v'] });
+  });
+});
+
+describe('quoteForCmd', () => {
+  it('leaves a plain argument alone', () => {
+    expect(quoteForCmd('--model')).toBe('--model');
+  });
+  it('keeps environment variables from being expanded', () => {
+    expect(quoteForCmd('%USERPROFILE%')).toBe('^^^%USERPROFILE^^^%');
+  });
+  it('escapes an embedded quote the way the C runtime reads it', () => {
+    expect(quoteForCmd('say "hi"')).toBe('^^^"say^^^ \\^^^"hi\\^^^"^^^"');
+  });
+  it('doubles a trailing backslash, so that it does not escape the closing quote', () => {
+    expect(quoteForCmd('C:\\a b\\')).toBe('^^^"C:\\a^^^ b\\\\^^^"');
+  });
+  it('refuses a line break, which cmd.exe cannot pass on', () => {
+    expect(() => quoteForCmd('a\nb')).toThrow(/line break/);
+    expect(() => quoteForCmd('a\rb')).toThrow(/line break/);
+  });
+});
+
+describe('systemProgram', () => {
+  it('names the program in System32 under SystemRoot', () => {
+    expect(systemProgram('wsl.exe', { SystemRoot: 'D:\\Win' })).toBe('D:\\Win\\System32\\wsl.exe');
+  });
+  it('falls back to C:\\Windows', () => {
+    expect(systemProgram('taskkill.exe', {})).toBe('C:\\Windows\\System32\\taskkill.exe');
+  });
+});
+
+describe('resolveExecutable and the current folder', () => {
+  it('ignores relative PATH entries', () => {
+    expect(resolveExecutable('node', { PATH: '.' }, 'linux')).toBeNull();
   });
 });
 

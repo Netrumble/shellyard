@@ -110,16 +110,17 @@ export function Cluster(): React.JSX.Element {
         onClick={() => setView({ kind: 'usage' })}
       >
         {effects !== 'off' && <ShiftLights pct={five.pct} known={five.state === 'ok'} />}
+        {/* As on the usage page: weekly first, then the 5-hour limit on the yellow face. */}
         <span className="cluster-dials">
-          {effects !== 'off' && <Dial compact size={34} pct={five.pct} dead={five.state !== 'ok'} zone={zoneOf(five.pct)} label="5-hour limit" valueText={text(five)} />}
-          <span className={`cluster-reading zone-text-${five.state === 'ok' ? zoneOf(five.pct) : 'none'}`}>
-            <span className="cluster-caption">5-hour</span>
-            <span className="cluster-figure">{text(five)}</span>
-          </span>
           {effects !== 'off' && <Dial compact size={34} pct={seven.pct} dead={seven.state !== 'ok'} zone={zoneOf(seven.pct)} label="Weekly limit" valueText={text(seven)} />}
           <span className={`cluster-reading zone-text-${seven.state === 'ok' ? zoneOf(seven.pct) : 'none'}`}>
             <span className="cluster-caption">Weekly</span>
             <span className="cluster-figure">{text(seven)}</span>
+          </span>
+          {effects !== 'off' && <Dial compact hero size={34} pct={five.pct} dead={five.state !== 'ok'} zone={zoneOf(five.pct)} label="5-hour limit" valueText={text(five)} />}
+          <span className={`cluster-reading zone-text-${five.state === 'ok' ? zoneOf(five.pct) : 'none'}`}>
+            <span className="cluster-caption">5-hour</span>
+            <span className="cluster-figure">{text(five)}</span>
           </span>
         </span>
         {five.age && <span className="cluster-age">read {five.age}</span>}

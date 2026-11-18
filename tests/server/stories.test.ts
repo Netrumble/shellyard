@@ -208,6 +208,7 @@ describe('sessions and stories', () => {
 describe('stories over http and websocket', () => {
   const home = useTempHome();
   const TOKEN = 't'.repeat(64);
+  const PAGE = 'e'.repeat(32) + '.localhost';
   let server: Server;
   let base = '';
   let port = 0;
@@ -231,8 +232,8 @@ describe('stories over http and websocket', () => {
     port = (server.address() as AddressInfo).port;
     base = `http://127.0.0.1:${port}`;
     mgr = new SessionManager({ ptyFactory: ptys.factory, now: Date.now, config: () => loadConfig().config, port, hookToken: 'h', hookScriptPath: '/h.js', statusScriptPath: '/s.js', builtins: () => [profile], stories: () => store.list() });
-    server.on('request', createRequestHandler({ manager: mgr, stories: store, usage: new UsageStore({ now: Date.now, file: join(home.dir(), 'usage.json') }), closed: new ClosedStore({ now: Date.now, file: join(home.dir(), 'closed.json') }), port, token: TOKEN, hookToken: 'h'.repeat(64), webDir: home.dir(), startedAt: 1, onShutdown: () => undefined }));
-    wsHandle = attachWebSocket(server, { manager: mgr, stories: store, port, token: TOKEN });
+    server.on('request', createRequestHandler({ manager: mgr, stories: store, usage: new UsageStore({ now: Date.now, file: join(home.dir(), 'usage.json') }), closed: new ClosedStore({ now: Date.now, file: join(home.dir(), 'closed.json') }), port, pageHost: PAGE, token: TOKEN, hookToken: 'h'.repeat(64), webDir: home.dir(), onShutdown: () => undefined }));
+    wsHandle = attachWebSocket(server, { manager: mgr, stories: store, port, pageHost: PAGE, token: TOKEN });
   });
 
   afterEach(async () => {
@@ -305,7 +306,7 @@ describe('stories over http and websocket', () => {
 
   it('pushes the story list to clients on connect and on every change', async () => {
     await call('POST', '/api/stories', { name: 'A' });
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, ['shellyard', `shellyard-token.${TOKEN}`], { headers: { origin: base } });
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, ['shellyard', `shellyard-token.${TOKEN}`], { headers: { host: `${PAGE}:${port}`, origin: `http://${PAGE}:${port}` } });
     sockets.push(ws);
     const messages: ServerMessage[] = [];
     ws.on('message', (d) => messages.push(JSON.parse(String(d))));

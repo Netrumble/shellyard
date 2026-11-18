@@ -37,7 +37,7 @@ describe('startServer', () => {
     expect(state!.hookToken).not.toBe(state!.token);
     const res = await fetch(`http://127.0.0.1:${port}/api/health`);
     const pkgVersion = (JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string }).version;
-    expect(await res.json()).toEqual({ ok: true, app: 'shellyard', startedAt: state!.startedAt, version: pkgVersion });
+    expect(await res.json()).toEqual({ ok: true, app: 'shellyard', version: pkgVersion });
 
     await s.stop();
     running.length = 0;
