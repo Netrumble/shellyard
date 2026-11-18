@@ -6,6 +6,10 @@
   "bin": {
     "ttc": "dist/cli/ttc.js"
   },
+  "exports": {
+    "./launcher": "./dist/cli/ttc.js",
+    "./package.json": "./package.json"
+  },
   "files": [
     "dist",
     "LICENSE",

@@ -126,12 +126,17 @@ function tailLog(lines: number): string {
   }
 }
 
-function spawnDetachedServer(port: number): void {
+/**
+ * Starts the server as a background process. `node` is the program that runs it: this very
+ * process by default, but the desktop app passes the real Node, because inside Electron
+ * process.execPath is the app itself and the server hands that path to Claude Code's hooks.
+ */
+function spawnDetachedServer(port: number, node: string = process.execPath): void {
   const built = join(here, '..', 'server', 'index.js');
   // Running from source (development) goes through tsx; the published package is plain JS.
   const args = existsSync(built) ? [built] : ['--import', 'tsx', join(here, '..', 'server', 'index.ts')];
   const log = openSync(logPath(), 'a');
-  const child = spawn(process.execPath, [...args, '--port', String(port)], {
+  const child = spawn(node, [...args, '--port', String(port)], {
     detached: true,
     stdio: ['ignore', log, log],
     windowsHide: true,
@@ -139,22 +144,35 @@ function spawnDetachedServer(port: number): void {
   child.unref();
 }
 
-async function start(port: number, openBrowser: boolean, out: Out): Promise<number> {
+export type EnsureResult = { ok: true; state: ServerState } | { ok: false; error: string };
+
+/**
+ * Returns the running server, starting one in the background first if there is none.
+ * Used by `ttc start` and by the desktop app, which passes the Node program to run it with.
+ */
+export async function ensureServer(options: { port?: number; node?: string } = {}): Promise<EnsureResult> {
   let state = await liveState();
   if (!state) {
     clearServerState();
-    spawnDetachedServer(port);
+    spawnDetachedServer(options.port ?? DEFAULT_PORT, options.node);
     const deadline = Date.now() + START_TIMEOUT_MS;
     while (!state && Date.now() < deadline) {
       await sleep(150);
       state = await liveState();
     }
-    if (!state) {
-      out('TTC did not start. Last lines of the log:');
-      out(tailLog(15) || `(no log at ${logPath()})`);
-      return 1;
-    }
+    if (!state) return { ok: false, error: `TTC did not start. Last lines of the log:
+${tailLog(15) || `(no log at ${logPath()})`}` };
   }
+  return { ok: true, state };
+}
+
+async function start(port: number, openBrowser: boolean, out: Out): Promise<number> {
+  const started = await ensureServer({ port });
+  if (!started.ok) {
+    out(started.error);
+    return 1;
+  }
+  const state = started.state;
   const base = `http://127.0.0.1:${state.port}`;
   out(`TTC running at ${base}`);
   if (openBrowser) await openBrowserOn(state, out);

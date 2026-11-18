@@ -1,0 +1,127 @@
+// The desktop app: a window on the TTC server. The server itself is the one `ttc` starts, a
+// background process that outlives the window, so closing the app never stops a session.
+import { app, BrowserWindow, dialog, Menu, nativeImage, Notification, shell, Tray } from 'electron';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { ensureServer, writeLauncherPage } from 'talentia-terminal-control/launcher';
+import { findNode } from './find-node.js';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const icon = nativeImage.createFromPath(join(here, 'icon.png'));
+let win = null;
+let tray = null;
+let serverState = null;
+/** True once the user asked to quit: until then closing the window only hides it. */
+let quitting = false;
+let toldAboutTray = false;
+
+function showWindow() {
+  if (!win) return void openWindow();
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+/** The icon in the notification area: the app keeps running there, and so do its notifications. */
+function createTray() {
+  if (tray) return;
+  tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon.resize({ width: 16, height: 16 }));
+  tray.setToolTip('TTC');
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: 'Show TTC', click: showWindow },
+      { label: 'Open in the browser', click: () => serverState && void shell.openPath(writeLauncherPage(serverState)) },
+      { type: 'separator' },
+      { label: 'Quit (sessions keep running)', click: () => app.quit() },
+    ]),
+  );
+  tray.on('click', showWindow);
+}
+
+function portFromArgs(argv) {
+  const i = argv.indexOf('--port');
+  const n = i >= 0 ? Number(argv[i + 1]) : NaN;
+  return Number.isInteger(n) && n > 0 && n < 65536 ? n : undefined;
+}
+
+async function openWindow() {
+  const node = findNode();
+  if (!node) {
+    dialog.showErrorBox('TTC', 'Node.js was not found on PATH. TTC runs its server on Node 22 or later: install it, then start the app again.');
+    app.quit();
+    return;
+  }
+  const started = await ensureServer({ port: portFromArgs(process.argv), node });
+  if (!started.ok) {
+    dialog.showErrorBox('TTC did not start', started.error);
+    app.quit();
+    return;
+  }
+  serverState = started.state;
+  const origin = `http://127.0.0.1:${started.state.port}`;
+
+  win = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    title: 'TTC',
+    icon: icon.isEmpty() ? undefined : icon,
+    autoHideMenuBar: true,
+    backgroundColor: '#181b21',
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+
+  // Links leave the app for the browser; the window itself stays on the server.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//.test(url)) void shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  win.webContents.on('will-navigate', (e, url) => {
+    if (new URL(url).origin === origin) return;
+    e.preventDefault();
+    if (/^https?:\/\//.test(url)) void shell.openExternal(url);
+  });
+  // Closing hides the window: the page stays loaded, so a session that needs you still
+  // raises a notification. Quitting is in the tray menu.
+  win.on('close', (e) => {
+    if (quitting) return;
+    e.preventDefault();
+    win.hide();
+    if (!toldAboutTray && Notification.isSupported()) {
+      toldAboutTray = true;
+      new Notification({ title: 'TTC is still running', body: 'It stays in the notification area and tells you when a session needs you. Quit it from there.', icon }).show();
+    }
+  });
+  win.on('closed', () => {
+    win = null;
+  });
+  createTray();
+
+  // The token travels in the fragment, as with the browser: no server sees it in a request line.
+  await win.loadURL(`${origin}/#token=${started.state.token}`);
+}
+
+// One window is enough: a second start brings the first one forward.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', showWindow);
+  app.on('before-quit', () => {
+    quitting = true;
+  });
+  // Windows shows notifications only for an app with an id.
+  app.setAppUserModelId('com.talentia.ttc');
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      { role: 'editMenu' },
+      { label: 'View', submenu: [{ role: 'reload' }, { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }] },
+      { role: 'windowMenu' },
+    ]),
+  );
+  app.whenReady().then(openWindow, (e) => {
+    dialog.showErrorBox('TTC', String(e?.message ?? e));
+    app.quit();
+  });
+  app.on('activate', showWindow);
+  // The window is only hidden on close; the app ends from the tray menu.
+  app.on('window-all-closed', () => {});
+}
