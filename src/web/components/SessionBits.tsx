@@ -72,7 +72,17 @@ export function StoryFilter({ value, onChange }: { value: string | null | undefi
 }
 
 /** Rename, recolour and close: the same three actions wherever a session is shown. */
-export function SessionActions({ session }: { session: SessionInfo }): React.JSX.Element {
+/** The mark of VS Code, drawn plainly in the colour of the text around it. */
+function CodeIcon(): React.JSX.Element {
+  return (
+    <svg className="code-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+      <path d="M17 2.5 21.5 4.6v14.8L17 21.5 7.2 12.6l-3.6 2.8-1.6-.9v-5l1.6-.9 3.6 2.8L17 2.5Zm0 5.4-5.3 4.1 5.3 4.1V7.9Z" fill="currentColor" fillRule="evenodd" />
+    </svg>
+  );
+}
+
+/** `onMinimize`, where given, adds a "_" before the close button that leaves the terminal for the board. */
+export function SessionActions({ session, onMinimize }: { session: SessionInfo; onMinimize?: () => void }): React.JSX.Element {
   const report = (e: unknown): void => window.alert((e as Error).message);
   const rename = (): void => {
     const name = window.prompt('Session name', session.name);
@@ -85,6 +95,17 @@ export function SessionActions({ session }: { session: SessionInfo }): React.JSX
   };
   return (
     <span className="actions">
+      {!session.error && (
+        <button
+          type="button"
+          className="icon"
+          title={`Open VS Code in ${session.cwd}`}
+          aria-label={`Open VS Code in the folder of ${session.name}`}
+          onClick={() => api.openEditor(session.id).catch(report)}
+        >
+          <CodeIcon />
+        </button>
+      )}
       <button type="button" className="icon" title="Rename" aria-label={`Rename ${session.name}`} onClick={rename}>
         ✎
       </button>
@@ -96,6 +117,11 @@ export function SessionActions({ session }: { session: SessionInfo }): React.JSX
           onChange={(e) => api.updateSession(session.id, { color: e.target.value }).catch(report)}
         />
       </label>
+      {onMinimize && (
+        <button type="button" className="icon" title="Back to the board" aria-label={`Leave ${session.name} and go back to the board`} onClick={onMinimize}>
+          _
+        </button>
+      )}
       <button type="button" className="icon" title="Close" aria-label={`Close ${session.name}`} onClick={close}>
         ✕
       </button>

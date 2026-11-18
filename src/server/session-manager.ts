@@ -121,7 +121,7 @@ export class SessionManager {
     if (profileId) {
       profile = this.profiles().find((p) => p.id === profileId);
       // A resumed session may name its command itself (when it is brought back after a restart).
-      if (!profile && !(req.resume !== undefined && req.command)) problem ??= `Profile not found: ${profileId}`;
+      if (!profile && !(req.resume !== undefined && req.command)) problem ??= `Launcher not found: ${profileId}`;
     }
 
     const kind: SessionKind = req.resume !== undefined ? 'claude' : (req.kind ?? profile?.kind ?? 'shell');

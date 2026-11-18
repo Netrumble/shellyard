@@ -105,7 +105,7 @@ export function NewSessionDialog({ onClose, initialStoryId }: { onClose: () => v
         <h2>New session</h2>
 
         <label>
-          <span>Profile</span>
+          <span>Launcher</span>
           <select value={profileId} onChange={(e) => setProfileId(e.target.value)} autoFocus>
             {meta.profiles.map((p) => (
               <option key={p.id} value={p.id}>
@@ -160,7 +160,7 @@ export function NewSessionDialog({ onClose, initialStoryId }: { onClose: () => v
           <label>
             <span>Model</span>
             <select value={modelChoice} onChange={(e) => setModelChoice(e.target.value)}>
-              <option value={DEFAULT_MODEL}>{profile?.model ? `Profile default (${profile.model})` : 'Default'}</option>
+              <option value={DEFAULT_MODEL}>{profile?.model ? `Launcher default (${profile.model})` : 'Default'}</option>
               {meta.models.map((m) => (
                 <option key={m} value={m}>
                   {m}
@@ -191,7 +191,7 @@ export function NewSessionDialog({ onClose, initialStoryId }: { onClose: () => v
 
         <label className="check">
           <input type="checkbox" checked={saveAsProfile} onChange={(e) => setSaveAsProfile(e.target.checked)} />
-          <span>Save as a profile</span>
+          <span>Save as a launcher</span>
         </label>
 
         {error && (

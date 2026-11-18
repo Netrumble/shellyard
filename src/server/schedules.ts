@@ -96,7 +96,7 @@ function toFields(input: Record<string, unknown>, base: Fields | null, now: numb
   if (!prompt) throw new ScheduleError('Write the prompt Claude Code is given.');
   if (prompt.length > MAX_PROMPT) throw new ScheduleError(`The prompt is too long (${MAX_PROMPT} characters at most).`);
   const profileId = text('profileId', '');
-  if (!profileId || profileId.length > 200) throw new ScheduleError('Choose the Claude Code profile the session starts from.');
+  if (!profileId || profileId.length > 200) throw new ScheduleError('Choose the Claude Code launcher the session starts from.');
   const cwd = text('cwd', '');
   if (cwd.length > 1024) throw new ScheduleError('The folder path is too long.');
 

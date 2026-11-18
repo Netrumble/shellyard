@@ -131,9 +131,9 @@ describe('schedules over http, websocket and a restart', () => {
   it('records a run that cannot start, and leaves no dead session behind', async () => {
     const s = await start();
     const notClaude = (await call(s, 'POST', '/api/schedules', input({ profileId: 'test-shell' }))).json as Schedule;
-    expect((await call(s, 'POST', `/api/schedules/${notClaude.id}/run`)).json).toMatchObject({ outcome: 'failed', detail: 'The profile "Test shell" does not start Claude Code.' });
+    expect((await call(s, 'POST', `/api/schedules/${notClaude.id}/run`)).json).toMatchObject({ outcome: 'failed', detail: 'The launcher "Test shell" does not start Claude Code.' });
     const gone = (await call(s, 'POST', '/api/schedules', input({ profileId: 'no-such-profile' }))).json as Schedule;
-    expect((await call(s, 'POST', `/api/schedules/${gone.id}/run`)).json).toMatchObject({ outcome: 'failed', detail: 'The profile of this schedule no longer exists.' });
+    expect((await call(s, 'POST', `/api/schedules/${gone.id}/run`)).json).toMatchObject({ outcome: 'failed', detail: 'The launcher of this schedule no longer exists.' });
     const badFolder = (await call(s, 'POST', '/api/schedules', input({ cwd: join(home.dir(), 'missing') }))).json as Schedule;
     const failed = (await call(s, 'POST', `/api/schedules/${badFolder.id}/run`)).json;
     expect(failed.outcome).toBe('failed');

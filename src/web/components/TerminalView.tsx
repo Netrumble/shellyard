@@ -16,7 +16,14 @@ function cssVar(name: string, fallback: string): string {
 /**
  * The real terminal of one session. It attaches on mount (and again after a reconnect),
  * receives the restored screen followed by live output, and sends back keystrokes and its
- * size. A session must be mounted in only one place at a time: a terminal has one size.
+ * size. A session must be mounted in only one place at a time within a page.
+ *
+ * A session has one size, and the program in it draws for that size. The same session can be
+ * on screen in two pages (two tabs, two windows) whose terminals would fit different sizes.
+ * So one page decides and the others follow: a page claims the size when it is the one being
+ * used (it is shown, its terminal is focused, its own layout changes), and a page that sees
+ * the session take another size sets its terminal to that size instead of its own fit. A
+ * terminal drawn at another size than the program believes shows its text out of place.
  */
 export function TerminalView(props: {
   sessionId: string;
@@ -26,6 +33,8 @@ export function TerminalView(props: {
   background?: TerminalBackground | null;
   /** The font and text size; null or absent is the default. */
   font?: TerminalFont | null;
+  /** The size the session has on the server, which another page may have set. */
+  size?: { cols: number; rows: number };
 }): React.JSX.Element {
   const { sessionId, autoFocus } = props;
   const host = useRef<HTMLDivElement>(null);
@@ -42,6 +51,10 @@ export function TerminalView(props: {
   fontRef.current = font;
   /** Applies the current font to the terminal that is open, and fits it again. */
   const applyFont = useRef<() => void>(() => undefined);
+  const sizeRef = useRef(props.size);
+  sizeRef.current = props.size;
+  /** Sets the terminal to the session's size when another page has changed it. */
+  const followSize = useRef<() => void>(() => undefined);
 
   // A stored image is fetched once and drawn behind the terminal, under its veil.
   useEffect(() => {
@@ -65,6 +78,10 @@ export function TerminalView(props: {
   useEffect(() => {
     applyFont.current();
   }, [font?.family, font?.size]);
+
+  useEffect(() => {
+    followSize.current();
+  }, [props.size?.cols, props.size?.rows]);
 
   useEffect(() => {
     const el = host.current;
@@ -117,13 +134,55 @@ export function TerminalView(props: {
       }
     };
 
-    const attach = (): void => {
+    // The size this page last asked for, until the server's answer has come back.
+    let asked: { cols: number; rows: number; at: number } | null = null;
+    const ASKED_MS = 1500;
+    // Whether this page is the one deciding the size. It stops being so when it takes a size
+    // another page set, and then its own layout changing is no reason to take the size back:
+    // drawing a terminal at a size that does not fit here can itself move the layout.
+    let deciding = false;
+    /** Makes the session the size that fits here. */
+    const claim = (): void => {
+      deciding = true;
       safeFit();
+      const known = sizeRef.current;
+      if (known && known.cols === term.cols && known.rows === term.rows) return;
+      asked = { cols: term.cols, rows: term.rows, at: Date.now() };
+      socket.send({ t: 'resize', id: sessionId, cols: term.cols, rows: term.rows });
+    };
+    /** Takes the size the session has, when it is not the one this page asked for. */
+    const follow = (): void => {
+      const known = sizeRef.current;
+      if (!known || known.cols < 2 || known.rows < 2) return;
+      if (asked && asked.cols === known.cols && asked.rows === known.rows) asked = null;
+      // An answer still on its way must not be undone by an older size arriving first.
+      if (asked && Date.now() - asked.at < ASKED_MS) return;
+      asked = null;
+      if (known.cols === term.cols && known.rows === term.rows) return;
+      deciding = false;
+      term.resize(known.cols, known.rows);
+    };
+    followSize.current = follow;
+
+    const attach = (): void => {
+      // A page nobody is looking at does not get to decide the size: it attaches as it is
+      // and takes the size the session has.
+      if (document.visibilityState === 'hidden') {
+        socket.send({ t: 'attach', id: sessionId, cols: 0, rows: 0 });
+        return;
+      }
+      deciding = true;
+      safeFit();
+      asked = { cols: term.cols, rows: term.rows, at: Date.now() };
       socket.send({ t: 'attach', id: sessionId, cols: term.cols, rows: term.rows });
     };
 
     const unsubscribe = socket.subscribe(sessionId, (m) => {
-      if (m.t === 'snapshot') term.reset();
+      if (m.t === 'snapshot') {
+        term.reset();
+        // The snapshot was taken at the session's size; it is drawn at that size.
+        follow();
+      }
       term.write(m.data);
     });
     const offState = socket.onState((s) => {
@@ -148,16 +207,7 @@ export function TerminalView(props: {
     });
 
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let lastCols = term.cols;
-    let lastRows = term.rows;
-    const refit = (): void => {
-      safeFit();
-      if (term.cols !== lastCols || term.rows !== lastRows) {
-        lastCols = term.cols;
-        lastRows = term.rows;
-        socket.send({ t: 'resize', id: sessionId, cols: term.cols, rows: term.rows });
-      }
-    };
+    const refit = claim;
     // Another font or size changes how many columns and rows fit: the session is told.
     applyFont.current = () => {
       const next = terminalFont(fontRef.current);
@@ -168,11 +218,21 @@ export function TerminalView(props: {
     };
     const observer = new ResizeObserver(() => {
       clearTimeout(timer);
-      timer = setTimeout(refit, RESIZE_DEBOUNCE_MS);
+      timer = setTimeout(() => {
+        if (deciding) refit();
+      }, RESIZE_DEBOUNCE_MS);
     });
     observer.observe(el);
 
-    const onFocusIn = (): void => onFocusChange.current?.(true);
+    const onFocusIn = (): void => {
+      // The terminal being typed in is the one whose size counts.
+      claim();
+      onFocusChange.current?.(true);
+    };
+    const onVisible = (): void => {
+      if (document.visibilityState === 'visible') claim();
+    };
+    document.addEventListener('visibilitychange', onVisible);
     const onFocusOut = (): void => onFocusChange.current?.(false);
     el.addEventListener('focusin', onFocusIn);
     el.addEventListener('focusout', onFocusOut);
@@ -181,6 +241,8 @@ export function TerminalView(props: {
     return () => {
       clearTimeout(timer);
       observer.disconnect();
+      document.removeEventListener('visibilitychange', onVisible);
+      followSize.current = () => undefined;
       el.removeEventListener('focusin', onFocusIn);
       el.removeEventListener('focusout', onFocusOut);
       input.dispose();

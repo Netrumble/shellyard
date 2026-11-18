@@ -7,6 +7,7 @@ import { newToken } from './auth.js';
 import { ActivityMeter } from './activity.js';
 import { ClosedStore } from './closed.js';
 import { clearServerState, dataDir, loadConfig, readServerState, writeServerState } from './config.js';
+import { openInEditor } from './editor.js';
 import { createRequestHandler } from './http.js';
 import { realPtyFactory, type PtyFactory } from './pty-session.js';
 import { claudeProjectsDir, findConversation } from './conversations.js';
@@ -41,6 +42,8 @@ export interface StartOptions {
   port?: number;
   ptyFactory?: PtyFactory;
   quiet?: boolean;
+  /** Stands in for starting VS Code, in tests. */
+  openEditor?: typeof openInEditor;
 }
 
 function listen(server: Server, port: number): Promise<void> {
@@ -116,8 +119,8 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   });
   const launchSchedule = (schedule: Schedule): LaunchResult => {
     const profile = manager.profiles().find((p) => p.id === schedule.profileId);
-    if (!profile) return { error: 'The profile of this schedule no longer exists.' };
-    if (profile.kind !== 'claude') return { error: `The profile "${profile.name}" does not start Claude Code.` };
+    if (!profile) return { error: 'The launcher of this schedule no longer exists.' };
+    if (profile.kind !== 'claude') return { error: `The launcher "${profile.name}" does not start Claude Code.` };
     const storyId = schedule.storyId !== null && stories.list().some((s) => s.id === schedule.storyId) ? schedule.storyId : null;
     const session = manager.create({
       profileId: profile.id,
@@ -245,6 +248,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
       usage,
       closed,
       schedules,
+      openEditor: opts.openEditor ?? openInEditor,
       onClaudeStatus: (id) => delivery.ready(id),
       onPromptSubmitted: (id) => delivery.submitted(id),
       port,

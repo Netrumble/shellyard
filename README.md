@@ -45,8 +45,8 @@ running when you close the browser tab. Open the page again with `ttc`.
   Click into a card and type your answer there. Sessions blocked on a permission or a question
   come first; sessions that finished their turn follow, with a "Mark as seen" button.
 - **Terminals** — every session side by side, or one maximised.
-- **Sidebar** — all sessions with their status, grouped by area, and your profiles: click one
-  to start it.
+- **Sidebar** — all sessions with their status, grouped by area, and your launchers: click one
+  to start a session from it.
 
 ### Areas
 
@@ -97,7 +97,7 @@ A schedule gives a prompt to a new Claude Code session at set times, as if you h
   at least, counted from the last run), once at a date and time, or a cron expression of five
   fields (minute, hour, day of month, month, weekday). Times are the local time of the computer
   TTC runs on;
-- the Claude Code profile, optionally a model, an area and a folder;
+- the Claude Code launcher, optionally a model, an area and a folder;
 - how the session asks before acting: as Claude Code is set up, or one of its modes (ask before
   every action, edit files without asking, auto, plan only). The modes that never ask are not
   offered: nobody may be at the screen.
@@ -122,38 +122,55 @@ Things to know:
 
 ### Folders
 
-Wherever a folder is asked for (a new story, a new session, a profile), you can type the path
+Wherever a folder is asked for (a new story, a new session, a launcher), you can type the path
 or press **Browse** to walk through the folders of the machine and pick one.
 
-Each profile has a start folder: the folder its sessions open in. The pencil beside a profile in
-the sidebar opens its settings, where you set the start folder and the terminal background. A
-built-in profile can be put back to its default there, and a profile of your own can be deleted. When a session starts, the folder is the one
+Each launcher has a start folder: the folder its sessions open in. The pencil beside a launcher in
+the sidebar opens its settings, where you set its name, the start folder and the terminal background. A
+built-in launcher can be put back to its default there, and a launcher of your own can be deleted. When a session starts, the folder is the one
 chosen in the new-session dialog if any, else the story's folder if the session is in a story
-that has one, else the profile's start folder, else your home folder.
+that has one, else the launcher's start folder, else your home folder.
 
 ### WSL
 
-On Windows, each WSL distribution installed on the machine is offered as a profile of its own
+On Windows, each WSL distribution installed on the machine is offered as a launcher of its own
 ("WSL: Ubuntu"), found by asking `wsl.exe`; a distribution added later shows up within a minute.
 Its sessions are a Linux shell in that distribution. They start in the session's folder like any
 other, which Linux shows under `/mnt/c/...`; type `cd` to go to your Linux home. Docker's own
 distributions are not listed.
 
 Claude Code started by hand inside a WSL shell runs, but TTC does not see its status: the
-status lights, the attention panel and schedules work with the Claude Code profile, which runs
+status lights, the attention panel and schedules work with the Claude Code launcher, which runs
 on Windows.
+
+### The same session in two tabs
+
+A session has one size, and the program in it draws for that size. If the same session is on
+screen in two tabs or windows, the one you are using decides the size (it is the one shown, or
+the one whose terminal you click), and the other draws the terminal at that size too, even
+where it does not fill its own tile or is cut off. Click a terminal to make its page the one
+that decides.
+
+### Open in VS Code
+
+Every session has a VS Code button, in its title bar and in its sidebar row. It opens VS Code on
+the folder the session was started in, on the computer TTC runs on. For a WSL session the folder
+is opened inside its distribution, through VS Code's WSL extension, also when it is a Windows
+folder (seen there as `/mnt/c/...`) or the Linux home. VS Code is found through its `code` command
+on the PATH. The folder is the one the session started in: where its shell has moved to since is
+not known to TTC.
 
 ### Terminal background
 
-A terminal normally follows the theme. In a profile's settings you can give its sessions another
+A terminal normally follows the theme. In a launcher's settings you can give its sessions another
 background: a colour, or an image of yours (PNG, JPEG, WebP or GIF, up to 8 MB) shown under a
 grey-black veil whose strength you set, so that text stays readable. The image is copied into
 TTC's own folder. The `◐` button in the title bar of a terminal changes the background of that
-one terminal while it is open, without touching the profile.
+one terminal while it is open, without touching the launcher.
 
 ### Terminal font and text size
 
-The same two places set the text of a terminal: a profile's settings (the pencil) for the
+The same two places set the text of a terminal: a launcher's settings (the pencil) for the
 sessions it starts from then on, and the `◐` button of an open terminal for that terminal alone,
 where the change shows at once. Choose a font from the list, or *Other…* to type the name of any
 fixed-width font installed on the computer the browser runs on; choose a size from 10 to 32
@@ -234,8 +251,8 @@ Known limits:
 - A session that is waiting but keeps printing something at least every 5 seconds (a status
   line on a timer, for example) is not caught by the "possibly waiting" rule.
 - A dialog Claude shows before the first prompt (folder trust, login) appears as "idle".
-- Of a profile, the start folder and the terminal background can be changed in the page; its
-  name, command and arguments are edited in `config.json`. A custom command takes no arguments field yet.
+- Of a launcher, the name, the start folder and the terminal background can be changed in the page; its
+  command and arguments are edited in `config.json` (under `profiles`, the name launchers keep there). A custom command takes no arguments field yet.
 - Some key combinations are taken by the browser before they reach the terminal (Ctrl+W, Ctrl+T,
   Ctrl+N). Ctrl+C copies when text is selected and interrupts otherwise; Ctrl+V pastes.
 
@@ -245,7 +262,7 @@ Everything is in `~/.talentia-terminal-control/`:
 
 | File | Content |
 |---|---|
-| `config.json` | Your profiles, your stories, the model list, `silenceMs` |
+| `config.json` | Your launchers (`profiles`), your stories, the model list, `silenceMs` |
 | `server.json` | The running server's port and access token (readable by you only) |
 | `ttc.log` | The server log |
 | `sessions.json` | The sessions open right now, to bring them back after a restart |

@@ -159,9 +159,9 @@ function ScheduleDialog({ schedule, onClose }: { schedule?: Schedule; onClose: (
         </div>
 
         <label>
-          <span>Profile</span>
+          <span>Launcher</span>
           <select value={profileId} onChange={(e) => setProfileId(e.target.value)}>
-            {!profile && <option value={profileId}>{profileId ? 'A profile that no longer exists' : 'No Claude Code profile found'}</option>}
+            {!profile && <option value={profileId}>{profileId ? 'A launcher that no longer exists' : 'No Claude Code launcher found'}</option>}
             {claudeProfiles.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
@@ -173,7 +173,7 @@ function ScheduleDialog({ schedule, onClose }: { schedule?: Schedule; onClose: (
         <label>
           <span>Model</span>
           <select value={model} onChange={(e) => setModel(e.target.value)}>
-            <option value={DEFAULT_MODEL}>{profile?.model ? `Profile default (${profile.model})` : 'Default'}</option>
+            <option value={DEFAULT_MODEL}>{profile?.model ? `Launcher default (${profile.model})` : 'Default'}</option>
             {models.map((m) => (
               <option key={m} value={m}>
                 {m}
@@ -303,7 +303,7 @@ export function SchedulesView(): React.JSX.Element {
                     <strong>{s.name}</strong>
                     <span className="schedule-when-text">{describeWhen(s.when)}</span>
                     <span className="hint">
-                      {[profile ? profile.name : 'Profile missing', s.model, area ? `in ${area.name}` : null].filter(Boolean).join(', ')}
+                      {[profile ? profile.name : 'Launcher missing', s.model, area ? `in ${area.name}` : null].filter(Boolean).join(', ')}
                     </span>
                     <span className="schedule-prompt">{s.prompt}</span>
                   </div>

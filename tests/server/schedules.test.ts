@@ -54,7 +54,7 @@ describe('ScheduleStore', () => {
     const bad: Array<[Record<string, unknown>, RegExp]> = [
       [{ name: '  ' }, /name/i],
       [{ prompt: '' }, /prompt/i],
-      [{ profileId: '' }, /profile/i],
+      [{ profileId: '' }, /launcher/i],
       [{ when: { kind: 'interval', minutes: 1 } }, /5 minutes/],
       [{ when: { kind: 'weekly', time: '25:00', days: [1] } }, /time/i],
       [{ when: { kind: 'weekly', time: '08:00', days: [] } }, /day/i],
@@ -99,10 +99,10 @@ describe('ScheduleStore', () => {
   it('records a run that could not start, and still plans the next one', () => {
     const store = fresh();
     store.create(input());
-    launchResult = () => ({ error: 'Profile not found: builtin-claude' });
+    launchResult = () => ({ error: 'Launcher not found: builtin-claude' });
     now += HOUR;
     store.tick();
-    expect(store.list()[0]!.runs[0]).toMatchObject({ outcome: 'failed', detail: 'Profile not found: builtin-claude', sessionId: null });
+    expect(store.list()[0]!.runs[0]).toMatchObject({ outcome: 'failed', detail: 'Launcher not found: builtin-claude', sessionId: null });
     expect(store.list()[0]!.nextRunAt).toBe(now + HOUR);
   });
 

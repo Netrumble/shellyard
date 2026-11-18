@@ -100,7 +100,7 @@ describe('SessionManager', () => {
     it('reports an unknown profile as an error', () => {
       const s = mgr.create({ profileId: 'missing' });
       expect(s.status).toBe('exited');
-      expect(s.error).toMatch(/profile/i);
+      expect(s.error).toMatch(/launcher/i);
     });
 
     it('names a session after its command when nothing else is given', () => {

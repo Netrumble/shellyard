@@ -2298,3 +2298,8 @@ button.day.on {
 .background-choice label span {
   white-space: nowrap;
 }
+
+.code-icon {
+  display: inline-block;
+  vertical-align: -2px;
+}

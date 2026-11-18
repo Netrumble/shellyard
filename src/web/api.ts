@@ -80,6 +80,8 @@ export const api = {
   createSession: (req: CreateSessionRequest): Promise<SessionInfo> => call('POST', '/api/sessions', req),
   updateSession: (id: string, patch: { name?: string; color?: string; background?: TerminalBackground | null; font?: TerminalFont | null }): Promise<SessionInfo> =>
     call('PATCH', `/api/sessions/${encodeURIComponent(id)}`, patch),
+  /** Opens VS Code on the session's folder, on the computer TTC runs on. */
+  openEditor: (id: string): Promise<void> => call('POST', `/api/sessions/${encodeURIComponent(id)}/editor`),
   ackSession: (id: string): Promise<SessionInfo> => call('POST', `/api/sessions/${encodeURIComponent(id)}/ack`),
   deleteSession: (id: string): Promise<void> => call('DELETE', `/api/sessions/${encodeURIComponent(id)}`),
   saveProfiles: (profiles: Profile[]): Promise<Profile[]> => call('PUT', '/api/profiles', profiles),

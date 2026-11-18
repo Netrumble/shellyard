@@ -22,6 +22,8 @@ export interface HttpDeps {
   usage: UsageStore;
   closed: ClosedStore;
   schedules?: ScheduleStore;
+  /** Opens the editor on a session's folder; returns why not, or null when it was started. */
+  openEditor?: (session: { command: string; args: string[]; cwd: string }) => string | null;
   /** A hosted Claude session reported a status line: its main screen is up. */
   onClaudeStatus?: (sessionId: string) => void;
   /** A hosted Claude session took a prompt. */
@@ -328,9 +330,18 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       throw new HttpError(405, 'Method not allowed');
     }
 
-    const sessionMatch = /^\/api\/sessions\/([^/]+)(\/ack)?$/.exec(path);
+    const sessionMatch = /^\/api\/sessions\/([^/]+)(\/ack|\/editor)?$/.exec(path);
     if (sessionMatch) {
       const id = decodeId(sessionMatch[1]!);
+      if (sessionMatch[2] === '/editor') {
+        if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
+        const s = manager.get(id);
+        if (!s) throw new HttpError(404, 'No such session');
+        // The folder is the session's own, never one the request names.
+        const problem = deps.openEditor ? deps.openEditor({ command: s.command, args: s.args, cwd: s.cwd }) : 'Opening an editor is not available here.';
+        if (problem) throw new HttpError(409, problem);
+        return send(res, 204);
+      }
       if (sessionMatch[2]) {
         if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
         const s = manager.ack(id);

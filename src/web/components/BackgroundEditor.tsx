@@ -144,7 +144,7 @@ function SessionBackgroundDialog({ session, onClose }: { session: SessionInfo; o
           <span>Text</span>
           <FontEditor value={session.font} onChange={changeFont} />
         </div>
-        <p className="hint">This changes this terminal only. A profile&apos;s own look is set with the pencil beside the profile.</p>
+        <p className="hint">This changes this terminal only. A launcher&apos;s own look is set with the pencil beside the launcher.</p>
         {error && (
           <p className="error" role="alert">
             {error}

@@ -185,8 +185,8 @@ export function Sidebar({ onNewSession }: { onNewSession: (storyId?: string) => 
         );
       })}
 
-      <h2>Profiles</h2>
-      {meta.profiles.length === 0 && <p className="hint">No profiles found.</p>}
+      <h2>Launchers</h2>
+      {meta.profiles.length === 0 && <p className="hint">No launchers found.</p>}
       <ul className="profile-list">
         {meta.profiles.map((p) => (
           <li key={p.id} className="profile-row">
@@ -197,7 +197,7 @@ export function Sidebar({ onNewSession }: { onNewSession: (storyId?: string) => 
                 ▸
               </span>
             </button>
-            <button type="button" className="icon" title="Edit this profile: start folder and terminal background" aria-label={`Edit the profile ${p.name}`} onClick={() => setProfileDialog(p.id)}>
+            <button type="button" className="icon" title="Edit this launcher: name, start folder and terminal look" aria-label={`Edit the launcher ${p.name}`} onClick={() => setProfileDialog(p.id)}>
               ✎
             </button>
           </li>

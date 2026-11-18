@@ -18,7 +18,7 @@ export function SessionBody({ session, autoFocus, onFocusChange }: { session: Se
       </div>
     );
   }
-  return <TerminalView sessionId={session.id} autoFocus={autoFocus} onFocusChange={onFocusChange} background={session.background} font={session.font} />;
+  return <TerminalView sessionId={session.id} autoFocus={autoFocus} onFocusChange={onFocusChange} background={session.background} font={session.font} size={{ cols: session.cols, rows: session.rows }} />;
 }
 
 function TileHeader({ session, children }: { session: SessionInfo; children?: React.ReactNode }): React.JSX.Element {
@@ -34,7 +34,7 @@ function TileHeader({ session, children }: { session: SessionInfo; children?: Re
       {children}
       <StorySelect session={session} />
       <BackgroundButton session={session} />
-      <SessionActions session={session} />
+      <SessionActions session={session} onMinimize={() => setView({ kind: 'board' })} />
     </header>
   );
 }

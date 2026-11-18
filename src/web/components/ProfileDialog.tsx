@@ -6,9 +6,10 @@ import { BackgroundEditor } from './BackgroundEditor.js';
 import { FolderPicker } from './FolderPicker.js';
 import { FontEditor } from './FontEditor.js';
 
-/** The settings of one profile: where its sessions start, and what their terminal looks like. */
+/** The settings of one launcher (a profile in the code and the config): where its sessions start, and what their terminal looks like. */
 export function ProfileDialog({ profile, onClose }: { profile: Profile; onClose: () => void }): React.JSX.Element {
   const { meta } = useStore();
+  const [name, setName] = useState(profile.name);
   const [cwd, setCwd] = useState(profile.cwd);
   const [background, setBackground] = useState<TerminalBackground | null>(profile.background ?? null);
   const [font, setFont] = useState<TerminalFont | null>(profile.font ?? null);
@@ -43,14 +44,23 @@ export function ProfileDialog({ profile, onClose }: { profile: Profile; onClose:
 
   const submit = (e: React.FormEvent): void => {
     e.preventDefault();
-    void run([...others(), { ...profile, cwd: cwd.trim(), background, font }]);
+    if (!name.trim()) {
+      setError('Give the launcher a name.');
+      return;
+    }
+    void run([...others(), { ...profile, name: name.trim(), cwd: cwd.trim(), background, font }]);
   };
 
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <form className="dialog wide" onSubmit={submit} aria-label={`Profile ${profile.name}`}>
-        <h2>Profile: {profile.name}</h2>
+      <form className="dialog wide" onSubmit={submit} aria-label={`Launcher ${profile.name}`}>
+        <h2>Launcher: {profile.name}</h2>
         <p className="hint command">{[profile.command, ...profile.args].join(' ')}</p>
+
+        <label>
+          <span>Name</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} spellCheck={false} autoFocus />
+        </label>
 
         <div className="field">
           <span id="profile-folder-label">Start folder</span>
@@ -68,7 +78,7 @@ export function ProfileDialog({ profile, onClose }: { profile: Profile; onClose:
         </div>
 
         <p className="hint">
-          Sessions started from this profile open in this folder, with this background and this text. An area&apos;s folder, or one chosen when starting
+          Sessions started from this launcher open in this folder, with this background and this text. An area&apos;s folder, or one chosen when starting
           the session, comes first.
         </p>
 
@@ -85,8 +95,8 @@ export function ProfileDialog({ profile, onClose }: { profile: Profile; onClose:
             </button>
           )}
           {isSaved && !isBuiltin && (
-            <button type="button" disabled={busy} onClick={() => window.confirm(`Delete the profile "${profile.name}"?`) && void run(others())}>
-              Delete profile
+            <button type="button" disabled={busy} onClick={() => window.confirm(`Delete the launcher "${profile.name}"?`) && void run(others())}>
+              Delete launcher
             </button>
           )}
           <span className="spacer" />
