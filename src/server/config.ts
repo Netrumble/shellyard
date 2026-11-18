@@ -17,6 +17,8 @@ export interface Config {
 export interface ServerState {
   pid: number;
   port: number;
+  /** The host name of the page (<32 hex>.localhost); absent in states of servers up to 0.1.2. */
+  pageHost?: string;
   token: string;
   hookToken: string;
   startedAt: number;
@@ -32,7 +34,8 @@ export function defaultConfig(): Config {
 /** SHELLYARD_HOME overrides the location, which is how tests avoid the real folder. */
 export function dataDir(): string {
   const dir = process.env.SHELLYARD_HOME || join(homedir(), '.shellyard');
-  mkdirSync(dir, { recursive: true });
+  // Private to the user where the file system has modes (Windows relies on the profile folder's ACL).
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
   return dir;
 }
 
@@ -208,7 +211,8 @@ export function readServerState(): ServerState | null {
     const { pid, port, token, hookToken, startedAt } = raw;
     if (typeof pid !== 'number' || typeof port !== 'number' || typeof token !== 'string') return null;
     if (typeof hookToken !== 'string' || typeof startedAt !== 'number') return null;
-    return { pid, port, token, hookToken, startedAt };
+    const pageHost = typeof raw.pageHost === 'string' && /^[0-9a-f]{32}\.localhost$/.test(raw.pageHost) ? raw.pageHost : undefined;
+    return { pid, port, token, hookToken, startedAt, ...(pageHost ? { pageHost } : {}) };
   } catch {
     return null;
   }
@@ -227,6 +231,13 @@ export function writeServerState(s: ServerState): void {
   }
 }
 
+/** The page the shellyard command opens the browser on; it holds the token of the server. */
+export function launcherPagePath(): string {
+  return join(dataDir(), 'open.html');
+}
+
+/** Forgets the running server: its state file, and the launcher page that holds its token. */
 export function clearServerState(): void {
   rmSync(serverStatePath(), { force: true });
+  rmSync(launcherPagePath(), { force: true });
 }

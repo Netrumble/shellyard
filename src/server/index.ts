@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { newToken } from './auth.js';
+import { newPageHost, newToken } from './auth.js';
 import { ActivityMeter } from './activity.js';
 import { ClosedStore } from './closed.js';
 import { clearServerState, dataDir, loadConfig, readServerState, writeServerState } from './config.js';
@@ -14,7 +14,7 @@ import { claudeProjectsDir, findConversation } from './conversations.js';
 import { TranscriptScanner } from './transcript-usage.js';
 import { PromptDelivery } from './prompt-delivery.js';
 import { loadRestorable, restoreSessions, saveRestorable } from './restore.js';
-import { ScheduleStore, type LaunchResult } from './schedules.js';
+import { launcherFingerprint, ScheduleStore, type LaunchResult } from './schedules.js';
 import { SessionManager } from './session-manager.js';
 import { StoryStore } from './stories.js';
 import { UsageStore } from './usage.js';
@@ -37,6 +37,8 @@ const SCAN_IDLE_MS = 3000;
 
 export interface RunningServer {
   port: number;
+  /** The host name the page is served on in this start. */
+  pageHost: string;
   token: string;
   address: string;
   stop(): Promise<void>;
@@ -90,6 +92,8 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   const port = await listenOnFirstFree(server, opts.port ?? DEFAULT_PORT);
   const token = newToken();
   const hookToken = newToken();
+  // A new host name for the page at every start: see newPageHost.
+  const pageHost = newPageHost();
   const startedAt = Date.now();
   const here = dirname(fileURLToPath(import.meta.url));
 
@@ -149,6 +153,10 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
     file: join(dataDir(), 'schedules.json'),
     now: Date.now,
     launch: launchSchedule,
+    fingerprint: (profileId) => {
+      const profile = manager.profiles().find((p) => p.id === profileId);
+      return profile ? launcherFingerprint(profile) : null;
+    },
     busy: (id) => {
       const s = manager.get(id);
       return s !== null && (s.status === 'working' || (s.status === 'attention' && s.reason === 'blocked'));
@@ -218,7 +226,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   const stopped = new Promise<void>((r) => (resolveStopped = r));
   let stopping: Promise<void> | null = null;
 
-  const ws = attachWebSocket(server, { manager, stories, closed, schedules, usage, activity, port, token });
+  const ws = attachWebSocket(server, { manager, stories, closed, schedules, usage, activity, port, pageHost, token });
   const ticker = setInterval(() => {
     manager.tick();
     schedules.tick();
@@ -258,20 +266,20 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
       onClaudeStatus: (id) => delivery.ready(id),
       onPromptSubmitted: (id) => delivery.submitted(id),
       port,
+      pageHost,
       token,
       hookToken,
       webDir: join(here, '..', 'web'),
-      startedAt,
       version: packageVersion(),
       // Let the 204 reach the caller before the sockets are torn down.
       onShutdown: () => void setTimeout(() => void stop(), 50),
     }),
   );
 
-  writeServerState({ pid: process.pid, port, token, hookToken, startedAt });
-  log(`listening on http://${HOST}:${port}`);
+  writeServerState({ pid: process.pid, port, pageHost, token, hookToken, startedAt });
+  log(`listening on http://${HOST}:${port}, page on http://${pageHost}:${port}`);
 
-  return { port, token, address: (server.address() as AddressInfo).address, stop, stopped };
+  return { port, pageHost, token, address: (server.address() as AddressInfo).address, stop, stopped };
 }
 
 function isMainModule(): boolean {

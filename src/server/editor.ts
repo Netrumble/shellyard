@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { statSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { resolveExecutable } from './shells.js';
+import { resolveExecutable, systemProgram } from './shells.js';
 
 // Opens VS Code on the folder of a session. For a session that runs in WSL the folder is
 // opened inside its distribution (VS Code's WSL remote), not as a Windows folder.
@@ -78,7 +78,7 @@ export function codeLaunch(target: Exclude<EditorTarget, { kind: 'error' }>, cod
 /** Asks a WSL distribution for its name and home folder. */
 export function askWsl(distro: string | null): WslInfo | null {
   try {
-    const out = execFileSync('wsl.exe', [...(distro ? ['-d', distro] : []), '--', 'sh', '-c', 'printf "%s\\n%s" "$WSL_DISTRO_NAME" "$HOME"'], {
+    const out = execFileSync(systemProgram('wsl.exe'), [...(distro ? ['-d', distro] : []), '--', 'sh', '-c', 'printf "%s\\n%s" "$WSL_DISTRO_NAME" "$HOME"'], {
       timeout: 8000,
       windowsHide: true,
       encoding: 'utf8',

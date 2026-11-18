@@ -1,9 +1,9 @@
 // The desktop app: a window on the ShellYard server. The server itself is the one `shellyard` starts, a
 // background process that outlives the window, so closing the app never stops a session.
-import { app, BrowserWindow, dialog, Menu, nativeImage, Notification, shell, Tray } from 'electron';
+import { app, BrowserWindow, dialog, Menu, nativeImage, Notification, session, shell, Tray } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ensureServer, restartServer, writeLauncherPage } from '@talentiaoss/shellyard/launcher';
+import { ensureServer, pageAddress, restartServer, writeLauncherPage } from '@talentiaoss/shellyard/launcher';
 import { findNode } from './find-node.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -83,7 +83,15 @@ async function openWindow() {
     return;
   }
   serverState = started.state;
-  const origin = `http://127.0.0.1:${started.state.port}`;
+  // The page's own host name of this start (<random>.localhost), never a fixed address.
+  const origin = pageAddress(started.state);
+
+  // A session of the app's own, not the default one, emptied before every load: a service
+  // worker left by whatever answered on a ShellYard address while the server was down (another
+  // user's program can take a free port) would answer instead of the server and read the
+  // token. The page's address changes at every start, so what earlier ones stored is of no use.
+  const ses = session.fromPartition('shellyard');
+  await ses.clearStorageData();
 
   win = new BrowserWindow({
     width: 1400,
@@ -92,7 +100,7 @@ async function openWindow() {
     icon: icon.isEmpty() ? undefined : icon,
     autoHideMenuBar: true,
     backgroundColor: '#181b21',
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, session: ses },
   });
 
   // Links leave the app for the browser; the window itself stays on the server.

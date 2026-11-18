@@ -12,8 +12,8 @@ window: your profile, your PATH, your permissions. The page is its screen and ke
 > - **Nothing leaves your PC.** The server listens on `127.0.0.1` only: no other computer can
 >   reach it, and ShellYard itself sends nothing to the internet (the programs you run in it, such
 >   as Claude Code, connect as they always do).
-> - **Only your page gets in.** Every request needs a secret token, created anew at each start;
->   requests from other websites or other host names are refused.
+> - **Only your page gets in.** Every request that does something needs a secret token, created
+>   anew at each start; requests from other websites or other host names are refused.
 > - **No cookies.** The token is never kept in a cookie, so it is never sent to anything else.
 > - **The desktop app is locked down.** Its window cannot run code on your PC by itself, cannot
 >   browse to other sites (links open in your browser), and stores no cookies.
@@ -38,7 +38,10 @@ ShellYard opens in your default browser. `npx @talentiaoss/shellyard` runs it wi
 ### As a desktop app, with the setup program (Windows)
 
 1. Download `ShellYard-Setup-<version>.exe` from the
-   [latest release](https://github.com/Talentia-Software-OSS/shellyard/releases/latest).
+   [latest release](https://github.com/Talentia-Software-OSS/shellyard/releases/latest), with the
+   `ShellYard-Setup-<version>.exe.sha256` beside it. To check the download, compare the two in
+   PowerShell: `(Get-FileHash .\ShellYard-Setup-<version>.exe -Algorithm SHA256).Hash` must equal
+   the first word of the `.sha256` file (case does not matter).
 2. Run it. The installer is not code-signed yet, so Windows SmartScreen says "Windows protected your
    PC": click **More info**, then **Run anyway**.
 3. Pick the folder (the default is `%LOCALAPPDATA%\Programs\ShellYard`, no administrator rights
@@ -166,8 +169,10 @@ A schedule gives a prompt to a new Claude Code session at set times, as if you h
   ShellYard runs on;
 - the Claude Code launcher, optionally a model, an area and a folder;
 - how the session asks before acting: as Claude Code is set up, or one of its modes (ask before
-  every action, edit files without asking, auto, plan only). The modes that never ask are not
-  offered: nobody may be at the screen.
+  every action, edit files without asking, auto, plan only). In *auto*, Claude Code decides by
+  itself which actions are safe and does them without asking, so a scheduled session can act
+  while nobody is at the screen; choose it only for prompts you would let run unattended. The
+  mode that skips every check (bypass permissions) is not offered.
 
 At its time the schedule opens a session like any other: it is a light on the board, in its
 area. The prompt is typed into the terminal when Claude Code is ready for it. If Claude Code asks
@@ -186,6 +191,9 @@ Things to know:
   permission, so that runs do not pile up.
 - Sessions a schedule opened stay open until you close them.
 - Deleting an area leaves its schedules, which then run outside any area.
+- A schedule is tied to its launcher as it was when the schedule was saved. If the launcher's
+  command, arguments or environment change afterwards, its runs fail (*Could not start*) until you
+  open the schedule and save it again: an unattended run never starts something you did not see.
 
 ### Folders
 
@@ -347,11 +355,27 @@ Set `SHELLYARD_HOME` to use another folder.
 Whoever can reach the server gets a shell as you, so:
 
 - it listens on `127.0.0.1` only, never on the network;
-- every request needs a random token created at each start. `shellyard` hands it to your browser in
+- every API request and WebSocket connection needs a random token created at each start (the
+  page's own files and the health check, which hold no secret, are served without it).
+  `shellyard` hands it to your browser in
   the fragment of the address (the part after `#`, which browsers never send to a server); the
   page keeps it and sends it explicitly with each request. No cookie is used, so the token is
   not sent to other programs listening on this machine;
-- requests and WebSocket connections coming from other web pages or other host names are refused;
+- the page is opened on a new address at every start, `http://<32 random characters>.localhost:7717`
+  (browsers send any `*.localhost` name to this machine by themselves). A fixed address could be
+  prepared in advance: whoever holds the port while ShellYard is down (another user of the
+  machine can) could leave a service worker there that answers in place of the server at the
+  next start and reads the token. Settings kept by the page in the browser (theme, collapsed
+  areas, board sizes) therefore start over after each restart of the server;
+- requests and WebSocket connections coming from other web pages or other host names are refused.
+  The app is served only on the address of the current start; on `127.0.0.1`, which the
+  `shellyard` command and Claude Code's hooks use, a page only says how to open it. `localhost`
+  is not accepted;
+- `shellyard` makes sure the server on the recorded port is really its own (it must answer a
+  random challenge with the token) before it sends it the token or stops its process;
+- the Windows programs ShellYard runs itself (`wsl.exe`, `cmd.exe`, `taskkill.exe`) are started
+  from System32 by full path, never looked up in the folder of a session, and the background
+  server runs in `~/.shellyard/`, not in the folder `shellyard` was started from;
 - the browser is started on a private file, not on the address, so the token does not appear on
   a command line that other users of the machine could read.
 
@@ -361,17 +385,22 @@ If you edit `config.json` by hand and it is not valid JSON at that moment, Shell
 last settings that were valid and refuses to save changes from the page until the file is fixed.
 
 Any program running as you can read the token from `~/.shellyard/`; ShellYard does not
-protect you from your own account.
+protect you from your own account. "Readable by you only" means file mode 600 and folder mode
+700 on Linux and macOS; Windows ignores those modes, and there the files are protected by the
+permissions of your user profile folder.
 
 The desktop app adds no way in:
 
 - its window runs the page isolated from your system (`contextIsolation` and `sandbox` on, no Node
   access), and cannot navigate away from the ShellYard server: links open in your browser;
-- it uses the same token as the browser, kept in the app's own folder (`%APPDATA%\ShellYard` on
-  Windows), which only your account can read. It stores no cookies;
+- it uses the same token as the browser. Its page runs in a storage session of its own, kept in
+  memory and emptied before each load, so nothing it stores (a service worker included) outlives
+  the app. It stores no cookies;
 - the setup program installs for your account only and needs no administrator rights. It is not
   code-signed yet: download it only from this repository's
-  [releases](https://github.com/Talentia-Software-OSS/shellyard/releases).
+  [releases](https://github.com/Talentia-Software-OSS/shellyard/releases) and check it against
+  its published SHA-256 checksum. It is built from the repository's lockfile, so it contains
+  exactly the dependency versions that were tested.
 
 Known gap, not yet closed:
 

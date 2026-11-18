@@ -44,12 +44,21 @@ function userCommand(): string | null {
   }
 }
 
+/**
+ * A program of Windows itself, by full path. This script runs in the folder of a Claude Code
+ * session, and a bare name ("taskkill") is looked up in the current folder first: a program of
+ * that name in the project would run instead.
+ */
+function systemProgram(name: string): string {
+  return join(process.env.SystemRoot || process.env.windir || 'C:\\Windows', 'System32', name);
+}
+
 /** Ends the command and everything it started; killing only the shell leaves its children. */
 function killTree(child: ChildProcess): void {
   if (child.pid === undefined) return;
   try {
     // Waited for: this script exits right after, and the kill must have happened by then.
-    if (process.platform === 'win32') execFileSync('taskkill', ['/T', '/F', '/PID', String(child.pid)], { windowsHide: true, stdio: 'ignore', timeout: 2000 });
+    if (process.platform === 'win32') execFileSync(systemProgram('taskkill.exe'),['/T', '/F', '/PID', String(child.pid)], { windowsHide: true, stdio: 'ignore', timeout: 2000 });
     else process.kill(-child.pid, 'SIGKILL');
   } catch {
     child.kill();
@@ -75,7 +84,7 @@ function runUserLine(command: string, body: Buffer): Promise<Buffer> {
       const shell = process.env.SHELL || (process.platform === 'win32' ? null : '/bin/sh');
       const child = shell
         ? spawn(shell, ['-c', command], { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true, env, detached: process.platform !== 'win32' })
-        : spawn(command, { shell: true, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true, env });
+        : spawn(command, { shell: systemProgram('cmd.exe'), stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true, env });
       const timer = setTimeout(() => {
         killTree(child);
         finish(Buffer.alloc(0));

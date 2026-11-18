@@ -31,6 +31,8 @@ class Client {
   }
 }
 
+const PAGE = 'a'.repeat(32) + '.localhost';
+
 describe('websocket', () => {
   const home = useTempHome();
   let server: Server;
@@ -51,7 +53,7 @@ describe('websocket', () => {
     usage = new UsageStore({ now: Date.now, file: join(home.dir(), 'usage.json') });
     activity = new ActivityMeter(Date.now);
     mgr.onOutput((id, data) => activity.add(id, data.length));
-    handle = attachWebSocket(server, { manager: mgr, usage, activity, port, token: TOKEN });
+    handle = attachWebSocket(server, { manager: mgr, usage, activity, port, pageHost: PAGE, token: TOKEN });
   });
 
   afterEach(async () => {
@@ -72,7 +74,7 @@ describe('websocket', () => {
       ws.on('unexpected-response', (_req, res) => reject(new Error(`refused ${res.statusCode}`)));
     });
   }
-  const good = (): Record<string, string> => ({ origin: `http://127.0.0.1:${port}` });
+  const good = (): Record<string, string> => ({ host: `${PAGE}:${port}`, origin: `http://${PAGE}:${port}` });
   const connect = (): Promise<Client> => open(good());
   const shell = (): SessionInfo => mgr.create({ kind: 'shell', command: process.execPath, cwd: home.dir() });
 
@@ -102,6 +104,14 @@ describe('websocket', () => {
     });
     it('refuses a foreign host header', async () => {
       await expect(open({ ...good(), host: 'evil.com' })).rejects.toThrow(/refused 403/);
+    });
+    it('refuses the fixed loopback address and its origin: only the page host of this start connects', async () => {
+      await expect(open({ host: `127.0.0.1:${port}`, origin: `http://127.0.0.1:${port}` })).rejects.toThrow(/refused 403/);
+      await expect(open({ ...good(), origin: `http://127.0.0.1:${port}` })).rejects.toThrow(/refused 403/);
+    });
+    it('refuses a tab from an earlier start as unauthorized', async () => {
+      const old = `${'b'.repeat(32)}.localhost:${port}`;
+      await expect(open({ host: old, origin: `http://${old}` })).rejects.toThrow(/refused 401/);
     });
     it('refuses another path', async () => {
       await expect(open(good(), '/other')).rejects.toThrow(/refused 404/);

@@ -3,7 +3,8 @@ import { spawn } from 'node:child_process';
 import { existsSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { clearServerState, dataDir, logPath, readServerState, type ServerState } from '../server/config.js';
+import { clearServerState, dataDir, launcherPagePath, logPath, readServerState, type ServerState } from '../server/config.js';
+import { healthProof, newChallenge, safeEqual } from '../server/auth.js';
 import { DEFAULT_PORT, startServer } from '../server/index.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -40,27 +41,36 @@ type Probe = 'ours' | 'other' | 'unreachable';
 
 /**
  * Asks the recorded port who is there. "ours" only if the very server that wrote the state
- * file answers (same start time): after a crash the port may be taken by another program,
- * or by another ShellYard instance, whose token we do not hold and whose pid is not the recorded one.
+ * file answers: after a crash the port may be taken by another program, or by another
+ * ShellYard instance, whose token we do not hold and whose pid is not the recorded one. That
+ * server proves it holds the recorded token by answering a fresh challenge; the token itself is
+ * never sent before that, so a stranger on the port learns nothing it could use.
  */
-async function probe(state: ServerState): Promise<Probe> {
+async function probe(state: ServerState): Promise<{ who: Probe; version: string | null }> {
+  const challenge = newChallenge();
   let res: Response;
   try {
-    res = await fetch(`http://127.0.0.1:${state.port}/api/health`, { signal: AbortSignal.timeout(1000) });
+    res = await fetch(`http://127.0.0.1:${state.port}/api/health?challenge=${challenge}`, { signal: AbortSignal.timeout(1000) });
   } catch {
-    return 'unreachable';
+    return { who: 'unreachable', version: null };
   }
   try {
-    if (!res.ok) return 'other';
-    const body = (await res.json()) as { ok?: unknown; app?: unknown; startedAt?: unknown };
-    return body.ok === true && body.app === 'shellyard' && body.startedAt === state.startedAt ? 'ours' : 'other';
+    if (!res.ok) return { who: 'other', version: null };
+    const body = (await res.json()) as { ok?: unknown; app?: unknown; proof?: unknown; version?: unknown; startedAt?: unknown };
+    const proven = typeof body.proof === 'string' && safeEqual(body.proof, healthProof(state.token, challenge));
+    // Servers up to 0.1.2 cannot answer the challenge and named their start time instead. That
+    // is still accepted, so that an update can stop the server it replaces; it proves little
+    // only for a state file such a server wrote, since newer servers never publish the time.
+    const legacy = body.proof === undefined && typeof body.startedAt === 'number' && body.startedAt === state.startedAt;
+    const ours = body.ok === true && body.app === 'shellyard' && (proven || legacy);
+    return ours ? { who: 'ours', version: typeof body.version === 'string' ? body.version : null } : { who: 'other', version: null };
   } catch {
-    return 'other';
+    return { who: 'other', version: null };
   }
 }
 
 export async function isServerAlive(state: ServerState): Promise<boolean> {
-  return (await probe(state)) === 'ours';
+  return (await probe(state)).who === 'ours';
 }
 
 function pidAlive(pid: number): boolean {
@@ -78,7 +88,7 @@ async function liveState(): Promise<ServerState | null> {
   // A busy server can miss one health check. While its process exists, ask again before
   // calling it gone: starting a second server would strand the first with its sessions.
   for (let attempt = 0; attempt < 3; attempt++) {
-    const who = await probe(state);
+    const { who } = await probe(state);
     if (who === 'ours') return state;
     if (who === 'other' || !pidAlive(state.pid)) return null;
     await sleep(300);
@@ -86,8 +96,16 @@ async function liveState(): Promise<ServerState | null> {
   return null;
 }
 
+/**
+ * Where the page of a server is: its own host name of this start (a server up to 0.1.2 has
+ * none and serves on 127.0.0.1). The command itself always talks to 127.0.0.1.
+ */
+export function pageAddress(state: Pick<ServerState, 'port' | 'pageHost'>): string {
+  return `http://${state.pageHost ?? '127.0.0.1'}:${state.port}`;
+}
+
 function launchUrl(state: ServerState): string {
-  return `http://127.0.0.1:${state.port}/#token=${state.token}`;
+  return `${pageAddress(state)}/#token=${state.token}`;
 }
 
 /**
@@ -96,7 +114,7 @@ function launchUrl(state: ServerState): string {
  * machine, and the token is all it takes to get a shell here.
  */
 export function writeLauncherPage(state: ServerState): string {
-  const file = join(dataDir(), 'open.html');
+  const file = launcherPagePath();
   // In the fragment the token is not sent to any server, not even ours; the page reads it.
   const url = launchUrl(state);
   rmSync(file, { force: true });
@@ -134,10 +152,14 @@ function tailLog(lines: number): string {
 function spawnDetachedServer(port: number, node: string = process.execPath): void {
   const built = join(here, '..', 'server', 'index.js');
   // Running from source (development) goes through tsx; the published package is plain JS.
-  const args = existsSync(built) ? [built] : ['--import', 'tsx', join(here, '..', 'server', 'index.ts')];
+  // tsx is named by its full address: the server does not start in this package's folder.
+  const args = existsSync(built) ? [built] : ['--import', import.meta.resolve('tsx'), join(here, '..', 'server', 'index.ts')];
   const log = openSync(logPath(), 'a');
   const child = spawn(node, [...args, '--port', String(port)], {
     detached: true,
+    // Not the folder the command was typed in: on Windows a program named like one the server
+    // starts (wsl.exe, cmd.exe) would be found there first, and the server lives on for days.
+    cwd: dataDir(),
     stdio: ['ignore', log, log],
     windowsHide: true,
   });
@@ -145,17 +167,11 @@ function spawnDetachedServer(port: number, node: string = process.execPath): voi
 }
 
 /**
- * The version the server reports, or null when it does not say (servers before this check) or
- * cannot be reached.
+ * The version our server reports, or null when it does not say (servers before this check),
+ * cannot be reached, or is not ours.
  */
 export async function serverVersion(state: ServerState): Promise<string | null> {
-  try {
-    const res = await fetch(`http://127.0.0.1:${state.port}/api/health`, { signal: AbortSignal.timeout(1000) });
-    const body = (await res.json()) as { version?: unknown };
-    return typeof body.version === 'string' ? body.version : null;
-  } catch {
-    return null;
-  }
+  return (await probe(state)).version;
 }
 
 export type EnsureResult =
@@ -219,7 +235,7 @@ async function start(port: number, openBrowser: boolean, out: Out): Promise<numb
     return 1;
   }
   const state = started.state;
-  const base = `http://127.0.0.1:${state.port}`;
+  const base = pageAddress(state);
   out(`ShellYard running at ${base}`);
   if (started.outdated) {
     out(
@@ -247,7 +263,7 @@ async function status(out: Out): Promise<number> {
   } catch {
     // The count is a courtesy; the server did answer the health check.
   }
-  out(`ShellYard is running at http://127.0.0.1:${state.port} (${count} sessions, pid ${state.pid}).`);
+  out(`ShellYard is running at ${pageAddress(state)} (${count} sessions, pid ${state.pid}).`);
   return 0;
 }
 
@@ -336,7 +352,7 @@ export async function main(argv: string[], out: Out = console.log): Promise<numb
   if (foreground) {
     const existing = await liveState();
     if (existing) {
-      out(`ShellYard is already running at http://127.0.0.1:${existing.port}. Stop it first with: shellyard stop`);
+      out(`ShellYard is already running at ${pageAddress(existing)}. Stop it first with: shellyard stop`);
       return 1;
     }
     // One failing session must not take the server, and every other session, down with it.
@@ -346,7 +362,7 @@ export async function main(argv: string[], out: Out = console.log): Promise<numb
     const shutdown = (): void => void running.stop();
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);
-    out(`ShellYard running at http://127.0.0.1:${running.port} (Ctrl+C to stop)`);
+    out(`ShellYard running at ${pageAddress(running)} (Ctrl+C to stop)`);
     const state = readServerState();
     if (openBrowser && state) await openBrowserOn(state, out);
     await running.stopped;

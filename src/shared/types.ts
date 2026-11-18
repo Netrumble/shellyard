@@ -211,6 +211,12 @@ export interface Schedule {
   name: string;
   prompt: string;
   profileId: string;
+  /**
+   * What the launcher ran when the schedule was last saved (a digest of its kind, command,
+   * arguments and environment). A run whose launcher has changed since is refused: nobody is
+   * at the screen to see that it now starts something else. Null: no such launcher then.
+   */
+  launcher: string | null;
   /** Null: the profile's own model. */
   model: string | null;
   /** Empty: the folder of the area, or else of the profile. */

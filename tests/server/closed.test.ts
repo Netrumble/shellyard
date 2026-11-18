@@ -284,7 +284,7 @@ describe('closed sessions over http, websocket and a restart', () => {
 
   it('pushes the list to the page on connect and on every change', async () => {
     const s = await start();
-    const ws = new WebSocket(`ws://127.0.0.1:${s.port}/ws`, ['shellyard', `shellyard-token.${s.token}`], { headers: { origin: `http://127.0.0.1:${s.port}` } });
+    const ws = new WebSocket(`ws://127.0.0.1:${s.port}/ws`, ['shellyard', `shellyard-token.${s.token}`], { headers: { host: `${s.pageHost}:${s.port}`, origin: `http://${s.pageHost}:${s.port}` } });
     const lists: string[][] = [];
     ws.on('message', (d) => {
       const m = JSON.parse(String(d)) as ServerMessage;

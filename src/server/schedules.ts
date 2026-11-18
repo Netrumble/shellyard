@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { SCHEDULE_PERMISSION_MODES, type Schedule, type ScheduleOutcome, type SchedulePermissionMode, type ScheduleRun, type ScheduleWhen } from '../shared/types.js';
 import { nextRun, parseCron, parseTime } from './schedule-time.js';
@@ -18,6 +18,19 @@ export interface ScheduleDeps {
   launch: (schedule: Schedule) => LaunchResult;
   /** Whether that session is still at work (working, or waiting on a permission). */
   busy: (sessionId: string) => boolean;
+  /**
+   * The digest of what a launcher runs now (see launcherFingerprint), or null if there is no
+   * such launcher. Without it, schedules are not tied to their launcher (tests).
+   */
+  fingerprint?: (profileId: string) => string | null;
+}
+
+/** What a launcher runs, as a digest: kind, command, arguments and environment. */
+export function launcherFingerprint(profile: { kind: string; command: string; args: string[]; env: Record<string, string> }): string {
+  const env = Object.keys(profile.env)
+    .sort()
+    .map((k) => [k, profile.env[k]]);
+  return createHash('sha256').update(JSON.stringify([profile.kind, profile.command, profile.args, env])).digest('hex');
 }
 
 export class ScheduleError extends Error {}
@@ -132,6 +145,7 @@ function toStored(v: unknown): Schedule | null {
     return {
       id: v.id,
       ...fields,
+      launcher: typeof v.launcher === 'string' && /^[0-9a-f]{64}$/.test(v.launcher) ? v.launcher : null,
       createdAt: typeof v.createdAt === 'number' && Number.isFinite(v.createdAt) ? v.createdAt : 0,
       nextRunAt: typeof v.nextRunAt === 'number' && Number.isFinite(v.nextRunAt) ? v.nextRunAt : null,
       runs: Array.isArray(v.runs) ? v.runs.map(toRun).filter((r): r is ScheduleRun => r !== null).slice(0, MAX_RUNS) : [],
@@ -158,7 +172,12 @@ export class ScheduleStore {
       if (!Array.isArray(list)) return [];
       const seen = new Set<string>();
       return list
-        .map(toStored)
+        .map((item: unknown) => {
+          const s = toStored(item);
+          // Saved before schedules were tied to their launcher: tied to it as it is now.
+          if (s && isObject(item) && !('launcher' in item)) s.launcher = this.deps.fingerprint?.(s.profileId) ?? null;
+          return s;
+        })
         .filter((s): s is Schedule => s !== null && !seen.has(s.id) && seen.add(s.id) !== undefined)
         .slice(0, MAX_SCHEDULES);
     } catch {
@@ -194,7 +213,7 @@ export class ScheduleStore {
     if (this.schedules.length >= MAX_SCHEDULES) throw new ScheduleError(`There can be ${MAX_SCHEDULES} schedules at most.`);
     const now = this.deps.now();
     const fields = toFields(input, null, now);
-    const schedule: Schedule = { id: randomUUID(), ...fields, createdAt: now, nextRunAt: fields.enabled ? nextRun(fields.when, now) : null, runs: [] };
+    const schedule: Schedule = { id: randomUUID(), ...fields, launcher: this.launcherOf(fields.profileId), createdAt: now, nextRunAt: fields.enabled ? nextRun(fields.when, now) : null, runs: [] };
     this.schedules.push(schedule);
     this.changed();
     return copy(schedule);
@@ -208,6 +227,9 @@ export class ScheduleStore {
     const fields = toFields(patch, s, now);
     const replan = patch.when !== undefined || fields.enabled !== s.enabled;
     Object.assign(s, fields);
+    // Saving the schedule with its launcher named (as its dialog does) is agreeing to that
+    // launcher as it is now. Switching it on or off is not.
+    if (patch.profileId !== undefined) s.launcher = this.launcherOf(s.profileId);
     if (!s.enabled) s.nextRunAt = null;
     else if (replan || s.nextRunAt === null) s.nextRunAt = nextRun(s.when, now);
     this.changed();
@@ -235,8 +257,20 @@ export class ScheduleStore {
     return run;
   }
 
+  private launcherOf(profileId: string): string | null {
+    return this.deps.fingerprint?.(profileId) ?? null;
+  }
+
   private fire(s: Schedule, manual: boolean): ScheduleRun {
     const at = this.deps.now();
+    if (this.deps.fingerprint) {
+      const current = this.deps.fingerprint(s.profileId);
+      // A launcher that no longer exists is reported by the launch itself.
+      if (current !== null && current !== s.launcher) {
+        const detail = 'Its launcher was changed since the schedule was saved (command, arguments or environment). Open the schedule and save it again to run it with the launcher as it is now.';
+        return this.record(s, { at, outcome: 'failed', detail, sessionId: null, manual });
+      }
+    }
     const previous = s.runs.find((r) => r.sessionId !== null);
     if (!manual && previous?.sessionId && this.deps.busy(previous.sessionId)) {
       return this.record(s, { at, outcome: 'skipped', detail: 'The session of the previous run was still at work.', sessionId: null, manual });

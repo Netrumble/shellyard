@@ -12,7 +12,9 @@ export interface LoadedToken {
 
 export function takeTokenFromHash(hash: string): string | null {
   const params = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
-  return params.get('token') || null;
+  const token = params.get('token');
+  // Exactly what the server makes (32 random bytes as hex): anything else is not passed on.
+  return token && /^[0-9a-f]{64}$/.test(token) ? token : null;
 }
 
 export function wsProtocols(token: string): string[] {
