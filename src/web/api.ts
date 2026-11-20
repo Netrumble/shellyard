@@ -1,4 +1,4 @@
-import type { AreaRule, ConversationItem, CreateSessionRequest, FolderListing, Meta, PermissionChoice, Profile, Schedule, ScheduleRun, SessionInfo, SoundFile, SoundLibrary, SoundSettings, Story, TerminalBackground, TerminalFont, WorktreeListing } from '../shared/types.js';
+import type { AreaRule, ConversationItem, FlowSummary, CreateSessionRequest, FolderListing, Meta, PermissionChoice, Profile, Schedule, ScheduleRun, SessionInfo, SoundFile, SoundLibrary, SoundSettings, Story, TerminalBackground, TerminalFont, WorktreeListing } from '../shared/types.js';
 import type { SendOutcome } from './selection.js';
 import type { Recipe } from '../shared/recipes.js';
 
@@ -128,6 +128,8 @@ export const api = {
   deleteRule: (id: string): Promise<void> => call('DELETE', `/api/rules/${encodeURIComponent(id)}`),
   /** Types the same prompt into several sessions; each says whether it took it. */
   sendPrompt: (ids: string[], prompt: string): Promise<{ results: Array<{ id: string; outcome: SendOutcome }> }> => call('POST', '/api/sessions/prompt', { ids, prompt }),
+  /** How the day went: time blocked on you, answers, the last hour per session. */
+  flow: (): Promise<FlowSummary> => call('GET', '/api/flow'),
   recipes: (): Promise<Recipe[]> => call('GET', '/api/recipes'),
   createRecipe: (r: Omit<Recipe, 'id'>): Promise<Recipe> => call('POST', '/api/recipes', r),
   updateRecipe: (id: string, r: Omit<Recipe, 'id'>): Promise<Recipe> => call('PUT', `/api/recipes/${encodeURIComponent(id)}`, r),

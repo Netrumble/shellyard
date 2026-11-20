@@ -14,6 +14,7 @@ import { StoryStore } from '../../src/server/stories.js';
 import { ClosedStore } from '../../src/server/closed.js';
 import { RuleStore } from '../../src/server/area-rules.js';
 import { RecipeStore } from '../../src/server/recipes.js';
+import { StatusLog } from '../../src/server/status-log.js';
 import { UsageStore } from '../../src/server/usage.js';
 import type { Profile, SessionInfo } from '../../src/shared/types.js';
 import { fakePtyFactory, useTempHome } from '../helpers.js';
@@ -88,7 +89,7 @@ describe('http api', () => {
       headOf: () => null,
     });
     rules = new RuleStore({ now: Date.now, file: join(home.dir(), 'rules.json') });
-    server.on('request', createRequestHandler({ manager: mgr, stories, rules, usage: new UsageStore({ now: Date.now, file: join(home.dir(), 'usage.json') }), closed: new ClosedStore({ now: Date.now, file: join(home.dir(), 'closed.json') }), port, pageHost: PAGE, token: TOKEN, hookToken: HOOK_TOKEN, webDir, onShutdown: () => shutdowns++ }));
+    server.on('request', createRequestHandler({ manager: mgr, stories, rules, flow: new StatusLog({ now: Date.now }), usage: new UsageStore({ now: Date.now, file: join(home.dir(), 'usage.json') }), closed: new ClosedStore({ now: Date.now, file: join(home.dir(), 'closed.json') }), port, pageHost: PAGE, token: TOKEN, hookToken: HOOK_TOKEN, webDir, onShutdown: () => shutdowns++ }));
   });
 
   afterEach(async () => {
@@ -333,6 +334,16 @@ describe('http api', () => {
       expect(ptys.last().written).toEqual(['\r']);
       expect((await answer({ requestId: pending.id, choice: 'deny' })).status).toBe(409);
       expect((await call('GET', `/api/sessions/${c.id}/answer`)).status).toBe(405);
+    });
+  });
+
+  describe('flow', () => {
+    it('gives how the day went to the user token only', async () => {
+      expect((await call('GET', '/api/flow', { auth: 'none' })).status).toBe(401);
+      const r = await call('GET', '/api/flow');
+      expect(r.status).toBe(200);
+      expect(r.json()).toMatchObject({ today: { blockedMs: 0, answers: 0 }, previous: null, timeline: { sessions: [] } });
+      expect((await call('POST', '/api/flow')).status).toBe(405);
     });
   });
 

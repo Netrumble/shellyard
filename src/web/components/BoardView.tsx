@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ClosedSession, Story } from '../../shared/types.js';
+import type { ClosedSession, FlowSummary, Story } from '../../shared/types.js';
 import { api } from '../api.js';
 import { areaBranch, areaSummary, boardAreas, byActivity, glyphCounts, type BoardArea, type GlyphCounts } from '../board.js';
 import { loadAreaSizes, NO_AREA_KEY, saveAreaSizes, withAreaSize, type AreaSize } from '../board-sizes.js';
@@ -16,6 +16,9 @@ import { SelectionBar } from './SelectionBar.js';
 import { SessionRow } from './SessionRow.js';
 import { StoryDialog } from './StoryDialog.js';
 import { TicketDialog } from './TicketDialog.js';
+import { TimelineView } from './TimelineView.js';
+import { answerTime, blockedTime } from '../flow-text.js';
+import { useFlow } from '../use-flow.js';
 
 const report = (e: unknown): void => window.alert((e as Error).message);
 
@@ -285,11 +288,32 @@ function Area(props: {
   );
 }
 
-/** "11 sessions in 3 areas · 2 are waiting for you" */
-function boardSummary(sessions: number, areas: number, waiting: number): string {
+/** "11 sessions in 3 areas · 2 are waiting for you · median answer 2m 10s · 27 min blocked today" */
+function boardSummary(sessions: number, areas: number, waiting: number, flow: FlowSummary | null): string {
   const parts = [`${sessions} session${sessions === 1 ? '' : 's'} in ${areas} area${areas === 1 ? '' : 's'}`];
   if (waiting > 0) parts.push(`${waiting} ${waiting === 1 ? 'is' : 'are'} waiting for you`);
+  if (flow && flow.today.medianAnswerMs !== null) parts.push(`median answer ${answerTime(flow.today.medianAnswerMs)}`);
+  if (flow && flow.today.blockedMs >= 60_000) parts.push(`${blockedTime(flow.today.blockedMs)} blocked today`);
   return parts.join(' · ');
+}
+
+type BoardMode = 'areas' | 'timeline';
+const MODE_KEY = 'shellyard-board-mode';
+
+function loadMode(): BoardMode {
+  try {
+    return localStorage.getItem(MODE_KEY) === 'timeline' ? 'timeline' : 'areas';
+  } catch {
+    return 'areas';
+  }
+}
+
+function saveMode(mode: BoardMode): void {
+  try {
+    localStorage.setItem(MODE_KEY, mode);
+  } catch {
+    // Not remembered next time; it still applies now.
+  }
 }
 
 /**
@@ -300,7 +324,13 @@ export function BoardView({ onNewSession }: { onNewSession: (storyId?: string) =
   const { sessions, stories, loaded } = useStore();
   const [dialog, setDialog] = useState<{ story?: Story } | null>(null);
   const [ticketOpen, setTicketOpen] = useState(false);
+  const [mode, setMode] = useState(loadMode);
+  const flow = useFlow(mode === 'timeline' ? 10_000 : 30_000);
   const [sizes, setSizes] = useState(loadAreaSizes);
+  const pick = (m: BoardMode): void => {
+    setMode(m);
+    saveMode(m);
+  };
   const areas = byActivity(boardAreas(sessions, stories));
   const waiting = sessions.filter((s) => s.status === 'attention' && s.reason !== 'finished').length;
   const resize = (key: string, size: AreaSize | null): void => {
@@ -314,7 +344,18 @@ export function BoardView({ onNewSession }: { onNewSession: (storyId?: string) =
   return (
     <div className="board">
       <div className="board-head">
-        <p className="board-summary">{boardSummary(sessions.length, stories.length, waiting)}</p>
+        <p className="board-summary">{boardSummary(sessions.length, stories.length, waiting, flow)}</p>
+        <div className="segmented board-modes" role="group" aria-label="Board view">
+          <button type="button" className={mode === 'areas' ? 'active' : undefined} aria-pressed={mode === 'areas'} onClick={() => pick('areas')}>
+            Areas
+          </button>
+          <button type="button" className={mode === 'timeline' ? 'active' : undefined} aria-pressed={mode === 'timeline'} onClick={() => pick('timeline')}>
+            Timeline
+          </button>
+          <button type="button" title="Every terminal, side by side" onClick={() => setView({ kind: 'grid' })}>
+            Wall
+          </button>
+        </div>
         <button type="button" onClick={() => setTicketOpen(true)}>
           Start from ticket
         </button>
@@ -323,34 +364,38 @@ export function BoardView({ onNewSession }: { onNewSession: (storyId?: string) =
         </button>
       </div>
       <NeedsYouLane />
-      <section className="board-section" aria-labelledby="areas-title">
-        <header className="section-head">
-          <h2 id="areas-title" className="section-name">
-            Areas
-          </h2>
-          <span className="hint">Shift-click sessions to act on several · drag a session between areas · areas with activity float up</span>
-        </header>
-        {loaded && areas.length === 0 && <p className="empty">Nothing here yet. Create an area for a piece of work, then start sessions in it.</p>}
-        <div className="board-areas">
-          {areas.map((a) => (
-            <Area
-              key={a.story?.id ?? ''}
-              area={a}
-              size={sizes[a.story?.id ?? NO_AREA_KEY]}
-              onResize={(size) => resize(a.story?.id ?? NO_AREA_KEY, size)}
-              onNewSession={onNewSession}
-              onEdit={(story) => setDialog({ story })}
-            />
-          ))}
-          <section className="ticket-card" aria-labelledby="ticket-card-title">
-            <h3 id="ticket-card-title">New area for a ticket</h3>
-            <p className="hint">Give a ticket code: ShellYard makes the worktree on its branch and the area, then starts the sessions of a recipe there.</p>
-            <button type="button" onClick={() => setTicketOpen(true)}>
-              Create from ticket
-            </button>
-          </section>
-        </div>
-      </section>
+      {mode === 'timeline' ? (
+        <TimelineView flow={flow} />
+      ) : (
+        <section className="board-section" aria-labelledby="areas-title">
+          <header className="section-head">
+            <h2 id="areas-title" className="section-name">
+              Areas
+            </h2>
+            <span className="hint">Shift-click sessions to act on several · drag a session between areas · areas with activity float up</span>
+          </header>
+          {loaded && areas.length === 0 && <p className="empty">Nothing here yet. Create an area for a piece of work, then start sessions in it.</p>}
+          <div className="board-areas">
+            {areas.map((a) => (
+              <Area
+                key={a.story?.id ?? ''}
+                area={a}
+                size={sizes[a.story?.id ?? NO_AREA_KEY]}
+                onResize={(size) => resize(a.story?.id ?? NO_AREA_KEY, size)}
+                onNewSession={onNewSession}
+                onEdit={(story) => setDialog({ story })}
+              />
+            ))}
+            <section className="ticket-card" aria-labelledby="ticket-card-title">
+              <h3 id="ticket-card-title">New area for a ticket</h3>
+              <p className="hint">Give a ticket code: ShellYard makes the worktree on its branch and the area, then starts the sessions of a recipe there.</p>
+              <button type="button" onClick={() => setTicketOpen(true)}>
+                Create from ticket
+              </button>
+            </section>
+          </div>
+        </section>
+      )}
       <SelectionBar />
       {dialog && <StoryDialog story={dialog.story} onClose={() => setDialog(null)} />}
       {ticketOpen && <TicketDialog onClose={() => setTicketOpen(false)} />}

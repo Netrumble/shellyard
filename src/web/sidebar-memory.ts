@@ -1,4 +1,5 @@
 export const SIDEBAR_FOLDED_KEY = 'shellyard-sidebar-folded';
+export const SESSIONS_FOLDED_KEY = 'shellyard-sessions-folded';
 export const LAUNCHERS_FOLDED_KEY = 'shellyard-launchers-folded';
 
 /** Whether a part of the sidebar is folded is a convenience of this browser, not shared state. */

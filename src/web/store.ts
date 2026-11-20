@@ -5,6 +5,7 @@ import { loadEffects, loadSound, saveEffects, saveSound, type EffectsLevel } fro
 import { connect, type ConnectionState, type Socket } from './socket.js';
 import { emptyHistory, recordActivity, type SparkHistory } from './sparkline.js';
 import { pruneSelection, toggleSelected } from './selection.js';
+import { addToDigest, loadFocus, saveFocus, startFocus, type Focus } from './focus.js';
 import { loadThemeChoice, resolveTheme, saveThemeChoice, systemPrefersLight, watchSystemTheme, type Theme, type ThemeChoice } from './theme.js';
 import { loadToken, rememberToken, wsProtocols } from './token.js';
 
@@ -34,6 +35,12 @@ interface State {
   sparks: SparkHistory;
   /** Sessions picked on the board for one action on all of them, in the order picked. */
   selection: string[];
+  /** Focus: only blocked sessions interrupt until it ends; null when off. */
+  focus: Focus | null;
+  /** Sessions that finished during the focus, for the digest at its end. */
+  digest: string[];
+  /** The names in the digest just shown, until it is dismissed. */
+  digestShown: string[] | null;
   /** False until the first list arrives, so an empty list is not shown as "nothing open". */
   loaded: boolean;
   view: View;
@@ -58,6 +65,9 @@ let state: State = {
   activity: {},
   sparks: emptyHistory(),
   selection: [],
+  focus: null,
+  digest: [],
+  digestShown: null,
   loaded: false,
   view: { kind: 'board' },
   connection: 'connecting',
@@ -141,6 +151,28 @@ export function setView(view: View): void {
 /** Picks a session on the board, or puts it back. */
 export function toggleSelection(id: string): void {
   set({ selection: toggleSelected(state.selection, id) });
+}
+
+export function startFocusNow(): void {
+  const focus = startFocus(Date.now());
+  saveFocus(focus);
+  set({ focus, digest: [], digestShown: null });
+}
+
+/** Ends the focus (by itself or by the user) and shows what finished meanwhile. Returns the names. */
+export function endFocus(): string[] {
+  const names = state.digest.map((id) => state.sessions.find((s) => s.id === id)?.name).filter((n): n is string => !!n);
+  saveFocus(null);
+  set({ focus: null, digest: [], digestShown: names });
+  return names;
+}
+
+export function noteDigest(ids: string[]): void {
+  if (ids.length > 0) set({ digest: addToDigest(state.digest, ids) });
+}
+
+export function dismissDigest(): void {
+  set({ digestShown: null });
 }
 
 export function clearSelection(): void {
@@ -229,7 +261,7 @@ export function startStore(): void {
   if (socket) return;
   const effects = loadEffects();
   applyEffects(effects);
-  set({ effects, sound: loadSound() });
+  set({ effects, sound: loadSound(), focus: loadFocus(Date.now()) });
   applyTheme(loadThemeChoice());
   watchSystemTheme(() => {
     if (state.themeChoice === 'system') applyTheme('system');

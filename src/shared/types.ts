@@ -33,6 +33,35 @@ export interface PendingRequest {
  */
 export type PermissionChoice = 'once' | 'deny' | 'area';
 
+/** A state on the timeline: "needs" blocked on the user, "maybe" possibly waiting. */
+export type FlowState = 'needs' | 'maybe' | 'working' | 'finished' | 'idle';
+
+export interface FlowSegment {
+  state: FlowState;
+  from: number;
+  /** Null while it lasts. */
+  to: number | null;
+}
+
+/** How the day went for the user: what waited on them, and how fast they answered. */
+export interface FlowDay {
+  /** Time Claude sessions spent blocked on the user (permission or question). */
+  blockedMs: number;
+  /** How long the user took to answer each block that ended in an answer. */
+  medianAnswerMs: number | null;
+  answers: number;
+  /** How many sessions worked at once, on average, while any did. */
+  parallel: number | null;
+}
+
+export interface FlowSummary {
+  today: FlowDay;
+  /** The average of the previous seven days that had any activity; null when there were none. */
+  previous: { blockedMs: number; medianAnswerMs: number | null } | null;
+  /** The last hour, per Claude session, oldest segment first. */
+  timeline: { from: number; to: number; sessions: Array<{ id: string; name: string; segments: FlowSegment[] }> };
+}
+
 /** A Bash command the sessions of an area may run without asking (see shared/rules.ts). */
 export interface AreaRule {
   id: string;

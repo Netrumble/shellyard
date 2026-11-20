@@ -8,7 +8,8 @@ import { selectCounts } from '../selectors.js';
 import { isTypingTarget, launcherIndex } from '../shortcuts.js';
 import { setView, useStore } from '../store.js';
 import { dragSource, useDropTarget } from './drag-target.js';
-import { LAUNCHERS_FOLDED_KEY, SIDEBAR_FOLDED_KEY, readFlag, writeFlag } from '../sidebar-memory.js';
+import { LAUNCHERS_FOLDED_KEY, SESSIONS_FOLDED_KEY, SIDEBAR_FOLDED_KEY, readFlag, writeFlag } from '../sidebar-memory.js';
+import { SidebarSessions } from './SidebarSessions.js';
 import {
   AttentionIcon,
   BoardIcon,
@@ -68,14 +69,12 @@ function scheduleNote(schedules: Schedule[], now: number): string | null {
   return `${on.length} on`;
 }
 
-/**
- * Where to go and what to start. The sessions themselves live on the board, so the sidebar
- * does not list them a second time.
- */
+/** Where to go, the sessions under their areas, and what to start. */
 export function Sidebar({ onNewSession }: { onNewSession: (storyId?: string) => void }): React.JSX.Element {
   const { sessions, schedules, view, meta } = useStore();
   const counts = selectCounts(sessions);
   const [railFolded, setRailFolded] = useState(() => readFlag(SIDEBAR_FOLDED_KEY));
+  const [sessionsFolded, setSessionsFolded] = useState(() => readFlag(SESSIONS_FOLDED_KEY));
   const [launchersFolded, setLaunchersFolded] = useState(() => readFlag(LAUNCHERS_FOLDED_KEY));
   const [storyDialog, setStoryDialog] = useState<{ story?: Story } | null>(null);
   const [profileDialog, setProfileDialog] = useState<string | null>(null);
@@ -175,6 +174,13 @@ export function Sidebar({ onNewSession }: { onNewSession: (storyId?: string) => 
           <span>New area</span>
         </button>
       </div>
+
+      <h2 className="section-title">
+        <button type="button" className="section-toggle" aria-expanded={!sessionsFolded} onClick={() => flip(sessionsFolded, setSessionsFolded, SESSIONS_FOLDED_KEY)}>
+          <span aria-hidden="true">{sessionsFolded ? '▸' : '▾'}</span> Sessions
+        </button>
+      </h2>
+      {!sessionsFolded && <SidebarSessions onNewSession={onNewSession} onEditArea={(story) => setStoryDialog({ story })} />}
 
       <h2 className="section-title">
         <button type="button" className="section-toggle" aria-expanded={!launchersFolded} onClick={() => flip(launchersFolded, setLaunchersFolded, LAUNCHERS_FOLDED_KEY)}>

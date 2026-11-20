@@ -12,6 +12,7 @@ import { suggestPattern } from '../shared/rules.js';
 import { MAX_PROMPT } from '../shared/sessions.js';
 import { RecipeError, type RecipeStore } from './recipes.js';
 import { startFromTicket, TicketError } from './tickets.js';
+import type { StatusLog } from './status-log.js';
 
 /** The most sessions one prompt is sent to at once. */
 const MAX_PROMPT_TARGETS = 50;
@@ -39,6 +40,8 @@ export interface HttpDeps {
   rules?: RuleStore;
   /** The recipes of "Start from ticket". */
   recipes?: RecipeStore;
+  /** How the day went: time blocked on the user, answers, the last hour per session. */
+  flow?: StatusLog;
   /** Types a prompt into a new Claude session once it is ready (see PromptDelivery). */
   deliverPrompt?: (sessionId: string, prompt: string) => void;
   /** Opens the editor on a session's folder; returns why not, or null when it was started. */
@@ -786,6 +789,12 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
         if (e instanceof FolderError) throw new HttpError(400, e.message);
         throw e;
       }
+    }
+
+    if (path === '/api/flow') {
+      if (method !== 'GET') throw new HttpError(405, 'Method not allowed');
+      if (!deps.flow) throw new HttpError(409, 'The flow is not recorded here.');
+      return send(res, 200, deps.flow.summary());
     }
 
     // The recipes of "Start from ticket".
