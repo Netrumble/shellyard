@@ -1421,6 +1421,17 @@ button.new-story {
   gap: 6px;
 }
 
+.worktree-row {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.worktree-row select {
+  flex: 1;
+  min-width: 0;
+}
+
 .folder-row input {
   flex: 1;
   min-width: 0;

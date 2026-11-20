@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chipText, countOf, deleteConfirmations, freeBranches, isWslSession, leaveDetachedPrompt, moveTargets, joinPath, relativeInside, samePathWeb, sessionChoices, sessionsIn, suggestedFolder, worktreeName } from '../../src/web/worktrees.js';
+import { branchNameFor, chipText, countOf, deleteConfirmations, freeBranches, isWslSession, leaveDetachedPrompt, moveTargets, joinPath, relativeInside, samePathWeb, sessionChoices, sessionsIn, suggestedFolder, worktreeName } from '../../src/web/worktrees.js';
 import type { SessionGit, SessionInfo } from '../../src/shared/types.js';
 
 const git = (over: Partial<SessionGit> = {}): SessionGit => ({ worktree: 'C:\\r\\app-feat', branch: 'feat', head: '1a2b3c4', isMain: false, worktreeCount: 2, ...over });
@@ -92,6 +92,28 @@ describe('moveTargets', () => {
   });
   it('is empty without a listing', () => {
     expect(moveTargets(null, 'x')).toEqual([]);
+  });
+});
+
+describe('branchNameFor', () => {
+  const listing = {
+    current: 'C:\\r\\app',
+    worktrees: [
+      { ...entry('C:\\r\\app', { isMain: true }), branch: 'main' },
+      { ...entry('C:\\r\\app-feat'), branch: 'feature/x' },
+      entry('C:\\r\\app-det'),
+    ],
+  };
+  it('is the branch of the chosen worktree', () => {
+    expect(branchNameFor(listing, 'c:/r/app-feat/')).toBe('feature/x');
+  });
+  it('is the branch of the current worktree when none is chosen', () => {
+    expect(branchNameFor(listing, '')).toBe('main');
+  });
+  it('is null for a detached worktree, an unknown path or no listing', () => {
+    expect(branchNameFor(listing, 'C:\\r\\app-det')).toBeNull();
+    expect(branchNameFor(listing, 'C:\\elsewhere')).toBeNull();
+    expect(branchNameFor(null, 'C:\\r\\app')).toBeNull();
   });
 });
 

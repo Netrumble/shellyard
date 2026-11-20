@@ -56,6 +56,16 @@ export function sessionChoices(listing: WorktreeListing | null): Worktree[] {
   return listing.worktrees.filter((w) => !w.bare && (!w.prunable || samePathWeb(w.path, listing.current)));
 }
 
+/**
+ * The branch of the worktree a new session will start in: the chosen one, or the folder's own
+ * when none is chosen. Null when it is detached or not in the listing.
+ */
+export function branchNameFor(listing: WorktreeListing | null, chosen: string): string | null {
+  if (!listing) return null;
+  const target = chosen || listing.current;
+  return listing.worktrees.find((w) => samePathWeb(w.path, target))?.branch ?? null;
+}
+
 /** The question asked before switching a detached worktree away from commits no branch holds; null when there are none. */
 export function leaveDetachedPrompt(unreachable: number): string | null {
   if (unreachable <= 0) return null;

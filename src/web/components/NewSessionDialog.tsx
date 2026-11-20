@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import { requestPermissionOnce } from '../notify.js';
 import { FolderPicker } from './FolderPicker.js';
 import { WorktreesDialog } from './WorktreesDialog.js';
-import { isWslSession, joinPath, relativeInside, samePathWeb, sessionChoices, worktreeName } from '../worktrees.js';
+import { branchNameFor, isWslSession, joinPath, relativeInside, samePathWeb, sessionChoices, worktreeName } from '../worktrees.js';
 import { useEscape } from '../escape.js';
 import { refreshMeta, setView, useStore } from '../store.js';
 
@@ -73,6 +73,9 @@ export function NewSessionDialog({ onClose, initialStoryId }: { onClose: () => v
   const setsOwnFolder = isWslSession(profile?.args);
   const offered = useMemo(() => (setsOwnFolder ? [] : sessionChoices(listing)), [listing, setsOwnFolder]);
 
+  // A Claude session left unnamed is named after the branch it will work on.
+  const branchName = isClaude && !setsOwnFolder ? branchNameFor(listing, offered.length > 1 ? chosen : '') : null;
+
   useEscape(onClose);
 
   const model = (): string | null | undefined => {
@@ -91,6 +94,7 @@ export function NewSessionDialog({ onClose, initialStoryId }: { onClose: () => v
     }
     const req: CreateSessionRequest = profile ? { profileId: profile.id } : { kind, command: command.trim() };
     if (name.trim()) req.name = name.trim();
+    else if (branchName) req.name = branchName;
     if (cwd.trim()) req.cwd = cwd.trim();
     if (listing && offered.length > 1 && chosen && !samePathWeb(chosen, listing.current)) {
       // Same place in the chosen worktree when the folder is a sub-folder of the current one and it exists there.
@@ -190,7 +194,7 @@ export function NewSessionDialog({ onClose, initialStoryId }: { onClose: () => v
 
         <label>
           <span>Name</span>
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder={profile?.name ?? 'Optional'} />
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder={branchName ?? profile?.name ?? 'Optional'} />
         </label>
 
         <div className="field">
@@ -200,19 +204,19 @@ export function NewSessionDialog({ onClose, initialStoryId }: { onClose: () => v
 
         {listing && offered.length > 1 && (
           <div className="field">
-            <label>
-              <span>Worktree</span>
-              <select value={chosen} onChange={(e) => setChosen(e.target.value)}>
+            <span id="session-worktree-label">Worktree</span>
+            <span className="worktree-row">
+              <select value={chosen} onChange={(e) => setChosen(e.target.value)} aria-labelledby="session-worktree-label">
                 {offered.map((w) => (
                   <option key={w.path} value={w.path}>
                     {`${worktreeName(w.path)} (${w.branch ?? 'detached'})`}
                   </option>
                 ))}
               </select>
-            </label>
-            <button type="button" className="link" onClick={() => setManaging(true)}>
-              Manage…
-            </button>
+              <button type="button" onClick={() => setManaging(true)}>
+                Manage…
+              </button>
+            </span>
           </div>
         )}
 
