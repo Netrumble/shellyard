@@ -45,7 +45,7 @@ export interface SoundFile {
   name: string;
 }
 
-/** Which sound plays for each event; null means silence. */
+/** Which sound plays for each event; null means the chime. */
 export interface SoundSettings {
   blocked: string | null;
   finished: string | null;

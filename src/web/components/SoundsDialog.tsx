@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { SoundSettings } from '../../shared/types.js';
 import { api } from '../api.js';
@@ -15,6 +15,9 @@ const EVENTS: Array<{ key: keyof SoundSettings; label: string }> = [
 /** Which sound plays for each event, and the sounds that can be chosen. */
 export function SoundsDialog({ onClose }: { onClose: () => void }): React.JSX.Element {
   useEscape(onClose);
+  useEffect(() => {
+    void refreshSounds();
+  }, []);
   const { sounds, settings } = useStore().soundLibrary;
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -34,7 +37,8 @@ export function SoundsDialog({ onClose }: { onClose: () => void }): React.JSX.El
   };
 
   const choose = (key: keyof SoundSettings, value: string): void => {
-    void run(() => api.saveSoundSettings({ ...settings, [key]: value || null }));
+    // Merge into the settings as the server has them now, not as this page last saw them.
+    void run(async () => api.saveSoundSettings({ ...(await api.sounds()).settings, [key]: value || null }));
   };
 
   const add = (file: File | undefined): void => {

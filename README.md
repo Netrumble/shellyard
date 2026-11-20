@@ -142,8 +142,8 @@ Areas, sessions and launchers can be dragged to put them in the order you like: 
 or after another, and a line shows where it will go. On the board, drag an area by its header to
 move it left or right; in the sidebar, drag an area, a session or a launcher up or down. Dropping
 a session on another session in a different area also moves it to that area. The order is kept
-by the server, so every tab and the next start show it. The line does not show where a drop would
-change nothing, such as over the item you are holding.
+by the server, so every tab and the next start show it. The line is not shown over the item you are
+holding.
 
 The sidebar can be folded away to leave more room, and its Sessions and Launchers sections, like
 each area in it, fold too; the board keeps the order of the areas.

@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Story } from '../../shared/types.js';
 import { api } from '../api.js';
 import { useEscape } from '../escape.js';
 import { playSound } from '../sounds.js';
-import { useStore } from '../store.js';
+import { refreshSounds, useStore } from '../store.js';
 import { FolderPicker } from './FolderPicker.js';
 
 /** Creates a story, or edits the one given. */
@@ -18,6 +18,11 @@ export function StoryDialog({ story, onClose }: { story?: Story; onClose: () => 
   const [busy, setBusy] = useState(false);
 
   useEscape(onClose);
+  useEffect(() => {
+    void refreshSounds();
+  }, []);
+  // The area's own sound when this page's library does not list it (yet): kept unless changed.
+  const unlisted = story?.sound && !library.some((f) => f.id === story.sound) ? story.sound : null;
 
   const submit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
@@ -28,7 +33,7 @@ export function StoryDialog({ story, onClose }: { story?: Story; onClose: () => 
     setBusy(true);
     setError(null);
     try {
-      const fields = { name: name.trim(), ticket: ticket.trim(), cwd: cwd.trim(), color, sound: library.some((f) => f.id === sound) ? sound : '' };
+      const fields = { name: name.trim(), ticket: ticket.trim(), cwd: cwd.trim(), color, sound: library.some((f) => f.id === sound) || sound === unlisted ? sound : '' };
       if (story) await api.updateStory(story.id, fields);
       else await api.createStory(fields);
       onClose();
@@ -78,8 +83,9 @@ export function StoryDialog({ story, onClose }: { story?: Story; onClose: () => 
         <label>
           <span>Sound</span>
           <span className="color-row">
-            <select value={library.some((f) => f.id === sound) ? sound : ''} onChange={(e) => setSound(e.target.value)}>
+            <select value={library.some((f) => f.id === sound) || sound === unlisted ? sound : ''} onChange={(e) => setSound(e.target.value)}>
               <option value="">Event sounds</option>
+              {unlisted && <option value={unlisted}>Current sound (not loaded)</option>}
               {library.map((f) => (
                 <option key={f.id} value={f.id}>
                   {f.name}

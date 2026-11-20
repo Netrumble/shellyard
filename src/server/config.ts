@@ -50,7 +50,7 @@ export function normalizeSoundFiles(v: unknown): SoundFile[] {
   return out;
 }
 
-/** Settings as they may be stored: only ids of known sounds, anything else is silence. */
+/** Settings as they may be stored: only ids of known sounds, anything else is the chime. */
 export function normalizeSoundSettings(v: unknown, files: SoundFile[]): SoundSettings {
   const o = isRecord(v) ? v : {};
   const pick = (x: unknown): string | null => (typeof x === 'string' && files.some((f) => f.id === x) ? x : null);

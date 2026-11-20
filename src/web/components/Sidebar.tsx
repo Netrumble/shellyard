@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import { AREA_DRAG, LAUNCHER_DRAG, SESSION_DRAG } from '../drag.js';
 import { dropArea, dropLauncher, dropSessionOnArea, dropSessionOnSession, sessionInArea } from '../drag-actions.js';
 import { requestPermissionOnce } from '../notify.js';
-import { groupByStory, selectCounts, type StoryGroup } from '../selectors.js';
+import { selectCounts, sidebarGroups, type StoryGroup } from '../selectors.js';
 import { setView, useStore } from '../store.js';
 import { Tachometer } from './Cluster.js';
 import { dragSource, useDropTarget } from './drag-target.js';
@@ -138,6 +138,7 @@ function AreaGroup(props: {
             <SessionRow key={s.id} session={s} selected={selectedId === s.id} />
           ))}
           {story && g.sessions.length === 0 && <li className="hint empty-story">No sessions</li>}
+          {!story && g.sessions.length === 0 && <li className="hint empty-story">Drop a session here to take it out of its area</li>}
         </ul>
       )}
     </section>
@@ -174,7 +175,7 @@ export function Sidebar({ onNewSession }: { onNewSession: (storyId?: string) => 
   const [profileDialog, setProfileDialog] = useState<string | null>(null);
   const editedProfile = meta.profiles.find((p) => p.id === profileDialog);
   const [creatingProfile, setCreatingProfile] = useState(false);
-  const groups = groupByStory(sessions, stories);
+  const groups = sidebarGroups(sessions, stories);
   const selectedId = view.kind === 'single' ? view.id : null;
   const storyFilter = view.kind === 'grid' ? view.storyFilter : undefined;
 
@@ -279,22 +280,21 @@ export function Sidebar({ onNewSession }: { onNewSession: (storyId?: string) => 
       </h2>
       {!sessionsFolded && (
         <div className="sessions-section">
-      {groups.length === 0 && <p className="hint">No sessions yet.</p>}
-      {groups.map((g) => (
-        <AreaGroup
-          key={g.story?.id ?? ''}
-          group={g}
-          folded={g.story !== null && collapsed.has(g.story.id)}
-          active={view.kind === 'grid' && storyFilter === (g.story ? g.story.id : null)}
-          showLooseHeader={stories.length > 0}
-          selectedId={selectedId}
-          onToggle={toggle}
-          onNewSession={onNewSession}
-          onEdit={(story) => setStoryDialog({ story })}
-          onRemove={removeStory}
-        />
-      ))}
-
+          {groups.length === 0 && <p className="hint">No sessions yet.</p>}
+          {groups.map((g) => (
+            <AreaGroup
+              key={g.story?.id ?? ''}
+              group={g}
+              folded={g.story !== null && collapsed.has(g.story.id)}
+              active={view.kind === 'grid' && storyFilter === (g.story ? g.story.id : null)}
+              showLooseHeader={stories.length > 0}
+              selectedId={selectedId}
+              onToggle={toggle}
+              onNewSession={onNewSession}
+              onEdit={(story) => setStoryDialog({ story })}
+              onRemove={removeStory}
+            />
+          ))}
         </div>
       )}
 
@@ -305,15 +305,15 @@ export function Sidebar({ onNewSession }: { onNewSession: (storyId?: string) => 
       </h2>
       {!launchersFolded && (
         <div className="launchers-section">
-      {meta.profiles.length === 0 && <p className="hint">No launchers found.</p>}
-      <ul className="profile-list">
-        {meta.profiles.map((p) => (
-          <LauncherRow key={p.id} profile={p} onLaunch={launch} onEdit={setProfileDialog} />
-        ))}
-      </ul>
-      <button type="button" className="icon add-launcher" title="New launcher" aria-label="New launcher" onClick={() => setCreatingProfile(true)}>
-        +
-      </button>
+          {meta.profiles.length === 0 && <p className="hint">No launchers found.</p>}
+          <ul className="profile-list">
+            {meta.profiles.map((p) => (
+              <LauncherRow key={p.id} profile={p} onLaunch={launch} onEdit={setProfileDialog} />
+            ))}
+          </ul>
+          <button type="button" className="icon add-launcher" title="New launcher" aria-label="New launcher" onClick={() => setCreatingProfile(true)}>
+            +
+          </button>
         </div>
       )}
 
