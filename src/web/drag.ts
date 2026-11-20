@@ -67,3 +67,41 @@ export function withSessionDrop(sessions: SessionInfo[], dragged: string, drop: 
   }
   return drop.order ? sortByIds(next, drop.order) : next;
 }
+
+/** What is being dragged right now (the drag data cannot be read before the drop). */
+export interface Dragged {
+  type: string;
+  id: string;
+}
+
+let dragged: Dragged | null = null;
+
+export function startDragged(type: string, id: string): void {
+  dragged = { type, id };
+}
+
+export function endDragged(): void {
+  dragged = null;
+}
+
+export function getDragged(): Dragged | null {
+  return dragged;
+}
+
+/**
+ * Whether a drop of the held item on a target would change nothing, so that no drop line shows.
+ * `targetId` is the item the target stands for (hovering the dragged item itself); `skip` is a
+ * further check on the dragged id (a session over its own area).
+ */
+export function dropChangesNothing(held: Dragged | null, type: string, targetId?: string, skip?: (id: string) => boolean): boolean {
+  if (!held || held.type !== type) return false;
+  return (targetId !== undefined && held.id === targetId) || (skip?.(held.id) ?? false);
+}
+
+/**
+ * After a failed change: the snapshot to put back, or null when the store no longer holds the
+ * optimistic value (a newer update arrived and must not be overwritten).
+ */
+export function restoreAfterFailure<T>(current: T, optimistic: T, snapshot: T): T | null {
+  return current === optimistic ? snapshot : null;
+}

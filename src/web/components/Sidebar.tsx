@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { Profile, SessionInfo, Story } from '../../shared/types.js';
 import { api } from '../api.js';
 import { AREA_DRAG, LAUNCHER_DRAG, SESSION_DRAG } from '../drag.js';
-import { dropArea, dropLauncher, dropSessionOnArea, dropSessionOnSession } from '../drag-actions.js';
+import { dropArea, dropLauncher, dropSessionOnArea, dropSessionOnSession, sessionInArea } from '../drag-actions.js';
 import { requestPermissionOnce } from '../notify.js';
 import { groupByStory, selectCounts, type StoryGroup } from '../selectors.js';
 import { setView, useStore } from '../store.js';
@@ -50,7 +50,7 @@ const report = (e: unknown): void => window.alert((e as Error).message);
 const classes = (...names: Array<string | false | null | undefined>): string | undefined => names.filter(Boolean).join(' ') || undefined;
 
 function SessionRow({ session, selected }: { session: SessionInfo; selected: boolean }): React.JSX.Element {
-  const { dropClass, dropProps } = useDropTarget({ [SESSION_DRAG]: { placed: true, onDrop: (id, place) => dropSessionOnSession(id, session.id, place) } });
+  const { dropClass, dropProps } = useDropTarget({ [SESSION_DRAG]: { placed: true, targetId: session.id, onDrop: (id, place) => dropSessionOnSession(id, session.id, place) } });
   return (
     <li className={classes(selected && 'selected', dropClass)} {...dropProps}>
       <button type="button" className="session-link" {...dragSource(SESSION_DRAG, session.id)} onClick={() => setView({ kind: 'single', id: session.id })}>
@@ -87,9 +87,9 @@ function AreaGroup(props: {
   const { group: g, folded, active, selectedId } = props;
   const story = g.story;
   const areaId = story ? story.id : null;
-  const intoArea = { onDrop: (id: string) => dropSessionOnArea(id, areaId) };
+  const intoArea = { skip: (id: string) => sessionInArea(id, areaId), onDrop: (id: string) => dropSessionOnArea(id, areaId) };
   const header = useDropTarget({
-    [AREA_DRAG]: story ? { placed: true, onDrop: (id, place) => dropArea(id, story.id, place) } : undefined,
+    [AREA_DRAG]: story ? { placed: true, targetId: story.id, onDrop: (id, place) => dropArea(id, story.id, place) } : undefined,
     [SESSION_DRAG]: intoArea,
   });
   const list = useDropTarget({ [SESSION_DRAG]: intoArea });
@@ -146,7 +146,7 @@ function AreaGroup(props: {
 
 /** A launcher: click to start it, drag to reorder the launchers. */
 function LauncherRow({ profile: p, onLaunch, onEdit }: { profile: Profile; onLaunch: (p: Profile) => void; onEdit: (id: string) => void }): React.JSX.Element {
-  const { dropClass, dropProps } = useDropTarget({ [LAUNCHER_DRAG]: { placed: true, onDrop: (id, place) => dropLauncher(id, p.id, place) } });
+  const { dropClass, dropProps } = useDropTarget({ [LAUNCHER_DRAG]: { placed: true, targetId: p.id, onDrop: (id, place) => dropLauncher(id, p.id, place) } });
   return (
     <li className={classes('profile-row', dropClass)} {...dropProps}>
       <button type="button" className="profile" title={`Start ${p.name}`} {...dragSource(LAUNCHER_DRAG, p.id)} onClick={() => onLaunch(p)}>

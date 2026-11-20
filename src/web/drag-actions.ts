@@ -1,9 +1,15 @@
 import { api } from './api.js';
-import { reorderTo, sessionDropOnArea, sessionDropOnSession, sortByIds, withSessionDrop, type SessionDrop } from './drag.js';
+import { reorderTo, restoreAfterFailure, sessionDropOnArea, sessionDropOnSession, sortByIds, withSessionDrop, type SessionDrop } from './drag.js';
 import type { Place } from './order.js';
 import { applyLocally, getState, refreshMeta } from './store.js';
 
 const report = (e: unknown): void => window.alert((e as Error).message);
+
+/** True when dropping this session on that area (null: none) would change nothing. */
+export function sessionInArea(id: string, storyId: string | null): boolean {
+  const { sessions, stories } = getState();
+  return sessionDropOnArea(sessions, stories, id, storyId) === null;
+}
 
 /** An area dropped before or after another one. */
 export function dropArea(dragged: string, target: string, place: Place): void {
@@ -15,8 +21,16 @@ export function dropArea(dragged: string, target: string, place: Place): void {
     place,
   );
   if (!order) return;
-  applyLocally({ stories: sortByIds(stories, order) });
-  api.reorderStories(order).catch(report);
+  const optimistic = sortByIds(stories, order);
+  applyLocally({ stories: optimistic });
+  api
+    .reorderStories(order)
+    .then((saved) => applyLocally({ stories: saved }))
+    .catch((e) => {
+      report(e);
+      const back = restoreAfterFailure(getState().stories, optimistic, stories);
+      if (back) applyLocally({ stories: back });
+    });
 }
 
 /** A launcher dropped before or after another one; the list is read again either way. */
@@ -38,9 +52,17 @@ export function dropLauncher(dragged: string, target: string, place: Place): voi
 
 function sendSessionDrop(dragged: string, drop: SessionDrop | null): void {
   if (!drop) return;
-  applyLocally({ sessions: withSessionDrop(getState().sessions, dragged, drop) });
+  const snapshot = getState().sessions;
+  const optimistic = withSessionDrop(snapshot, dragged, drop);
+  applyLocally({ sessions: optimistic });
   const move = drop.moveTo !== undefined ? api.moveSession(dragged, drop.moveTo) : Promise.resolve();
-  move.then(() => (drop.order ? api.reorderSessions(drop.order) : undefined)).catch(report);
+  move
+    .then(() => (drop.order ? api.reorderSessions(drop.order) : undefined))
+    .catch((e) => {
+      report(e);
+      const back = restoreAfterFailure(getState().sessions, optimistic, snapshot);
+      if (back) applyLocally({ sessions: back });
+    });
 }
 
 /** A session dropped before or after another one, moving into that one's area if needed. */

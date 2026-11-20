@@ -1,24 +1,31 @@
 import { useEffect, useState } from 'react';
+import { dropChangesNothing, endDragged, getDragged, startDragged } from '../drag.js';
 import { placeFor, type Place } from '../order.js';
 
 /** What a drop target does with one drag type; `placed` shows a before/after line instead of a highlight. */
 export interface DropRule {
   onDrop: (id: string, place: Place) => void;
   placed?: boolean;
+  /** The item this target stands for: no line shows while it is the one being dragged. */
+  targetId?: string;
+  /** A further check on the dragged id: true when dropping it here changes nothing. */
+  skip?: (id: string) => boolean;
 }
 
 /** Drop events already taken by an inner target, so the targets around it leave them alone. */
 const taken = new WeakSet<Event>();
 
 /** Makes an element the start of a drag carrying `id` under `type`. */
-export function dragSource(type: string, id: string): { draggable: true; onDragStart: (e: React.DragEvent) => void } {
+export function dragSource(type: string, id: string): { draggable: true; onDragStart: (e: React.DragEvent) => void; onDragEnd: () => void } {
   return {
     draggable: true,
     onDragStart: (e) => {
       e.stopPropagation();
       e.dataTransfer.setData(type, id);
       e.dataTransfer.effectAllowed = 'move';
+      startDragged(type, id);
     },
+    onDragEnd: endDragged,
   };
 }
 
@@ -57,7 +64,7 @@ export function useDropTarget(
 
   const rule = hover ? rules[hover.type] : undefined;
   return {
-    dropClass: hover && rule ? (rule.placed ? `drop-${hover.place}` : 'drop-into') : '',
+    dropClass: hover && rule && !dropChangesNothing(getDragged(), hover.type, rule.targetId, rule.skip) ? (rule.placed ? `drop-${hover.place}` : 'drop-into') : '',
     dropProps: {
       onDragOver: (e) => {
         const type = accepted(e);

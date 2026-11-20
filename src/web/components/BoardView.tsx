@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import { areaSummary, boardAreas, type BoardArea } from '../board.js';
 import { loadAreaSizes, NO_AREA_KEY, saveAreaSizes, withAreaSize, type AreaSize } from '../board-sizes.js';
 import { AREA_DRAG, SESSION_DRAG } from '../drag.js';
-import { dropArea, dropSessionOnArea, dropSessionOnSession } from '../drag-actions.js';
+import { dropArea, dropSessionOnArea, dropSessionOnSession, sessionInArea } from '../drag-actions.js';
 import { lampState } from '../effects.js';
 import { durationLabel } from '../gauges.js';
 import { statusLabel } from '../selectors.js';
@@ -18,7 +18,7 @@ const report = (e: unknown): void => window.alert((e as Error).message);
 function Dot({ session }: { session: SessionInfo }): React.JSX.Element {
   const label = `${session.name}: ${statusLabel(session)}`;
   // The dots wrap in rows, so the left half of a dot drops before it and the right half after.
-  const { dropClass, dropProps } = useDropTarget({ [SESSION_DRAG]: { placed: true, onDrop: (id, place) => dropSessionOnSession(id, session.id, place) } }, 'x');
+  const { dropClass, dropProps } = useDropTarget({ [SESSION_DRAG]: { placed: true, targetId: session.id, onDrop: (id, place) => dropSessionOnSession(id, session.id, place) } }, 'x');
   return (
     <button
       type="button"
@@ -116,8 +116,8 @@ function Area(props: {
   // A session dropped on the area moves into it; an area dropped on it goes to its left or right.
   const { dropClass, dropProps } = useDropTarget(
     {
-      [AREA_DRAG]: story ? { placed: true, onDrop: (id, place) => dropArea(id, story.id, place) } : undefined,
-      [SESSION_DRAG]: { onDrop: (id) => dropSessionOnArea(id, story ? story.id : null) },
+      [AREA_DRAG]: story ? { placed: true, targetId: story.id, onDrop: (id, place) => dropArea(id, story.id, place) } : undefined,
+      [SESSION_DRAG]: { skip: (id) => sessionInArea(id, story ? story.id : null), onDrop: (id) => dropSessionOnArea(id, story ? story.id : null) },
     },
     'x',
   );

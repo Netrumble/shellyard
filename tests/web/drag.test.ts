@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionInfo, Story } from '../../src/shared/types.js';
-import { areaOf, reorderTo, sessionDropOnArea, sessionDropOnSession, sortByIds, withSessionDrop } from '../../src/web/drag.js';
+import { areaOf, dropChangesNothing, endDragged, getDragged, reorderTo, restoreAfterFailure, startDragged, sessionDropOnArea, sessionDropOnSession, sortByIds, withSessionDrop } from '../../src/web/drag.js';
 
 const session = (id: string, storyId: string | null): SessionInfo => ({ id, storyId }) as SessionInfo;
 const story = (id: string): Story => ({ id, name: id }) as Story;
@@ -80,5 +80,39 @@ describe('withSessionDrop', () => {
   });
   it('leaves the list as it is without a move or an order', () => {
     expect(withSessionDrop(sessions, 'a', {})).toEqual(sessions);
+  });
+});
+
+describe('dragged item', () => {
+  it('is remembered from the start to the end of a drag', () => {
+    expect(getDragged()).toBeNull();
+    startDragged('t', 'a');
+    expect(getDragged()).toEqual({ type: 't', id: 'a' });
+    endDragged();
+    expect(getDragged()).toBeNull();
+  });
+});
+
+describe('dropChangesNothing', () => {
+  const none = null;
+  it('is false when nothing is dragged', () => expect(dropChangesNothing(none, 't', 'a')).toBe(false));
+  it('is true over the dragged item itself', () => expect(dropChangesNothing({ type: 't', id: 'a' }, 't', 'a')).toBe(true));
+  it('is false over another item, or another type', () => {
+    expect(dropChangesNothing({ type: 't', id: 'a' }, 't', 'b')).toBe(false);
+    expect(dropChangesNothing({ type: 'u', id: 'a' }, 't', 'a')).toBe(false);
+  });
+  it('is true for a session over its own area, through the area check', () => {
+    const own = (id: string): boolean => sessionDropOnArea(sessions, stories, id, 's1') === null;
+    expect(dropChangesNothing({ type: 't', id: 'a' }, 't', undefined, own)).toBe(true);
+    expect(dropChangesNothing({ type: 't', id: 'c' }, 't', undefined, own)).toBe(false);
+  });
+});
+
+describe('restoreAfterFailure', () => {
+  it('restores the snapshot only while the store still holds the optimistic value', () => {
+    const before = [1];
+    const optimistic = [2];
+    expect(restoreAfterFailure(optimistic, optimistic, before)).toBe(before);
+    expect(restoreAfterFailure([3], optimistic, before)).toBeNull();
   });
 });
