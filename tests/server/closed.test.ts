@@ -263,7 +263,7 @@ describe('closed sessions over http, websocket and a restart', () => {
     const shell = (await call(s, 'POST', '/api/sessions', { kind: 'shell', command: node, cwd: gone, name: 'lost' })).json as SessionInfo;
     await call(s, 'DELETE', `/api/sessions/${shell.id}`);
     const { rmSync } = await import('node:fs');
-    rmSync(gone, { recursive: true });
+    rmSync(gone, { recursive: true, maxRetries: 10, retryDelay: 100 });
     const [closed] = (await call(s, 'GET', '/api/closed')).json as ClosedSession[];
     const r = await call(s, 'POST', `/api/closed/${closed!.id}/reopen`);
     expect(r.status).toBe(409);

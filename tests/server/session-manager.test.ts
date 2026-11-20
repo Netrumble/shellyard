@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { defaultConfig, type Config } from '../../src/server/config.js';
 import { SessionManager } from '../../src/server/session-manager.js';
-import type { Profile, SessionInfo } from '../../src/shared/types.js';
+import type { Profile, SessionInfo, WorktreeListing } from '../../src/shared/types.js';
 import { FakeClock, fakePtyFactory, useTempHome } from '../helpers.js';
 
 const node = process.execPath;
@@ -419,5 +419,188 @@ describe('SessionManager', () => {
       ptys.last().emit('abc');
       expect(out).toEqual([[s.id, 'abc']]);
     });
+  });
+});
+
+describe('SessionManager git', () => {
+  const home = useTempHome();
+  let ptys: ReturnType<typeof fakePtyFactory>;
+  let mgr: SessionManager;
+  let work: string;
+  let other: string;
+  let listings: Map<string, WorktreeListing | null>;
+  let heads: Map<string, { branch: string | null; head: string }>;
+  let gitCalls: string[];
+
+  const wt = (path: string, branch: string | null, isMain = false) => ({ path, branch, head: 'abc1234', isMain, locked: false, prunable: false });
+  const listing = (current: string, paths: string[]): WorktreeListing => ({
+    current,
+    worktrees: paths.map((p, i) => wt(p, 'main', i === 0)),
+  });
+
+  beforeEach(() => {
+    ptys = fakePtyFactory();
+    work = join(home.dir(), 'work');
+    other = join(home.dir(), 'other');
+    mkdirSync(work);
+    mkdirSync(other);
+    listings = new Map();
+    heads = new Map();
+    gitCalls = [];
+    mgr = new SessionManager({
+      ptyFactory: ptys.factory,
+      now: new FakeClock().now,
+      config: () => defaultConfig(),
+      port: 7717,
+      hookToken: 't',
+      hookScriptPath: '/h.js',
+      statusScriptPath: '/s.js',
+      builtins: () => [],
+      gitOf: async (folder) => {
+        gitCalls.push(folder);
+        return listings.get(folder) ?? null;
+      },
+      headOf: (w) => heads.get(w) ?? null,
+    });
+  });
+
+  const shell = (cwd = work): SessionInfo => mgr.create({ kind: 'shell', command: node, cwd });
+  const claude = (cwd = work): SessionInfo => mgr.create({ kind: 'claude', command: node, cwd });
+
+  it('fills git after the session starts', async () => {
+    listings.set(work, listing(work, [work, other]));
+    let changes = 0;
+    mgr.onChange(() => changes++);
+    const s = shell();
+    expect(s.git).toBeNull();
+    expect(s.liveCwd).toBeNull();
+    const before = changes;
+    await vi.waitFor(() => expect(mgr.get(s.id)!.git).toEqual({ worktree: work, branch: 'main', head: 'abc1234', isMain: true, worktreeCount: 2 }));
+    expect(changes).toBeGreaterThan(before);
+  });
+
+  it('git stays null outside a repository', async () => {
+    const s = shell();
+    await vi.waitFor(() => expect(gitCalls).toEqual([work]));
+    await mgr.refreshGit(s.id);
+    expect(mgr.get(s.id)!.git).toBeNull();
+  });
+
+  it('setLiveCwd moves a Claude session git to the reported worktree', async () => {
+    listings.set(work, listing(work, [work, other]));
+    listings.set(other, listing(other, [work, other]));
+    const s = claude();
+    await vi.waitFor(() => expect(mgr.get(s.id)!.git?.worktree).toBe(work));
+    mgr.setLiveCwd(s.id, other);
+    expect(mgr.get(s.id)!.liveCwd).toBe(other);
+    await vi.waitFor(() => expect(mgr.get(s.id)!.git?.worktree).toBe(other));
+    expect(gitCalls).toContain(other);
+    expect(mgr.get(s.id)!.cwd).toBe(work);
+  });
+
+  it('setLiveCwd is ignored for shells, for relative paths and for missing folders', async () => {
+    const sh = shell();
+    const c = claude();
+    await mgr.refreshGit(c.id);
+    gitCalls.length = 0;
+    mgr.setLiveCwd(sh.id, other);
+    mgr.setLiveCwd(c.id, 'relative/dir');
+    mgr.setLiveCwd(c.id, join(home.dir(), 'missing'));
+    mgr.setLiveCwd(c.id, 42);
+    expect(mgr.get(sh.id)!.liveCwd).toBeNull();
+    expect(mgr.get(c.id)!.liveCwd).toBeNull();
+    expect(gitCalls).toEqual([]);
+  });
+
+  it('live folder outside a repository clears git', async () => {
+    listings.set(work, listing(work, [work]));
+    const s = claude();
+    await vi.waitFor(() => expect(mgr.get(s.id)!.git).not.toBeNull());
+    mgr.setLiveCwd(s.id, other);
+    await vi.waitFor(() => expect(mgr.get(s.id)!.git).toBeNull());
+  });
+
+  it('the last lookup started wins when two race', async () => {
+    const resolvers: Array<(l: WorktreeListing | null) => void> = [];
+    const racing = new SessionManager({
+      ptyFactory: ptys.factory,
+      now: new FakeClock().now,
+      config: () => defaultConfig(),
+      port: 1,
+      hookToken: 't',
+      hookScriptPath: '/h.js',
+      statusScriptPath: '/s.js',
+      builtins: () => [],
+      gitOf: () => new Promise((r) => resolvers.push(r)),
+    });
+    const s = racing.create({ kind: 'shell', command: node, cwd: work });
+    const second = racing.refreshGit(s.id);
+    resolvers[1]!(listing(other, [other]));
+    await second;
+    resolvers[0]!(listing(work, [work]));
+    await Promise.resolve();
+    expect(racing.get(s.id)!.git?.worktree).toBe(other);
+  });
+
+  it('ignores a git answer for a session removed meanwhile', async () => {
+    const resolvers: Array<(l: WorktreeListing | null) => void> = [];
+    const m = new SessionManager({
+      ptyFactory: ptys.factory,
+      now: new FakeClock().now,
+      config: () => defaultConfig(),
+      port: 1,
+      hookToken: 't',
+      hookScriptPath: '/h.js',
+      statusScriptPath: '/s.js',
+      builtins: () => [],
+      gitOf: () => new Promise((r) => resolvers.push(r)),
+    });
+    const s = m.create({ kind: 'shell', command: node, cwd: work });
+    let changes = 0;
+    m.remove(s.id);
+    m.onChange(() => changes++);
+    resolvers[0]!(listing(work, [work]));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(changes).toBe(0);
+    expect(m.get(s.id)).toBeNull();
+  });
+
+  it('refreshHeads updates the branch of running sessions only', async () => {
+    listings.set(work, listing(work, [work]));
+    const running = shell();
+    const gone = shell();
+    await vi.waitFor(() => {
+      expect(mgr.get(running.id)!.git).not.toBeNull();
+      expect(mgr.get(gone.id)!.git).not.toBeNull();
+    });
+    ptys.ptys[1]!.exit(0);
+    expect(mgr.get(gone.id)!.status).toBe('exited');
+    heads.set(work, { branch: 'feature', head: 'def5678' });
+    let changes = 0;
+    mgr.onChange(() => changes++);
+    mgr.refreshHeads();
+    expect(mgr.get(running.id)!.git).toMatchObject({ branch: 'feature', head: 'def5678', worktreeCount: 1 });
+    expect(mgr.get(gone.id)!.git).toMatchObject({ branch: 'main', head: 'abc1234' });
+    expect(changes).toBe(1);
+    mgr.refreshHeads();
+    expect(changes).toBe(1);
+  });
+
+  it('refreshGitIn updates worktreeCount of every session in the repo', async () => {
+    listings.set(work, listing(work, [work]));
+    listings.set(other, listing(other, [work, other]));
+    const a = shell(work);
+    const b = shell(other);
+    await vi.waitFor(() => {
+      expect(mgr.get(a.id)!.git?.worktreeCount).toBe(1);
+      expect(mgr.get(b.id)!.git?.worktreeCount).toBe(2);
+    });
+    const grown = [work, other, join(home.dir(), 'third')];
+    listings.set(work, listing(work, grown));
+    listings.set(other, listing(other, grown));
+    await mgr.refreshGitIn(work);
+    expect(mgr.get(a.id)!.git?.worktreeCount).toBe(3);
+    expect(mgr.get(b.id)!.git?.worktreeCount).toBe(3);
   });
 });

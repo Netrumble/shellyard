@@ -60,6 +60,18 @@ export interface SessionInfo {
   background: TerminalBackground | null;
   /** The font and text size chosen for this terminal; null: the default. */
   font: TerminalFont | null;
+  /** The git worktree the session works in; null outside a repository or before git answered. */
+  git: SessionGit | null;
+  /** For a Claude session, the folder Claude reports it is working in now. */
+  liveCwd: string | null;
+}
+
+export interface SessionGit {
+  worktree: string;
+  branch: string | null;
+  head: string;
+  isMain: boolean;
+  worktreeCount: number;
 }
 
 /** A Claude Code conversation saved on disk, which can be continued in a new session. */

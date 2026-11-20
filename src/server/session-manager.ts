@@ -1,14 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename } from 'node:path';
-import type { Conversation, CreateSessionRequest, HookName, Profile, SessionInfo, SessionKind, Story, TerminalBackground, TerminalFont } from '../shared/types.js';
+import { basename, isAbsolute } from 'node:path';
+import type { Conversation, SessionGit, WorktreeListing, CreateSessionRequest, HookName, Profile, SessionInfo, SessionKind, Story, TerminalBackground, TerminalFont } from '../shared/types.js';
 import { normalizeBackground } from './backgrounds.js';
 import { normalizeFont } from './fonts.js';
 import { findConversation } from './conversations.js';
 import type { RestoreEntry } from './restore.js';
 import { cleanupClaudeLaunch, prepareClaudeLaunch, withoutClaudeSessionMarkers } from './claude-launch.js';
 import type { Config } from './config.js';
+import { headOf, samePath, worktreesOf } from './git.js';
 import { isTerminalReport } from './input.js';
 import { PtySession, type PtyFactory } from './pty-session.js';
 import { detectProfiles, resolveExecutable, toLaunch } from './shells.js';
@@ -28,6 +29,10 @@ export interface ManagerDeps {
   stories?: () => Story[];
   /** Looks up a saved Claude Code conversation. Defaults to reading Claude Code's own files. */
   findConversation?: (id: string) => Conversation | null;
+  /** Reads the git worktrees around a folder. Defaults to running git. */
+  gitOf?: (folder: string) => Promise<WorktreeListing | null>;
+  /** Reads the branch and commit of a worktree. Defaults to reading its HEAD file. */
+  headOf?: (worktree: string) => { branch: string | null; head: string } | null;
 }
 
 const CLAUDE_PROFILE = 'builtin-claude';
@@ -56,6 +61,8 @@ interface Entry {
   launchModel: string | null;
   /** For a Claude session, the conversation it holds, as far as is known. */
   conversationId: string | null;
+  /** Counts git lookups, so that only the latest one started is applied. */
+  gitSeq: number;
 }
 
 function isDirectory(p: string): boolean {
@@ -64,6 +71,11 @@ function isDirectory(p: string): boolean {
   } catch {
     return false;
   }
+}
+
+function sameGit(a: SessionGit | null, b: SessionGit | null): boolean {
+  if (!a || !b) return a === b;
+  return a.worktree === b.worktree && a.branch === b.branch && a.head === b.head && a.isMain === b.isMain && a.worktreeCount === b.worktreeCount;
 }
 
 export class SessionManager {
@@ -154,6 +166,8 @@ export class SessionManager {
       // The request decides if it says anything (null included); otherwise the profile does.
       background: req.background !== undefined ? normalizeBackground(req.background) : normalizeBackground(profile?.background),
       font: req.font !== undefined ? normalizeFont(req.font) : normalizeFont(profile?.font),
+      git: null,
+      liveCwd: null,
     };
     const entry: Entry = {
       info,
@@ -165,6 +179,7 @@ export class SessionManager {
       launchModel: model,
       // A new Claude session is started under its own id, which is then its conversation's id.
       conversationId: kind === 'claude' ? (conversation?.id ?? id) : null,
+      gitSeq: 0,
     };
     this.entries.set(id, entry);
 
@@ -211,7 +226,78 @@ export class SessionManager {
       cleanupClaudeLaunch(id);
     }
     this.emitChange();
+    if (!problem) void this.refreshGit(id);
     return { ...info };
+  }
+
+  /** Works out the git worktree and branch of a session from the folder it is in. */
+  async refreshGit(id: string): Promise<void> {
+    const e = this.entries.get(id);
+    if (!e) return;
+    const seq = ++e.gitSeq;
+    const folder = e.info.liveCwd ?? e.info.cwd;
+    let git: SessionGit | null = null;
+    try {
+      const listing = await (this.deps.gitOf ?? worktreesOf)(folder);
+      if (listing) {
+        const w = listing.worktrees.find((x) => samePath(x.path, listing.current));
+        if (w) git = { worktree: w.path, branch: w.branch, head: w.head, isMain: w.isMain, worktreeCount: listing.worktrees.length };
+      }
+    } catch {
+      git = null;
+    }
+    if (this.entries.get(id) !== e || e.gitSeq !== seq) return;
+    if (sameGit(e.info.git, git)) return;
+    e.info.git = git;
+    this.emitChange();
+  }
+
+  /** Refreshes every running session working in a worktree of the repository containing this folder. */
+  async refreshGitIn(worktreeOrRepo: string): Promise<void> {
+    let listing: WorktreeListing | null = null;
+    try {
+      listing = await (this.deps.gitOf ?? worktreesOf)(worktreeOrRepo);
+    } catch {
+      return;
+    }
+    if (!listing) return;
+    const paths = listing.worktrees.map((w) => w.path);
+    const ids = [...this.entries.values()]
+      .filter((e) => e.info.status !== 'exited' && e.info.git && paths.some((p) => samePath(p, e.info.git!.worktree)))
+      .map((e) => e.info.id);
+    await Promise.all(ids.map((id) => this.refreshGit(id)));
+  }
+
+  /** The folder Claude Code says it is working in. Only an existing absolute folder counts. */
+  setLiveCwd(id: string, cwd: unknown): void {
+    const e = this.entries.get(id);
+    if (!e || e.info.kind !== 'claude') return;
+    if (typeof cwd !== 'string' || !isAbsolute(cwd) || !isDirectory(cwd)) return;
+    const previous = e.info.liveCwd;
+    if (previous !== null && samePath(previous, cwd)) return;
+    e.info.liveCwd = cwd;
+    this.emitChange();
+    void this.refreshGit(id);
+  }
+
+  /** Re-reads the branch of the running sessions from their HEAD files; no git process. */
+  refreshHeads(): void {
+    const read = this.deps.headOf ?? headOf;
+    let changed = false;
+    for (const e of this.entries.values()) {
+      const git = e.info.git;
+      if (!git || e.info.status === 'exited') continue;
+      let h: { branch: string | null; head: string } | null = null;
+      try {
+        h = read(git.worktree);
+      } catch {
+        h = null;
+      }
+      if (!h || (h.branch === git.branch && h.head === git.head)) continue;
+      e.info.git = { ...git, branch: h.branch, head: h.head };
+      changed = true;
+    }
+    if (changed) this.emitChange();
   }
 
   private wire(entry: Entry): void {
