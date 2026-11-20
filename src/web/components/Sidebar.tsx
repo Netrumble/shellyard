@@ -5,6 +5,18 @@ import { requestPermissionOnce } from '../notify.js';
 import { groupByStory, selectCounts } from '../selectors.js';
 import { setView, useStore } from '../store.js';
 import { Tachometer } from './Cluster.js';
+import { LAUNCHERS_FOLDED_KEY, SESSIONS_FOLDED_KEY, SIDEBAR_FOLDED_KEY, readFlag, writeFlag } from '../sidebar-memory.js';
+import {
+  AttentionIcon,
+  BoardIcon,
+  ConversationsIcon,
+  NewAreaIcon,
+  NewSessionIcon,
+  SchedulesIcon,
+  SidebarIcon,
+  TerminalsIcon,
+  UsageIcon,
+} from './icons.js';
 import { ColorDot, SessionActions, StatusBadge } from './SessionBits.js';
 import { ProfileDialog } from './ProfileDialog.js';
 import { StoryDialog } from './StoryDialog.js';
@@ -54,6 +66,9 @@ export function Sidebar({ onNewSession }: { onNewSession: (storyId?: string) => 
   const { sessions, stories, schedules, view, meta } = useStore();
   const counts = selectCounts(sessions);
   const [collapsed, setCollapsed] = useState(readCollapsed);
+  const [railFolded, setRailFolded] = useState(() => readFlag(SIDEBAR_FOLDED_KEY));
+  const [sessionsFolded, setSessionsFolded] = useState(() => readFlag(SESSIONS_FOLDED_KEY));
+  const [launchersFolded, setLaunchersFolded] = useState(() => readFlag(LAUNCHERS_FOLDED_KEY));
   const [storyDialog, setStoryDialog] = useState<{ story?: Story } | null>(null);
   const [profileDialog, setProfileDialog] = useState<string | null>(null);
   const editedProfile = meta.profiles.find((p) => p.id === profileDialog);
@@ -68,6 +83,11 @@ export function Sidebar({ onNewSession }: { onNewSession: (storyId?: string) => 
     else next.add(id);
     setCollapsed(next);
     writeCollapsed(next);
+  };
+
+  const flip = (current: boolean, set: (v: boolean) => void, key: string): void => {
+    set(!current);
+    writeFlag(key, !current);
   };
 
   const launch = (p: Profile): void => {
@@ -90,46 +110,74 @@ export function Sidebar({ onNewSession }: { onNewSession: (storyId?: string) => 
   const activeSchedules = schedules.filter((s) => s.enabled).length;
 
   return (
-    <aside className="sidebar">
-      <div className="brand">ShellYard</div>
+    <aside className={railFolded ? 'sidebar folded' : 'sidebar'}>
+      <div className="sidebar-top">
+        <button
+          type="button"
+          className="icon sidebar-toggle"
+          aria-expanded={!railFolded}
+          title={railFolded ? 'Unfold the sidebar' : 'Fold the sidebar'}
+          aria-label={railFolded ? 'Unfold the sidebar' : 'Fold the sidebar'}
+          onClick={() => flip(railFolded, setRailFolded, SIDEBAR_FOLDED_KEY)}
+        >
+          <SidebarIcon size={18} />
+        </button>
+        <div className="brand">ShellYard</div>
+      </div>
 
       <nav>
-        <button type="button" className={view.kind === 'board' ? 'nav active' : 'nav'} onClick={() => setView({ kind: 'board' })}>
-          <span>Board</span>
+        <button type="button" title="Board" className={view.kind === 'board' ? 'nav active' : 'nav'} onClick={() => setView({ kind: 'board' })}>
+          <BoardIcon />
+          <span className="nav-label">Board</span>
         </button>
-        <button type="button" className={view.kind === 'attention' ? 'nav active' : 'nav'} onClick={() => setView({ kind: 'attention' })}>
-          <span>Needs attention</span>
+        <button type="button" title="Needs attention" className={view.kind === 'attention' ? 'nav active' : 'nav'} onClick={() => setView({ kind: 'attention' })}>
+          <AttentionIcon />
+          <span className="nav-label">Needs attention</span>
           {counts.attention > 0 && <span className="count">{counts.attention}</span>}
         </button>
-        <button type="button" className={view.kind === 'grid' && storyFilter === undefined ? 'nav active' : 'nav'} onClick={() => setView({ kind: 'grid' })}>
-          <span>Terminals</span>
+        <button type="button" title="Terminals" className={view.kind === 'grid' && storyFilter === undefined ? 'nav active' : 'nav'} onClick={() => setView({ kind: 'grid' })}>
+          <TerminalsIcon />
+          <span className="nav-label">Terminals</span>
           <span className="count quiet">{sessions.length}</span>
         </button>
-        <button type="button" className={view.kind === 'conversations' ? 'nav active' : 'nav'} onClick={() => setView({ kind: 'conversations' })}>
-          <span>Conversations</span>
+        <button type="button" title="Conversations" className={view.kind === 'conversations' ? 'nav active' : 'nav'} onClick={() => setView({ kind: 'conversations' })}>
+          <ConversationsIcon />
+          <span className="nav-label">Conversations</span>
         </button>
-        <button type="button" className={view.kind === 'schedules' ? 'nav active' : 'nav'} onClick={() => setView({ kind: 'schedules' })}>
-          <span>Schedules</span>
+        <button type="button" title="Schedules" className={view.kind === 'schedules' ? 'nav active' : 'nav'} onClick={() => setView({ kind: 'schedules' })}>
+          <SchedulesIcon />
+          <span className="nav-label">Schedules</span>
           {activeSchedules > 0 && <span className="count quiet">{activeSchedules}</span>}
         </button>
-        <button type="button" className={view.kind === 'usage' ? 'nav active' : 'nav'} onClick={() => setView({ kind: 'usage' })}>
-          <span>Usage</span>
+        <button type="button" title="Usage" className={view.kind === 'usage' ? 'nav active' : 'nav'} onClick={() => setView({ kind: 'usage' })}>
+          <UsageIcon />
+          <span className="nav-label">Usage</span>
         </button>
       </nav>
 
       <div className="new-buttons">
-        <button type="button" className="start" onClick={() => onNewSession()}>
-          <span className="start-ring" aria-hidden="true">
+        <button type="button" className="start" title="New session" aria-label="New session" onClick={() => onNewSession()}>
+          <span className="start-ring start-full" aria-hidden="true">
             <span className="start-core" />
           </span>
-          <span>New session</span>
+          <span className="start-compact">
+            <NewSessionIcon />
+          </span>
+          <span className="start-label">New session</span>
         </button>
         <button type="button" className="new-story" onClick={() => setStoryDialog({})}>
-          New area
+          <NewAreaIcon />
+          <span>New area</span>
         </button>
       </div>
 
-      <h2>Sessions</h2>
+      <h2 className="section-title">
+        <button type="button" className="section-toggle" aria-expanded={!sessionsFolded} onClick={() => flip(sessionsFolded, setSessionsFolded, SESSIONS_FOLDED_KEY)}>
+          <span aria-hidden="true">{sessionsFolded ? '▸' : '▾'}</span> Sessions
+        </button>
+      </h2>
+      {!sessionsFolded && (
+        <div className="sessions-section">
       {groups.length === 0 && <p className="hint">No sessions yet.</p>}
       {groups.map((g) => {
         const key = g.story?.id ?? '';
@@ -186,7 +234,16 @@ export function Sidebar({ onNewSession }: { onNewSession: (storyId?: string) => 
         );
       })}
 
-      <h2>Launchers</h2>
+        </div>
+      )}
+
+      <h2 className="section-title">
+        <button type="button" className="section-toggle" aria-expanded={!launchersFolded} onClick={() => flip(launchersFolded, setLaunchersFolded, LAUNCHERS_FOLDED_KEY)}>
+          <span aria-hidden="true">{launchersFolded ? '▸' : '▾'}</span> Launchers
+        </button>
+      </h2>
+      {!launchersFolded && (
+        <div className="launchers-section">
       {meta.profiles.length === 0 && <p className="hint">No launchers found.</p>}
       <ul className="profile-list">
         {meta.profiles.map((p) => (
@@ -207,6 +264,8 @@ export function Sidebar({ onNewSession }: { onNewSession: (storyId?: string) => 
       <button type="button" className="icon add-launcher" title="New launcher" aria-label="New launcher" onClick={() => setCreatingProfile(true)}>
         +
       </button>
+        </div>
+      )}
 
       <p className="powered-by">Powered by Talentia Software</p>
 

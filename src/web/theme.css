@@ -2471,3 +2471,125 @@ button.worktree-chip[aria-expanded='true'] {
   margin: 0;
   color: var(--text);
 }
+
+/* Sidebar: icons, folded rail, foldable sections */
+
+.sidebar-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.sidebar-top .brand {
+  margin-bottom: 0;
+}
+
+.sidebar-toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nav {
+  gap: 8px;
+}
+
+.nav .nav-icon {
+  flex: none;
+}
+
+.nav .nav-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.start .start-compact {
+  display: none;
+}
+
+.new-story {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.section-title {
+  margin: 0;
+}
+
+.section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: none;
+  border-color: transparent;
+  padding: 2px 4px;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  text-align: left;
+}
+
+.app:has(.sidebar.folded) {
+  grid-template-columns: 52px minmax(0, 1fr);
+}
+
+.sidebar.folded {
+  padding: 14px 6px;
+  align-items: center;
+  overflow-x: hidden;
+}
+
+.sidebar.folded .brand,
+.sidebar.folded .nav-label,
+.sidebar.folded .new-story,
+.sidebar.folded .start-label,
+.sidebar.folded .start-full,
+.sidebar.folded .section-title,
+.sidebar.folded .sessions-section,
+.sidebar.folded .launchers-section,
+.sidebar.folded .powered-by {
+  display: none;
+}
+
+.sidebar.folded .sidebar-top {
+  margin-bottom: 10px;
+}
+
+.sidebar.folded nav {
+  align-items: center;
+}
+
+.sidebar.folded .nav {
+  position: relative;
+  justify-content: center;
+  padding: 6px;
+}
+
+.sidebar.folded .nav .count {
+  position: absolute;
+  top: -2px;
+  right: -4px;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.sidebar.folded .start .start-compact {
+  display: inline-flex;
+}
+
+.sidebar.folded .start {
+  justify-content: center;
+  padding: 6px;
+}
+
+@media (max-width: 900px) {
+  .app:has(.sidebar.folded) {
+    grid-template-columns: 52px minmax(0, 1fr);
+  }
+}
