@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chipText, isWslSession, moveTargets, samePathWeb, sessionsIn, suggestedFolder, worktreeName } from '../../src/web/worktrees.js';
+import { chipText, deleteConfirmations, freeBranches, isWslSession, moveTargets, samePathWeb, sessionsIn, suggestedFolder, worktreeName } from '../../src/web/worktrees.js';
 import type { SessionGit, SessionInfo } from '../../src/shared/types.js';
 
 const git = (over: Partial<SessionGit> = {}): SessionGit => ({ worktree: 'C:\\r\\app-feat', branch: 'feat', head: '1a2b3c4', isMain: false, worktreeCount: 2, ...over });
@@ -74,5 +74,44 @@ describe('isWslSession', () => {
     expect(isWslSession(['--cd', '/home'])).toBe(true);
     expect(isWslSession(['-x'])).toBe(false);
     expect(isWslSession(undefined)).toBe(false);
+  });
+});
+
+describe('deleteConfirmations', () => {
+  const path = 'C:\\r\\app-feat';
+  const final = `Delete worktree ${path}? Files ignored by git (like .env) are deleted too.`;
+  it('asks only the final question for a clean worktree with no sessions', () => {
+    expect(deleteConfirmations({ sessionNames: [], path, prunable: false, status: { dirty: false, unreachable: 0 } })).toEqual({ prompts: [final], force: false });
+  });
+  it('asks in order: sessions, changes, lost commits, then the final question, and forces', () => {
+    expect(deleteConfirmations({ sessionNames: ['a', 'b'], path, prunable: false, status: { dirty: true, unreachable: 3 } })).toEqual({
+      prompts: ['Close a, b and delete?', `Uncommitted changes in ${path} will be lost.`, '3 commits on no branch will be lost.', final],
+      force: true,
+    });
+  });
+  it('forces for lost commits alone', () => {
+    expect(deleteConfirmations({ sessionNames: [], path, prunable: false, status: { dirty: false, unreachable: 1 } })).toEqual({
+      prompts: ['1 commits on no branch will be lost.', final],
+      force: true,
+    });
+  });
+  it('asks about changes when the status is unknown, before forcing', () => {
+    expect(deleteConfirmations({ sessionNames: ['a'], path, prunable: false, status: null })).toEqual({
+      prompts: ['Close a and delete?', `Uncommitted changes in ${path} will be lost.`, final],
+      force: true,
+    });
+  });
+  it('has nothing to lose in a prunable worktree, whose folder is gone', () => {
+    expect(deleteConfirmations({ sessionNames: [], path, prunable: true, status: null })).toEqual({ prompts: [final], force: false });
+  });
+});
+
+describe('freeBranches', () => {
+  const wt = (branch: string | null) => ({ path: `/r/${branch ?? 'x'}`, branch, head: 'abc1234', isMain: false, locked: false, prunable: false });
+  it('leaves out the branches checked out in a worktree', () => {
+    expect(freeBranches(['main', 'feat', 'fix'], { current: '/r/main', worktrees: [wt('main'), wt(null), wt('feat')] })).toEqual(['fix']);
+  });
+  it('keeps every branch without a listing', () => {
+    expect(freeBranches(['main'], null)).toEqual(['main']);
   });
 });

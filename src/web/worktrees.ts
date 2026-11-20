@@ -39,6 +39,40 @@ export function moveTargets(listing: WorktreeListing | null, current: string): W
   return (listing?.worktrees ?? []).filter((w) => !w.prunable && !samePathWeb(w.path, current));
 }
 
+/** The branches no worktree has checked out, which git lets a new worktree use. */
+export function freeBranches(branches: string[], listing: WorktreeListing | null): string[] {
+  const taken = new Set((listing?.worktrees ?? []).map((w) => w.branch).filter((b): b is string => b !== null));
+  return branches.filter((b) => !taken.has(b));
+}
+
+/**
+ * The questions to ask, in order, before deleting a worktree, and whether git must force it.
+ * `status` null means unknown: ask about changes anyway before forcing. A prunable worktree's
+ * folder is gone already, so nothing in it can be lost.
+ */
+export function deleteConfirmations(c: {
+  sessionNames: string[];
+  path: string;
+  prunable: boolean;
+  status: { dirty: boolean; unreachable: number } | null;
+}): { prompts: string[]; force: boolean } {
+  const prompts: string[] = [];
+  let force = false;
+  if (c.sessionNames.length > 0) prompts.push(`Close ${c.sessionNames.join(', ')} and delete?`);
+  if (!c.prunable) {
+    if (c.status === null || c.status.dirty) {
+      prompts.push(`Uncommitted changes in ${c.path} will be lost.`);
+      force = true;
+    }
+    if (c.status && c.status.unreachable > 0) {
+      prompts.push(`${c.status.unreachable} commits on no branch will be lost.`);
+      force = true;
+    }
+  }
+  prompts.push(`Delete worktree ${c.path}? Files ignored by git (like .env) are deleted too.`);
+  return { prompts, force };
+}
+
 /** Whether a session runs in WSL (`--cd`), where moving it to another worktree is not offered. */
 export function isWslSession(args: string[] | undefined): boolean {
   return (args ?? []).includes('--cd');

@@ -5,6 +5,7 @@ import { api } from '../api.js';
 import { useStore } from '../store.js';
 import { chipText, isWslSession, moveTargets, sessionsIn, worktreeName } from '../worktrees.js';
 import { BranchDialog } from './BranchDialog.js';
+import { WorktreesDialog } from './WorktreesDialog.js';
 
 /** Asks before touching a worktree where other sessions are working too. True when there is none, or the answer is yes. */
 export function confirmShared(sessions: SessionInfo[], action: string): boolean {
@@ -25,6 +26,7 @@ export function WorktreeChip({ session }: { session: SessionInfo }): React.JSX.E
   const [listing, setListing] = useState<WorktreeListing | null | undefined>(undefined);
   const [pos, setPos] = useState({ top: 0, left: 0 });
   const [branching, setBranching] = useState(false);
+  const [managing, setManaging] = useState(false);
   const worktree = git?.worktree;
 
   useEffect(() => {
@@ -56,12 +58,17 @@ export function WorktreeChip({ session }: { session: SessionInfo }): React.JSX.E
     };
   }, [open, worktree]);
 
+  // Once the choices are there, put the keyboard on the first one.
+  useEffect(() => {
+    if (open && listing !== undefined) menu.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+  }, [open, listing]);
+
   if (!git) return null;
 
   const toggle = (e: React.MouseEvent): void => {
     e.stopPropagation();
     const r = button.current?.getBoundingClientRect();
-    if (r) setPos({ top: r.bottom + 4, left: Math.max(8, Math.min(r.left, window.innerWidth - 280)) });
+    if (r) setPos({ top: r.bottom + 4, left: Math.max(8, Math.min(r.left, window.innerWidth - 328)) });
     setOpen((o) => !o);
   };
 
@@ -90,7 +97,13 @@ export function WorktreeChip({ session }: { session: SessionInfo }): React.JSX.E
             style={{ top: pos.top, left: pos.left }}
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
-            onKeyDown={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Escape') {
+                setOpen(false);
+                button.current?.focus();
+              }
+            }}
           >
             {listing === undefined ? (
               <p className="hint">Loading…</p>
@@ -112,12 +125,23 @@ export function WorktreeChip({ session }: { session: SessionInfo }): React.JSX.E
                 >
                   Switch branch…
                 </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setOpen(false);
+                    setManaging(true);
+                  }}
+                >
+                  Manage worktrees…
+                </button>
               </>
             )}
           </div>,
           document.body,
         )}
-      {branching && <BranchDialog worktree={git.worktree} onClose={() => setBranching(false)} />}
+      {branching && <BranchDialog worktree={git.worktree} current={git.branch} exceptId={session.id} onClose={() => setBranching(false)} />}
+      {managing && <WorktreesDialog folder={git.worktree} onClose={() => setManaging(false)} />}
     </>
   );
 }

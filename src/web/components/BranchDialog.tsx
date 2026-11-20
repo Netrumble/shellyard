@@ -5,13 +5,28 @@ import { useStore } from '../store.js';
 import { sessionsIn, worktreeName } from '../worktrees.js';
 import { confirmShared } from './WorktreeChip.js';
 
-/** Switches the branch checked out in a worktree: to an existing one, or to a new one. */
-export function BranchDialog({ worktree, onClose }: { worktree: string; onClose: () => void }): React.JSX.Element {
+/**
+ * Switches the branch checked out in a worktree: to an existing one, or to a new one.
+ * `current` is the branch checked out now (left out of the choices); `exceptId` a session
+ * not to count among the others working there.
+ */
+export function BranchDialog({
+  worktree,
+  current,
+  exceptId,
+  onClose,
+}: {
+  worktree: string;
+  current?: string | null;
+  exceptId?: string;
+  onClose: () => void;
+}): React.JSX.Element {
   const { sessions } = useStore();
   const [mode, setMode] = useState<'existing' | 'new'>('existing');
   const [branches, setBranches] = useState<string[] | null>(null);
   const [existing, setExisting] = useState('');
   const [fresh, setFresh] = useState('');
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -21,18 +36,19 @@ export function BranchDialog({ worktree, onClose }: { worktree: string; onClose:
       .branches(worktree)
       .then((list) => {
         if (!live) return;
-        setBranches(list);
-        setExisting(list[0] ?? '');
+        const others = list.filter((b) => b !== current);
+        setBranches(others);
+        setExisting(others[0] ?? '');
       })
       .catch((e: unknown) => {
         if (!live) return;
         setBranches([]);
-        setError((e as Error).message);
+        setLoadError((e as Error).message);
       });
     return () => {
       live = false;
     };
-  }, [worktree]);
+  }, [worktree, current]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -46,10 +62,12 @@ export function BranchDialog({ worktree, onClose }: { worktree: string; onClose:
     e.preventDefault();
     const branch = (mode === 'new' ? fresh : existing).trim();
     if (!branch) {
+      // The reason the list is empty stays on screen; no need to say "choose" over it.
+      if (mode === 'existing' && loadError) return;
       setError(mode === 'new' ? 'Give the new branch a name.' : 'Choose a branch.');
       return;
     }
-    if (!confirmShared(sessionsIn(sessions, worktree), `Switch the branch of ${worktreeName(worktree)}`)) return;
+    if (!confirmShared(sessionsIn(sessions, worktree, exceptId), `Switch the branch of ${worktreeName(worktree)}`)) return;
     setBusy(true);
     setError(null);
     try {
@@ -95,6 +113,11 @@ export function BranchDialog({ worktree, onClose }: { worktree: string; onClose:
           <span>New branch</span>
         </label>
         {mode === 'new' && <input value={fresh} onChange={(e) => setFresh(e.target.value)} aria-label="New branch name" placeholder="feature/name" autoFocus />}
+        {loadError && (
+          <p className="error" role="alert">
+            {loadError}
+          </p>
+        )}
         {error && (
           <p className="error" role="alert">
             {error}

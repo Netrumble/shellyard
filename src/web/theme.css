@@ -2371,3 +2371,92 @@ button.worktree-chip[aria-expanded='true'] {
   margin: 0;
   padding: 6px 8px;
 }
+
+/* The worktrees dialog: one row per worktree, then the form for a new one. */
+.worktree-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.worktree-row {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.worktree-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.worktree-branch {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.worktree-name {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.worktree-mark {
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 5px;
+}
+
+.worktree-mark.ok {
+  color: var(--ok);
+}
+
+.worktree-mark.warn {
+  color: var(--warn);
+}
+
+.worktree-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.dialog .worktree-actions label.check {
+  font-size: 12px;
+}
+
+.worktree-actions button.danger {
+  color: var(--danger);
+}
+
+.worktree-warning {
+  color: var(--warn);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.worktree-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.worktree-form h3 {
+  font-size: 13px;
+  margin: 0;
+  color: var(--text);
+}
