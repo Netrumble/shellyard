@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chipText, deleteConfirmations, freeBranches, isWslSession, moveTargets, joinPath, relativeInside, samePathWeb, sessionsIn, suggestedFolder, worktreeName } from '../../src/web/worktrees.js';
+import { chipText, countOf, deleteConfirmations, freeBranches, isWslSession, leaveDetachedPrompt, moveTargets, joinPath, relativeInside, samePathWeb, sessionChoices, sessionsIn, suggestedFolder, worktreeName } from '../../src/web/worktrees.js';
 import type { SessionGit, SessionInfo } from '../../src/shared/types.js';
 
 const git = (over: Partial<SessionGit> = {}): SessionGit => ({ worktree: 'C:\\r\\app-feat', branch: 'feat', head: '1a2b3c4', isMain: false, worktreeCount: 2, ...over });
@@ -56,16 +56,63 @@ describe('suggestedFolder', () => {
     expect(suggestedFolder('/home/me/app', 'feature/x')).toBe('/home/me/app-feature-x');
     expect(suggestedFolder('/home/me/app/', 'fix')).toBe('/home/me/app-fix');
   });
+  it('leaves out .git for a bare repository', () => {
+    expect(suggestedFolder('/r/app.git', 'feat', true)).toBe('/r/app-feat');
+    expect(suggestedFolder('C:\\r\\app.git\\', 'feature/x', true)).toBe('C:\\r\\app-feature-x');
+    expect(suggestedFolder('/r/app/.git', 'feat', true)).toBe('/r/app-feat');
+    expect(suggestedFolder('/r/app', 'feat', true)).toBe('/r/app-feat');
+  });
+});
+
+describe('countOf', () => {
+  it('says one or many', () => {
+    expect(countOf(1, 'commit', 'commits')).toBe('1 commit');
+    expect(countOf(3, 'commit', 'commits')).toBe('3 commits');
+  });
+});
+
+const entry = (path: string, o: { prunable?: boolean; bare?: boolean; isMain?: boolean } = {}) => ({
+  path,
+  branch: null,
+  head: 'abc1234',
+  isMain: o.isMain ?? false,
+  locked: false,
+  prunable: o.prunable ?? false,
+  bare: o.bare ?? false,
 });
 
 describe('moveTargets', () => {
-  const wt = (path: string, prunable = false) => ({ path, branch: null, head: 'abc1234', isMain: false, locked: false, prunable });
   it('leaves out the current worktree and prunable ones', () => {
-    const listing = { current: 'C:\\r\\app', worktrees: [wt('C:/r/app'), wt('C:/r/app-feat'), wt('C:/r/gone', true)] };
+    const listing = { current: 'C:\\r\\app', worktrees: [entry('C:/r/app'), entry('C:/r/app-feat'), entry('C:/r/gone', { prunable: true })] };
     expect(moveTargets(listing, 'C:\\r\\app').map((w) => w.path)).toEqual(['C:/r/app-feat']);
+  });
+  it('leaves out the entry of a bare repository', () => {
+    const listing = { current: '/r/app-a', worktrees: [entry('/r/app.git', { bare: true, isMain: true }), entry('/r/app-a'), entry('/r/app-b')] };
+    expect(moveTargets(listing, '/r/app-a').map((w) => w.path)).toEqual(['/r/app-b']);
   });
   it('is empty without a listing', () => {
     expect(moveTargets(null, 'x')).toEqual([]);
+  });
+});
+
+describe('sessionChoices', () => {
+  it('offers the worktrees a session can start in: not bare, not prunable unless current', () => {
+    const listing = {
+      current: '/r/gone',
+      worktrees: [entry('/r/app.git', { bare: true, isMain: true }), entry('/r/app-a'), entry('/r/gone', { prunable: true }), entry('/r/old', { prunable: true })],
+    };
+    expect(sessionChoices(listing).map((w) => w.path)).toEqual(['/r/app-a', '/r/gone']);
+  });
+  it('is empty without a listing', () => {
+    expect(sessionChoices(null)).toEqual([]);
+  });
+});
+
+describe('leaveDetachedPrompt', () => {
+  it('asks only when commits would be left behind, with the right plural', () => {
+    expect(leaveDetachedPrompt(0)).toBeNull();
+    expect(leaveDetachedPrompt(1)).toBe('1 commit on no branch will be left behind (recoverable only from the reflog). Continue?');
+    expect(leaveDetachedPrompt(2)).toBe('2 commits on no branch will be left behind (recoverable only from the reflog). Continue?');
   });
 });
 
@@ -91,7 +138,7 @@ describe('deleteConfirmations', () => {
   });
   it('forces for lost commits alone', () => {
     expect(deleteConfirmations({ sessionNames: [], path, prunable: false, detached: false, status: { dirty: false, unreachable: 1 } })).toEqual({
-      prompts: ['1 commits on no branch will be lost.', final],
+      prompts: ['1 commit on no branch will be lost.', final],
       force: true,
     });
   });
@@ -120,7 +167,7 @@ describe('deleteConfirmations', () => {
 });
 
 describe('freeBranches', () => {
-  const wt = (branch: string | null) => ({ path: `/r/${branch ?? 'x'}`, branch, head: 'abc1234', isMain: false, locked: false, prunable: false });
+  const wt = (branch: string | null) => ({ path: `/r/${branch ?? 'x'}`, branch, head: 'abc1234', isMain: false, locked: false, prunable: false, bare: false });
   it('leaves out the branches checked out in a worktree', () => {
     expect(freeBranches(['main', 'feat', 'fix'], { current: '/r/main', worktrees: [wt('main'), wt(null), wt('feat')] })).toEqual(['fix']);
   });

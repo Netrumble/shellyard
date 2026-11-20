@@ -29,14 +29,37 @@ export function sessionsIn(sessions: SessionInfo[], worktree: string, exceptId?:
   return sessions.filter((s) => s.status !== 'exited' && s.id !== exceptId && s.git !== null && samePathWeb(s.git.worktree, worktree));
 }
 
-/** Where a new worktree goes by default: beside the main one, named `<folder>-<branch>`. Keeps the separator style given. */
-export function suggestedFolder(mainWorktree: string, branch: string): string {
-  return `${mainWorktree.replace(/[\\/]+$/, '')}-${branch.replaceAll('/', '-')}`;
+/**
+ * Where a new worktree goes by default: beside the main one, named `<folder>-<branch>`. Keeps the
+ * separator style given. For a bare repository the name leaves out `.git` (`app.git` → `app-<branch>`,
+ * `app/.git` → `app-<branch>`).
+ */
+export function suggestedFolder(mainWorktree: string, branch: string, bare = false): string {
+  let base = mainWorktree.replace(/[\\/]+$/, '');
+  if (bare) base = /[\\/]\.git$/i.test(base) ? base.slice(0, -'.git'.length - 1) : base.replace(/\.git$/i, '');
+  return `${base}-${branch.replaceAll('/', '-')}`;
 }
 
-/** The worktrees a session can move to: every listed one but the one it is in, and none that git would prune. */
+/** "1 commit", "2 commits". */
+export function countOf(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+/** The worktrees a session can move to: every listed one but the one it is in, and none that git would prune or that is bare. */
 export function moveTargets(listing: WorktreeListing | null, current: string): Worktree[] {
-  return (listing?.worktrees ?? []).filter((w) => !w.prunable && !samePathWeb(w.path, current));
+  return (listing?.worktrees ?? []).filter((w) => !w.prunable && !w.bare && !samePathWeb(w.path, current));
+}
+
+/** The worktrees a new session can start in: none that is bare, and none that git would prune unless it is the current one. */
+export function sessionChoices(listing: WorktreeListing | null): Worktree[] {
+  if (!listing) return [];
+  return listing.worktrees.filter((w) => !w.bare && (!w.prunable || samePathWeb(w.path, listing.current)));
+}
+
+/** The question asked before switching a detached worktree away from commits no branch holds; null when there are none. */
+export function leaveDetachedPrompt(unreachable: number): string | null {
+  if (unreachable <= 0) return null;
+  return `${countOf(unreachable, 'commit', 'commits')} on no branch will be left behind (recoverable only from the reflog). Continue?`;
 }
 
 /** The branches no worktree has checked out, which git lets a new worktree use. */
@@ -73,7 +96,7 @@ export function deleteConfirmations(c: {
       force = true;
     }
     if (c.status.unreachable > 0) {
-      prompts.push(`${c.status.unreachable} commits on no branch will be lost.`);
+      prompts.push(`${countOf(c.status.unreachable, 'commit', 'commits')} on no branch will be lost.`);
       force = true;
     }
   }

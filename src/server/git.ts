@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { isAbsolute, join, resolve } from 'node:path';
 import type { Worktree, WorktreeListing } from '../shared/types.js';
 
 /** The message is git's trimmed stderr, or a validation message. */
@@ -12,9 +12,9 @@ export class GitRefusal extends GitError {}
 /**
  * What git says when a folder is still held by a process that is going away (Windows keeps the
  * cwd of a dying process busy for a moment): "Permission denied", "Device or resource busy",
- * "being used by another process", "Directory not empty", "failed to delete", "unable to ...".
+ * "being used by another process", "failed to delete". Git runs with LC_ALL=C, so it is English.
  */
-const BUSY = /busy|permission denied|being used|not empty|failed to delete|unable to/i;
+const BUSY = /busy|permission denied|being used|failed to delete/i;
 
 /**
  * Runs a git operation again, a few times and a short while apart, while it fails because a folder
@@ -40,13 +40,18 @@ export async function retryWhileBusy<T>(
 
 const TIMEOUT_MS = 15000;
 
-/** Runs git without a shell and returns stdout. Throws GitError when git fails or is missing. */
+export type RunGit = (args: string[], cwd: string) => Promise<string>;
+
+/**
+ * Runs git without a shell and returns stdout. Throws GitError when git fails or is missing.
+ * Git speaks English here (LC_ALL=C), so that its messages can be recognised.
+ */
 export function runGit(args: string[], cwd: string): Promise<string> {
   return new Promise((resolvePromise, reject) => {
     execFile(
       'git',
       args,
-      { cwd, timeout: TIMEOUT_MS, windowsHide: true, maxBuffer: 16 * 1024 * 1024 },
+      { cwd, timeout: TIMEOUT_MS, windowsHide: true, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C', LANG: 'C' } },
       (error, stdout, stderr) => {
         if (error) {
           const text = String(stderr ?? '').trim();
@@ -79,6 +84,13 @@ export function samePath(a: string, b: string): boolean {
   return normalise(a) === normalise(b);
 }
 
+/** Whether `folder` is `root` or somewhere below it. */
+export function isInside(folder: string, root: string): boolean {
+  const f = normalise(folder);
+  const r = normalise(root);
+  return f === r || f.startsWith(r.endsWith('/') ? r : `${r}/`);
+}
+
 function parseWorktrees(out: string): Worktree[] {
   const list: Worktree[] = [];
   for (const block of out.split(/\r?\n\r?\n/)) {
@@ -92,12 +104,14 @@ function parseWorktrees(out: string): Worktree[] {
           isMain: list.length === 0,
           locked: false,
           prunable: false,
+          bare: false,
         };
       } else if (!w) continue;
       else if (line.startsWith('HEAD ')) w.head = line.slice(5, 12);
       else if (line.startsWith('branch ')) w.branch = line.slice(7).replace(/^refs\/heads\//, '');
       else if (line === 'locked' || line.startsWith('locked ')) w.locked = true;
       else if (line === 'prunable' || line.startsWith('prunable ')) w.prunable = true;
+      else if (line === 'bare') w.bare = true;
     }
     if (w) list.push(w);
   }
@@ -239,26 +253,65 @@ export async function createWorktree(
   return listingOf(repo);
 }
 
+/** "1 commit", "2 commits". */
+export function countOf(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+/** Deletes what is left of a folder, trying again a few times; true when it is gone. */
+function removeLeftover(path: string): boolean {
+  try {
+    rmSync(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch {
+    // Still held by some process: the caller says so.
+  }
+  return !existsSync(path);
+}
+
+/**
+ * Removes a linked worktree (and, when asked, its branch if it is merged). `seams` lets tests
+ * stand in for git and for the deletion of a leftover folder.
+ */
 export async function removeWorktree(
   repo: string,
   path: string,
   o: { force: boolean; deleteBranch: boolean },
+  seams: { run?: RunGit; removeFolder?: (path: string) => boolean } = {},
 ): Promise<{ listing: WorktreeListing; warning: string | null }> {
+  const run = seams.run ?? runGit;
   refuseDash('Path', path);
   const target = (await listingOf(repo)).worktrees.find((w) => samePath(w.path, path));
   if (!target) throw new GitRefusal('Not a worktree of this repository');
   if (target.isMain) throw new GitRefusal('The main worktree cannot be removed');
-  if (target.prunable) await runGit(['worktree', 'prune'], repo);
-  else await runGit(['worktree', 'remove', ...(o.force ? ['--force'] : []), '--', target.path], repo);
-  let warning: string | null = null;
-  if (o.deleteBranch && target.branch) {
+  // Removing a worktree drops its HEAD: commits only a detached HEAD holds would be lost.
+  if (!o.force && target.branch === null && !target.prunable) {
+    const { unreachable } = await worktreeStatus(target.path);
+    if (unreachable > 0) throw new GitRefusal(`${countOf(unreachable, 'commit', 'commits')} on no branch would be lost.`);
+  }
+  const warnings: string[] = [];
+  if (target.prunable) await run(['worktree', 'prune'], repo);
+  else {
     try {
-      await runGit(['branch', '-d', '--', target.branch], repo);
+      await run(['worktree', 'remove', ...(o.force ? ['--force'] : []), '--', target.path], repo);
     } catch (e) {
-      warning = e instanceof Error ? e.message : String(e);
+      // On Windows git can fail half-way on a folder another process still holds: it has deleted
+      // the files and dropped the worktree from its list already, and only the folder remains.
+      // The removal is done then; what is left of the folder is deleted here if it can be.
+      const still = (await listingOf(repo)).worktrees.some((w) => samePath(w.path, target.path));
+      if (still) throw e;
+      if (existsSync(target.path) && !(seams.removeFolder ?? removeLeftover)(target.path)) {
+        warnings.push(`The folder ${target.path} could not be fully deleted; remove it by hand.`);
+      }
     }
   }
-  return { listing: await listingOf(repo), warning };
+  if (o.deleteBranch && target.branch) {
+    try {
+      await run(['branch', '-d', '--', target.branch], repo);
+    } catch (e) {
+      warnings.push(e instanceof Error ? e.message : String(e));
+    }
+  }
+  return { listing: await listingOf(repo), warning: warnings.length > 0 ? warnings.join('\n') : null };
 }
 
 export async function switchBranch(
@@ -267,8 +320,4 @@ export async function switchBranch(
 ): Promise<void> {
   await validateBranch(worktreePath, o.branch);
   await runGit(['switch', ...(o.create ? ['-c'] : []), o.branch], worktreePath);
-}
-
-export function defaultWorktreeFolder(mainWorktree: string, branch: string): string {
-  return resolve(`${dirname(mainWorktree)}/${basename(mainWorktree)}-${branch.replaceAll('/', '-')}`);
 }

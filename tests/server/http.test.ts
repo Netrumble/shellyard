@@ -480,6 +480,7 @@ describe.skipIf(!hasGit)('http api: git', () => {
   let repo = '';
   let linked = '';
   let plain = '';
+  let gitPtys = fakePtyFactory();
 
   const call = (method: string, path: string, opts: CallOpts = {}): Promise<Res> => callAt(port, method, path, opts);
   const q = (p: string): string => encodeURIComponent(p);
@@ -489,6 +490,7 @@ describe.skipIf(!hasGit)('http api: git', () => {
   const status = (body: Record<string, unknown>) => JSON.stringify({ model: { id: 'claude-opus', display_name: 'Opus' }, cost: { total_cost_usd: 1 }, ...body });
 
   beforeEach(async () => {
+    gitPtys = fakePtyFactory();
     root = realpathSync(mkdtempSync(join(tmpdir(), 'shellyard-http-git-')));
     repo = join(root, 'repo');
     linked = join(root, 'repo-feature');
@@ -511,7 +513,7 @@ describe.skipIf(!hasGit)('http api: git', () => {
     // The real git functions: no gitOf / headOf stubs here.
     mgr = new SessionManager({
       stories: () => stories.list(),
-      ptyFactory: fakePtyFactory().factory,
+      ptyFactory: gitPtys.factory,
       now: Date.now,
       config: () => loadConfig().config,
       port,
@@ -685,5 +687,40 @@ describe.skipIf(!hasGit)('http api: git', () => {
     expect(mgr.get(s.id)!.liveCwd).toBe(plain);
     expect(mgr.get(s.id)!.status).toBe('working');
     expect(mgr.conversationOf(s.id)).toBe(fresh);
+
+    // The new process has reported, so the old one is gone: the user may /resume its conversation.
+    const resumed = await call('POST', `/api/hooks/${s.id}`, { auth: 'hook', body: JSON.stringify({ hook_event_name: 'Stop', session_id: old, cwd: repo }) });
+    expect(resumed.status).toBe(204);
+    expect(mgr.conversationOf(s.id)).toBe(old);
+    expect(mgr.get(s.id)!.liveCwd).toBe(repo);
+  });
+
+  it('refuses to move a session that sets its own folder with --cd', async () => {
+    const s = mgr.create({ kind: 'shell', command: process.execPath, args: ['--cd', '/home/me'], cwd: repo });
+    const r = await post(`/api/sessions/${s.id}/worktree`, { path: linked });
+    expect(r.status).toBe(422);
+    expect(r.json().error).toMatch(/--cd/);
+    expect(samePath(mgr.get(s.id)!.cwd, repo)).toBe(true);
+  });
+
+  it('waits for the process of a closed session in the worktree to end before removing it', async () => {
+    const s = mgr.create({ kind: 'shell', command: process.execPath, cwd: linked });
+    const p = gitPtys.last();
+    // Like a real process, it ends a while after it is killed.
+    p.kill = () => {
+      p.killed = true;
+    };
+    mgr.remove(s.id);
+    let settled = false;
+    const pending = del('/api/git/worktrees', { repo, path: linked, force: false, deleteBranch: false }).then((r) => {
+      settled = true;
+      return r;
+    });
+    await new Promise((r) => setTimeout(r, 400));
+    expect(settled).toBe(false);
+    p.exit(1);
+    const r = await pending;
+    expect(r.status).toBe(200);
+    expect(r.json().listing.worktrees).toHaveLength(1);
   });
 });

@@ -9,7 +9,7 @@ import { findConversation } from './conversations.js';
 import type { RestoreEntry } from './restore.js';
 import { cleanupClaudeLaunch, prepareClaudeLaunch, withoutClaudeSessionMarkers } from './claude-launch.js';
 import type { Config } from './config.js';
-import { headOf, samePath, worktreesOf } from './git.js';
+import { headOf, isInside, samePath, worktreesOf } from './git.js';
 import { isTerminalReport } from './input.js';
 import { PtySession, type PtyFactory } from './pty-session.js';
 import { detectProfiles, resolveExecutable, toLaunch } from './shells.js';
@@ -49,6 +49,8 @@ const ECHO_WINDOW_MS = 500;
  * working again" and the session would drop out of sight just as it was put on screen.
  */
 const REPAINT_WINDOW_MS = 1500;
+/** A stopped process not reported gone after this long is not waited for any more. */
+const DYING_MS = 10000;
 
 interface Entry {
   info: SessionInfo;
@@ -108,8 +110,46 @@ export class SessionManager {
   private readonly changeCbs: Array<(sessions: SessionInfo[]) => void> = [];
   private readonly outputCbs: Array<(id: string, data: string) => void> = [];
   private readonly closedCbs: Array<(entry: RestoreEntry, sessionId: string) => void> = [];
+  /** Processes stopped (session closed or restarted elsewhere) that have not ended yet, with their folders. */
+  private readonly dying = new Set<{ folders: string[]; since: number }>();
 
   constructor(private readonly deps: ManagerDeps) {}
+
+  /**
+   * Stops a session's process. Until it has ended its folders count as in use, as Windows keeps
+   * the working folder of a process busy until it is gone.
+   */
+  private stop(entry: Entry): void {
+    const pty = entry.pty;
+    entry.pty = null;
+    if (!pty) return;
+    if (!pty.hasExited) {
+      const { info } = entry;
+      const record = {
+        folders: [info.cwd, info.liveCwd, info.git?.worktree].filter((f): f is string => typeof f === 'string'),
+        since: this.deps.now(),
+      };
+      this.dying.add(record);
+      pty.onExit(() => this.dying.delete(record));
+    }
+    pty.kill();
+    pty.dispose();
+  }
+
+  /** Whether a process of a session, running or still ending, works in this folder or below it. */
+  hasLiveProcessIn(folder: string): boolean {
+    const now = this.deps.now();
+    for (const d of this.dying) {
+      if (now - d.since > DYING_MS) this.dying.delete(d);
+      else if (d.folders.some((f) => isInside(f, folder))) return true;
+    }
+    for (const e of this.entries.values()) {
+      if (!e.pty || e.pty.hasExited || e.info.status === 'exited') continue;
+      const folders = [e.info.cwd, e.info.liveCwd, e.info.git?.worktree];
+      if (folders.some((f) => typeof f === 'string' && isInside(f, folder))) return true;
+    }
+    return false;
+  }
 
   list(): SessionInfo[] {
     return [...this.entries.values()].map((e) => ({ ...e.info }));
@@ -282,10 +322,7 @@ export class SessionManager {
     // Callbacks of the old process are ignored from here on, its exit included: it must
     // neither close the session nor remove the settings file of the new process.
     entry.generation++;
-    const old = entry.pty;
-    entry.pty = null;
-    old?.kill();
-    old?.dispose();
+    this.stop(entry);
     cleanupClaudeLaunch(id);
 
     const from = info.git?.worktree ?? info.cwd;
@@ -307,7 +344,12 @@ export class SessionManager {
     entry.lastResizeAt = 0;
 
     const problem = this.start(entry, cwd, null);
-    if (problem) this.failStart(entry, problem);
+    if (problem) {
+      // The session is in another folder now: the git it had no longer describes it.
+      entry.gitSeq++;
+      info.git = null;
+      this.failStart(entry, problem);
+    }
     this.emitChange();
     if (!problem) this.refreshGit(id).catch(() => undefined);
     return { ...info };
@@ -481,10 +523,15 @@ export class SessionManager {
     return this.entries.get(id)?.retired.has(conversationId) ?? false;
   }
 
-  /** The conversation Claude Code says the session is holding (it changes with /clear or /resume). */
+  /**
+   * The conversation Claude Code says the session is holding (it changes with /clear or /resume).
+   * Called for reports not from a retired conversation: the current process is reporting, so the
+   * one it replaced is gone, and a retired conversation it names later (/resume) is its own.
+   */
   setConversation(id: string, conversationId: string): void {
     const e = this.entries.get(id);
     if (!e || e.info.kind !== 'claude' || !CONVERSATION_ID.test(conversationId)) return;
+    e.retired.clear();
     if (e.conversationId === conversationId) return;
     e.conversationId = conversationId;
     this.emitChange();
@@ -583,8 +630,7 @@ export class SessionManager {
     // Closed while it was running; one that had already ended was reported when it ended.
     if (e.pty && e.info.status !== 'exited') this.emitClosed(e);
     this.entries.delete(id);
-    e.pty?.kill();
-    e.pty?.dispose();
+    this.stop(e);
     cleanupClaudeLaunch(id);
     this.emitChange();
     return true;

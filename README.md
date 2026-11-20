@@ -240,25 +240,30 @@ not known to ShellYard.
 A session in a git repository shows a chip in its title bar, `⎇ branch · worktree`: the branch
 checked out in the folder it works in (a short commit id when no branch is), and the name of that
 worktree's folder. A Claude Code session follows the folder Claude reports, so the chip changes
-when Claude moves to another worktree; for other sessions it shows the folder the session started in.
+when Claude moves to another worktree; for other sessions it shows the folder the session started
+in.
 
 The chip's menu lets you move the session to another worktree of the repository, or switch the
-branch of its worktree. Moving a session restarts it. For Claude Code that means a new conversation
-in the new folder: the old one stays in Conversations, where you can resume it. Moving is not
-offered for WSL sessions.
+branch of its worktree. Moving a session restarts it. For Claude Code that means a new
+conversation in the new folder: the old one stays in Conversations, where you can resume it.
+Moving is not offered for WSL sessions. Switching away from a commit that is on no branch asks
+first, as that commit is then left behind.
 
-**Manage worktrees…** (in the chip's menu) lists the worktrees of the repository. There you create one,
-choosing an existing branch or a new one and the folder (by default beside the main worktree), and
-delete one. Before deleting, ShellYard asks about what would be lost: sessions still open in it, uncommitted changes,
-commits that are on no branch, and the files git ignores (like `.env`), which are deleted too. You can
-delete the branch together with the worktree, which is kept, with a warning, if it is not merged.
+**Manage worktrees…** (in the chip's menu) lists the worktrees of the repository. There you
+create one, choosing an existing branch or a new one and the folder (by default beside the main
+worktree), and delete one. Before deleting, ShellYard asks about what would be lost: sessions
+still open in it, uncommitted changes, commits that are on no branch, and the files git ignores
+(like `.env`), which are deleted too. Commits on no branch are never lost without that
+confirmation: the server refuses to delete such a worktree otherwise. You can also delete the
+worktree's branch; if that branch is not merged, the branch is kept and a warning says so.
 
-When other sessions are working in a worktree, moving a session there or switching the branch of that
-worktree asks first: they all share the same files, and the branch changes under all of them.
+When other sessions are working in a worktree, moving a session there or switching the branch of
+that worktree asks first: they all share the same files, and the branch changes under all of them.
 
 In the new-session dialog, when the folder is in a repository with more than one worktree, a
 **Worktree** choice appears under Folder. Pick one to start the session there, in the same
 sub-folder if it exists in that worktree. **Manage…** opens the same dialog to create one first.
+The choice is not offered for launchers that set their own folder (WSL, `--cd`).
 
 ### Terminal background
 

@@ -436,7 +436,7 @@ describe('SessionManager git', () => {
   let heads: Map<string, { branch: string | null; head: string }>;
   let gitCalls: string[];
 
-  const wt = (path: string, branch: string | null, isMain = false) => ({ path, branch, head: 'abc1234', isMain, locked: false, prunable: false });
+  const wt = (path: string, branch: string | null, isMain = false) => ({ path, branch, head: 'abc1234', isMain, locked: false, prunable: false, bare: false });
   const listing = (current: string, paths: string[]): WorktreeListing => ({
     current,
     worktrees: paths.map((p, i) => wt(p, 'main', i === 0)),
@@ -667,7 +667,7 @@ describe('SessionManager restartIn', () => {
 
   const listing = (current: string, paths: string[]): WorktreeListing => ({
     current,
-    worktrees: paths.map((p, i) => ({ path: p, branch: i === 0 ? 'main' : 'feature', head: 'abc1234', isMain: i === 0, locked: false, prunable: false })),
+    worktrees: paths.map((p, i) => ({ path: p, branch: i === 0 ? 'main' : 'feature', head: 'abc1234', isMain: i === 0, locked: false, prunable: false, bare: false })),
   });
 
   beforeEach(() => {
@@ -832,5 +832,106 @@ describe('SessionManager restartIn', () => {
     expect(ptys.last().opts.cwd).toBe(join(other, 'web'));
     expect(r.cwd).toBe(join(other, 'web'));
     expect(r.liveCwd).toBeNull();
+  });
+
+  it('forgets the git of a session whose restart fails', async () => {
+    listings.set(work, listing(work, [work, other]));
+    const s = mgr.create({ kind: 'shell', command: node, cwd: work });
+    await vi.waitFor(() => expect(mgr.get(s.id)!.git?.worktree).toBe(work));
+    const r = mgr.restartIn(s.id, join(home.dir(), 'missing'))!;
+    expect(r.status).toBe('exited');
+    expect(r.error).toMatch(/Folder does not exist/);
+    expect(r.git).toBeNull();
+    expect(mgr.get(s.id)!.git).toBeNull();
+  });
+
+  it('stops ignoring a retired conversation once the new process has reported', () => {
+    const s = mgr.create({ kind: 'claude', command: node, cwd: work });
+    const before = mgr.conversationOf(s.id)!;
+    mgr.restartIn(s.id, other);
+    const after = mgr.conversationOf(s.id)!;
+    expect(mgr.isRetiredConversation(s.id, before)).toBe(true);
+    // The new process reports: the old one is gone, and the user may /resume its conversation.
+    mgr.setConversation(s.id, after);
+    expect(mgr.isRetiredConversation(s.id, before)).toBe(false);
+    mgr.setConversation(s.id, before);
+    expect(mgr.conversationOf(s.id)).toBe(before);
+  });
+});
+
+describe('SessionManager hasLiveProcessIn', () => {
+  const home = useTempHome();
+  let ptys: ReturnType<typeof fakePtyFactory>;
+  let mgr: SessionManager;
+  let clock: FakeClock;
+  let wt: string;
+
+  beforeEach(() => {
+    ptys = fakePtyFactory();
+    clock = new FakeClock();
+    wt = join(home.dir(), 'app-feat');
+    mkdirSync(join(wt, 'src'), { recursive: true });
+    mkdirSync(join(home.dir(), 'app-feature'));
+    mgr = new SessionManager({
+      ptyFactory: ptys.factory,
+      now: clock.now,
+      config: () => defaultConfig(),
+      port: 7717,
+      hookToken: 't',
+      hookScriptPath: '/h.js',
+      statusScriptPath: '/s.js',
+      builtins: () => [],
+      gitOf: async () => null,
+      headOf: () => null,
+    });
+  });
+
+  /** A process that, like a real one, ends some time after it is killed. */
+  const slowToDie = (): ReturnType<typeof ptys.last> => {
+    const p = ptys.last();
+    p.kill = () => {
+      p.killed = true;
+    };
+    return p;
+  };
+
+  it('sees a running session in the folder or below it, not in a sibling', () => {
+    mgr.create({ kind: 'shell', command: node, cwd: join(wt, 'src') });
+    expect(mgr.hasLiveProcessIn(wt)).toBe(true);
+    expect(mgr.hasLiveProcessIn(join(home.dir(), 'app-fe'))).toBe(false);
+    expect(mgr.hasLiveProcessIn(join(home.dir(), 'app-feature'))).toBe(false);
+  });
+
+  it('does not count an exited session', () => {
+    mgr.create({ kind: 'shell', command: node, cwd: wt });
+    ptys.last().exit(0);
+    expect(mgr.hasLiveProcessIn(wt)).toBe(false);
+  });
+
+  it('counts a closed session until its process has ended', () => {
+    const s = mgr.create({ kind: 'shell', command: node, cwd: wt });
+    const p = slowToDie();
+    mgr.remove(s.id);
+    expect(p.killed).toBe(true);
+    expect(mgr.hasLiveProcessIn(wt)).toBe(true);
+    p.exit(1);
+    expect(mgr.hasLiveProcessIn(wt)).toBe(false);
+  });
+
+  it('counts the process a restart replaced until it has ended', () => {
+    const s = mgr.create({ kind: 'shell', command: node, cwd: wt });
+    const p = slowToDie();
+    mgr.restartIn(s.id, join(home.dir(), 'app-feature'));
+    expect(mgr.hasLiveProcessIn(wt)).toBe(true);
+    p.exit(1);
+    expect(mgr.hasLiveProcessIn(wt)).toBe(false);
+  });
+
+  it('stops waiting for a process that never reports its end', () => {
+    const s = mgr.create({ kind: 'shell', command: node, cwd: wt });
+    slowToDie();
+    mgr.remove(s.id);
+    clock.advance(11000);
+    expect(mgr.hasLiveProcessIn(wt)).toBe(false);
   });
 });

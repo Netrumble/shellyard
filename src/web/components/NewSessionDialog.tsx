@@ -4,7 +4,8 @@ import { api } from '../api.js';
 import { requestPermissionOnce } from '../notify.js';
 import { FolderPicker } from './FolderPicker.js';
 import { WorktreesDialog } from './WorktreesDialog.js';
-import { joinPath, relativeInside, samePathWeb, worktreeName } from '../worktrees.js';
+import { isWslSession, joinPath, relativeInside, samePathWeb, sessionChoices, worktreeName } from '../worktrees.js';
+import { useEscape } from '../escape.js';
 import { refreshMeta, setView, useStore } from '../store.js';
 
 const CUSTOM = '__custom__';
@@ -68,15 +69,11 @@ export function NewSessionDialog({ onClose, initialStoryId }: { onClose: () => v
     return () => clearTimeout(timer);
   }, [folder, loadWorktrees]);
 
-  const offered = useMemo(() => (listing ? listing.worktrees.filter((w) => !w.prunable || samePathWeb(w.path, listing.current)) : []), [listing]);
+  // A launcher that names its folder itself (WSL, --cd) would not start in the chosen worktree.
+  const setsOwnFolder = isWslSession(profile?.args);
+  const offered = useMemo(() => (setsOwnFolder ? [] : sessionChoices(listing)), [listing, setsOwnFolder]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  useEscape(onClose);
 
   const model = (): string | null | undefined => {
     if (!isClaude) return undefined;

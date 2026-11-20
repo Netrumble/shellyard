@@ -166,6 +166,15 @@ async function gitCall<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
+/** How long removing a worktree waits for the processes of closed sessions in it to end. */
+const FOLDER_RELEASE_MS = 3000;
+
+/** Resolves once `done` holds, checking every 100 ms, or after `timeoutMs` whatever it says. */
+async function waitFor(done: () => boolean, timeoutMs: number): Promise<void> {
+  const end = Date.now() + timeoutMs;
+  while (!done() && Date.now() < end) await new Promise((r) => setTimeout(r, 100));
+}
+
 /** The conversation a hook or status report names, if any. */
 const reportedConversation = (body: unknown): unknown => (body as { session_id?: unknown } | null)?.session_id;
 
@@ -413,6 +422,8 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
         const s = manager.get(id);
         if (!s) throw new HttpError(404, 'No such session');
         const target = absolutePath((await readObject(req)).path);
+        // A WSL session names its folder itself (--cd): restarting it elsewhere would not move it.
+        if (s.args.includes('--cd')) throw new HttpError(422, 'This session sets its own folder (--cd), so it cannot be moved to another worktree');
         // Only a worktree of the session's own repository, as git lists it.
         const listing = await worktreesOf(s.git?.worktree ?? s.liveCwd ?? s.cwd);
         const worktree = listing?.worktrees.find((w) => samePath(w.path, target));
@@ -612,7 +623,9 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
         const repo = absolutePath(b.repo, 'repo');
         const target = absolutePath(b.path);
         // A session closed just before (as the worktrees dialog does) may still hold the folder for a
-        // moment on Windows: git then fails on a busy folder, so try again a few times.
+        // moment on Windows: wait (a little) for its process to end, and should git still find the
+        // folder busy, try again a few times.
+        await waitFor(() => !manager.hasLiveProcessIn(target), FOLDER_RELEASE_MS);
         const result = await gitCall(() => retryWhileBusy(() => removeWorktree(repo, target, { force: b.force === true, deleteBranch: b.deleteBranch === true })));
         // The sessions that were in the removed worktree are no longer in the listing.
         const inRemoved = manager.list().filter((s) => s.git && samePath(s.git.worktree, target));

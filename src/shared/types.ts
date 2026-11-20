@@ -266,6 +266,8 @@ export interface Worktree {
   isMain: boolean;
   locked: boolean;
   prunable: boolean;
+  /** The entry of a bare repository: no files checked out, nothing to work in. */
+  bare: boolean;
 }
 
 export interface WorktreeListing {

@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../api.js';
 import { useStore } from '../store.js';
-import { sessionsIn, worktreeName } from '../worktrees.js';
+import { leaveDetachedPrompt, sessionsIn, worktreeName } from '../worktrees.js';
+import { useEscape } from '../escape.js';
 import { confirmShared } from './WorktreeChip.js';
 
 /**
@@ -50,13 +51,21 @@ export function BranchDialog({
     };
   }, [worktree, current]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  useEscape(onClose);
+
+  /** Detached: asks before leaving behind commits that no branch holds. True to go on. */
+  const confirmLeavingDetached = async (): Promise<boolean> => {
+    if (current !== null) return true;
+    let unreachable: number | null = null;
+    try {
+      unreachable = (await api.worktreeStatus(worktree)).unreachable;
+    } catch {
+      unreachable = null;
+    }
+    if (unreachable === null) return window.confirm('Could not tell whether commits on no branch would be left behind (recoverable only from the reflog). Continue?');
+    const prompt = leaveDetachedPrompt(unreachable);
+    return prompt === null || window.confirm(prompt);
+  };
 
   const submit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
@@ -70,6 +79,10 @@ export function BranchDialog({
     if (!confirmShared(sessionsIn(sessions, worktree, exceptId), `Switch the branch of ${worktreeName(worktree)}`)) return;
     setBusy(true);
     setError(null);
+    if (!(await confirmLeavingDetached())) {
+      setBusy(false);
+      return;
+    }
     try {
       await api.switchBranch({ path: worktree, branch, create: mode === 'new' });
       onClose();

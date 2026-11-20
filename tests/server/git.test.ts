@@ -1,12 +1,13 @@
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   branches,
   createWorktree,
-  defaultWorktreeFolder,
+  countOf,
+  isInside,
   GitError,
   GitRefusal,
   retryWhileBusy,
@@ -46,6 +47,27 @@ describe('samePath', () => {
   });
   it('tells different paths apart', () => {
     expect(samePath('/a/b', '/a/c')).toBe(false);
+  });
+});
+
+describe('isInside', () => {
+  it('is true for the folder itself and below it', () => {
+    expect(isInside('/r/app', '/r/app/')).toBe(true);
+    expect(isInside('/r/app/src/web', '/r/app')).toBe(true);
+  });
+  it('is false for a sibling with the same prefix and outside', () => {
+    expect(isInside('/r/app-two', '/r/app')).toBe(false);
+    expect(isInside('/r', '/r/app')).toBe(false);
+  });
+  it.runIf(process.platform === 'win32')('ignores case and separators on Windows', () => {
+    expect(isInside('c:\\R\\App\\src', 'C:/r/app')).toBe(true);
+  });
+});
+
+describe('countOf', () => {
+  it('says one or many', () => {
+    expect(countOf(1, 'commit', 'commits')).toBe('1 commit');
+    expect(countOf(2, 'commit', 'commits')).toBe('2 commits');
   });
 });
 
@@ -232,8 +254,102 @@ describe.skipIf(!hasGit)('git worktrees', () => {
     await expect(switchBranch(repo, { branch: 'feat', create: false })).rejects.toThrow(/already|used by worktree/i);
   });
 
-  it('defaultWorktreeFolder joins the parent, name and branch', () => {
-    expect(defaultWorktreeFolder('C:/r/shellyard', 'feature/x')).toBe(resolve('C:/r/shellyard-feature-x'));
+  it('refuses to lose commits only a detached HEAD holds unless forced', async () => {
+    const det = join(root, 'det');
+    git(repo, 'worktree', 'add', '--detach', det);
+    // Nothing on no branch yet: removed without force.
+    await removeWorktree(repo, det, { force: false, deleteBranch: false });
+    git(repo, 'worktree', 'add', '--detach', det);
+    for (const n of ['b', 'c']) {
+      writeFileSync(join(det, `${n}.txt`), n);
+      git(det, 'add', '.');
+      git(det, 'commit', '-m', n);
+    }
+    await expect(removeWorktree(repo, det, { force: false, deleteBranch: false })).rejects.toThrow('2 commits on no branch would be lost.');
+    await expect(removeWorktree(repo, det, { force: false, deleteBranch: false })).rejects.toBeInstanceOf(GitRefusal);
+    expect((await worktreesOf(repo))!.worktrees.length).toBe(2);
+    const r = await removeWorktree(repo, det, { force: true, deleteBranch: false });
+    expect(r.listing.worktrees.length).toBe(1);
+  });
+
+  it('says "1 commit" when one commit would be lost', async () => {
+    const det = join(root, 'det');
+    git(repo, 'worktree', 'add', '--detach', det);
+    writeFileSync(join(det, 'b.txt'), 'b');
+    git(det, 'add', '.');
+    git(det, 'commit', '-m', 'b');
+    await expect(removeWorktree(repo, det, { force: false, deleteBranch: false })).rejects.toThrow('1 commit on no branch would be lost.');
+  });
+
+  describe('when git fails half-way (Windows, folder held by another process)', () => {
+    // What git does then: the files are gone and the worktree is out of its list, but it fails
+    // on the folder itself, which remains.
+    const halfDone = (path: string) => async (args: string[], cwd: string): Promise<string> => {
+      if (args[0] === 'worktree' && args[1] === 'remove') {
+        git(cwd, 'worktree', 'remove', '--force', '--', path);
+        mkdirSync(path);
+        throw new GitError(`error: failed to delete '${path}': Permission denied`);
+      }
+      return git(cwd, ...args);
+    };
+
+    it('finishes the removal: deletes the leftover folder and the branch, without a warning', async () => {
+      await createWorktree(repo, { path: wtDir, branch: 'feat', newBranch: true });
+      const r = await removeWorktree(repo, wtDir, { force: false, deleteBranch: true }, { run: halfDone(wtDir) });
+      expect(r.warning).toBeNull();
+      expect(r.listing.worktrees.length).toBe(1);
+      expect(existsSync(wtDir)).toBe(false);
+      expect(await branches(repo)).not.toContain('feat');
+    });
+
+    it('warns when the leftover folder cannot be deleted, and still deletes the branch', async () => {
+      await createWorktree(repo, { path: wtDir, branch: 'feat', newBranch: true });
+      const r = await removeWorktree(repo, wtDir, { force: false, deleteBranch: true }, { run: halfDone(wtDir), removeFolder: () => false });
+      expect(r.warning).toBe(`The folder ${wtDir} could not be fully deleted; remove it by hand.`);
+      expect(r.listing.worktrees.length).toBe(1);
+      expect(await branches(repo)).not.toContain('feat');
+    });
+
+    it("rethrows git's error when the worktree is still listed", async () => {
+      await createWorktree(repo, { path: wtDir, branch: 'feat', newBranch: true });
+      const failing = async (args: string[], cwd: string): Promise<string> => {
+        if (args[1] === 'remove') throw new GitError('error: failed to delete: Permission denied');
+        return git(cwd, ...args);
+      };
+      await expect(removeWorktree(repo, wtDir, { force: false, deleteBranch: true }, { run: failing })).rejects.toThrow('Permission denied');
+      expect(await branches(repo)).toContain('feat');
+    });
+
+    it.runIf(process.platform === 'win32')('copes with a folder really held as the working folder of a process', async () => {
+      await createWorktree(repo, { path: wtDir, branch: 'feat', newBranch: true });
+      const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: wtDir, stdio: 'ignore' });
+      try {
+        await new Promise((r) => setTimeout(r, 300));
+        const r = await removeWorktree(repo, wtDir, { force: false, deleteBranch: true });
+        expect(r.listing.worktrees.length).toBe(1);
+        expect(await branches(repo)).not.toContain('feat');
+        // The folder is either gone or reported.
+        if (existsSync(wtDir)) expect(r.warning).toMatch(/could not be fully deleted/);
+      } finally {
+        child.kill();
+      }
+    });
+  });
+
+  it('marks the entry of a bare repository', async () => {
+    const bare = join(root, 'app.git');
+    git(root, 'clone', '--bare', repo, bare);
+    git(bare, 'worktree', 'add', join(root, 'wt'), '-b', 'x');
+    const l = await worktreesOf(join(root, 'wt'));
+    expect(l!.worktrees.length).toBe(2);
+    expect(l!.worktrees[0]).toMatchObject({ isMain: true, bare: true, branch: null });
+    expect(samePath(l!.worktrees[0]!.path, bare)).toBe(true);
+    expect(l!.worktrees[1]).toMatchObject({ isMain: false, bare: false, branch: 'x' });
+  });
+
+  it('marks no entry of a normal repository as bare', async () => {
+    git(repo, 'worktree', 'add', '-b', 'feat', wtDir);
+    expect((await worktreesOf(repo))!.worktrees.every((w) => !w.bare)).toBe(true);
   });
 });
 
@@ -281,5 +397,18 @@ describe('retryWhileBusy', () => {
       }, { sleep: noWait }),
     ).rejects.toThrow('contains modified');
     expect(calls).toBe(2);
+  });
+
+  it('does not retry messages that are not about a busy folder', async () => {
+    for (const message of ['fatal: unable to read tree', 'error: Directory not empty']) {
+      let calls = 0;
+      await expect(
+        retryWhileBusy(() => {
+          calls += 1;
+          return Promise.reject(new GitError(message));
+        }, { sleep: noWait }),
+      ).rejects.toThrow(message);
+      expect(calls, message).toBe(1);
+    }
   });
 });

@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 import type { Worktree, WorktreeListing } from '../../shared/types.js';
 import { api } from '../api.js';
 import { useStore } from '../store.js';
-import { deleteConfirmations, freeBranches, samePathWeb, sessionsIn, suggestedFolder, worktreeName } from '../worktrees.js';
+import { countOf, deleteConfirmations, freeBranches, samePathWeb, sessionsIn, suggestedFolder, worktreeName } from '../worktrees.js';
+import { useEscape } from '../escape.js';
 import { BranchDialog } from './BranchDialog.js';
 import { FolderPicker } from './FolderPicker.js';
 
@@ -64,7 +65,8 @@ export function WorktreesDialog({ folder, onClose, onCreated }: { folder: string
     let current = true;
     setStatuses({});
     for (const w of listing.worktrees) {
-      if (w.prunable) continue;
+      // A bare repository has no files checked out: nothing to report.
+      if (w.prunable || w.bare) continue;
       api
         .worktreeStatus(w.path)
         .then((s): Status => s)
@@ -76,13 +78,8 @@ export function WorktreesDialog({ folder, onClose, onCreated }: { folder: string
     };
   }, [listing]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape' && !branching) onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, branching]);
+  // Escape while Switch branch is open closes that one only: it is newer on the stack.
+  useEscape(onClose);
 
   const worktrees = listing?.worktrees ?? [];
   const main = worktrees.find((w) => w.isMain) ?? worktrees[0];
@@ -92,7 +89,7 @@ export function WorktreesDialog({ folder, onClose, onCreated }: { folder: string
   const defaultBase = current ? (current.branch ?? current.head) : '';
   const chosenBase = base || defaultBase;
   const branchName = (mode === 'new' ? fresh : chosenExisting).trim();
-  const suggested = main && branchName ? suggestedFolder(main.path, branchName) : '';
+  const suggested = main && branchName ? suggestedFolder(main.path, branchName, main.bare) : '';
   const target = pathEdited ? path : suggested;
 
   const create = async (e: React.FormEvent): Promise<void> => {
@@ -169,7 +166,7 @@ export function WorktreesDialog({ folder, onClose, onCreated }: { folder: string
     return (
       <>
         {s.dirty && <span className="worktree-mark warn">changes</span>}
-        {s.unreachable > 0 && <span className="worktree-mark warn">{`${s.unreachable} commits on no branch`}</span>}
+        {s.unreachable > 0 && <span className="worktree-mark warn">{`${countOf(s.unreachable, 'commit', 'commits')} on no branch`}</span>}
       </>
     );
   };
@@ -178,10 +175,7 @@ export function WorktreesDialog({ folder, onClose, onCreated }: { folder: string
     <div
       className="overlay"
       onClick={(e) => e.stopPropagation()}
-      onKeyDown={(e) => {
-        e.stopPropagation();
-        if (e.key === 'Escape' && !branching) onClose();
-      }}
+      onKeyDown={(e) => e.stopPropagation()}
       onMouseDown={(e) => {
         e.stopPropagation();
         if (e.target === e.currentTarget) onClose();
@@ -203,6 +197,7 @@ export function WorktreesDialog({ folder, onClose, onCreated }: { folder: string
                       {worktreeName(w.path)}
                     </span>
                     {w.isMain && <span className="worktree-mark ok">main</span>}
+                    {w.bare && <span className="worktree-mark">bare</span>}
                     {w.locked && <span className="worktree-mark">locked</span>}
                     {w.prunable && <span className="worktree-mark">prunable</span>}
                     {mark(w)}
@@ -220,12 +215,12 @@ export function WorktreesDialog({ folder, onClose, onCreated }: { folder: string
                       </label>
                     )}
                     <span className="spacer" />
-                    {!w.prunable && (
+                    {!w.prunable && !w.bare && (
                       <button type="button" disabled={busy} onClick={() => setBranching(w)}>
                         Switch branch
                       </button>
                     )}
-                    {!w.isMain && (
+                    {!w.isMain && !w.bare && (
                       <button
                         type="button"
                         className="danger"
