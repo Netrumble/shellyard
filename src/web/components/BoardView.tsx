@@ -3,29 +3,30 @@ import type { ClosedSession, SessionInfo, Story } from '../../shared/types.js';
 import { api } from '../api.js';
 import { areaSummary, boardAreas, type BoardArea } from '../board.js';
 import { loadAreaSizes, NO_AREA_KEY, saveAreaSizes, withAreaSize, type AreaSize } from '../board-sizes.js';
+import { AREA_DRAG, SESSION_DRAG } from '../drag.js';
+import { dropArea, dropSessionOnArea, dropSessionOnSession } from '../drag-actions.js';
 import { lampState } from '../effects.js';
 import { durationLabel } from '../gauges.js';
 import { statusLabel } from '../selectors.js';
 import { setView, useStore } from '../store.js';
+import { dragSource, useDropTarget } from './drag-target.js';
 import { StoryDialog } from './StoryDialog.js';
 
-const DRAG_TYPE = 'application/x-shellyard-session';
 const report = (e: unknown): void => window.alert((e as Error).message);
 
 /** One terminal on the board: a light for its state and its name. Not the terminal itself. */
 function Dot({ session }: { session: SessionInfo }): React.JSX.Element {
   const label = `${session.name}: ${statusLabel(session)}`;
+  // The dots wrap in rows, so the left half of a dot drops before it and the right half after.
+  const { dropClass, dropProps } = useDropTarget({ [SESSION_DRAG]: { placed: true, onDrop: (id, place) => dropSessionOnSession(id, session.id, place) } }, 'x');
   return (
     <button
       type="button"
-      className="board-dot"
-      draggable
-      title={`${label}. Click to open, drag to another area.`}
+      className={dropClass ? `board-dot ${dropClass}` : 'board-dot'}
+      title={`${label}. Click to open, drag to another area or next to another session.`}
       aria-label={label}
-      onDragStart={(e) => {
-        e.dataTransfer.setData(DRAG_TYPE, session.id);
-        e.dataTransfer.effectAllowed = 'move';
-      }}
+      {...dragSource(SESSION_DRAG, session.id)}
+      {...dropProps}
       onClick={() => setView({ kind: 'single', id: session.id })}
     >
       <span className={`lamp lamp-${lampState(session)}`} aria-hidden="true" />
@@ -112,7 +113,14 @@ function Area(props: {
 }): React.JSX.Element {
   const { area, size, onNewSession, onEdit } = props;
   const { story, sessions } = area;
-  const [over, setOver] = useState(false);
+  // A session dropped on the area moves into it; an area dropped on it goes to its left or right.
+  const { dropClass, dropProps } = useDropTarget(
+    {
+      [AREA_DRAG]: story ? { placed: true, onDrop: (id, place) => dropArea(id, story.id, place) } : undefined,
+      [SESSION_DRAG]: { onDrop: (id) => dropSessionOnArea(id, story ? story.id : null) },
+    },
+    'x',
+  );
   const [reopening, setReopening] = useState(false);
   const closedCount = useStore().closed.length;
   const name = story ? story.name : 'No area';
@@ -159,33 +167,17 @@ function Area(props: {
   return (
     <section
       ref={box}
-      className={`board-area area-${area.state}${over ? ' drop-over' : ''}${story ? '' : ' area-none'}`}
+      className={`board-area area-${area.state}${dropClass ? ` ${dropClass}` : ''}${story ? '' : ' area-none'}`}
       aria-label={`${name}: ${areaSummary(sessions)}`}
       style={{ ...(story?.color ? { '--area-color': story.color } : {}), ...(size ? { width: size.width, height: size.height } : {}) } as React.CSSProperties}
-      onDragOver={(e) => {
-        if (!e.dataTransfer.types.includes(DRAG_TYPE)) return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        setOver(true);
-      }}
-      onDragLeave={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(false);
-      }}
-      onDrop={(e) => {
-        const id = e.dataTransfer.getData(DRAG_TYPE);
-        setOver(false);
-        if (!id) return;
-        e.preventDefault();
-        const target = story ? story.id : null;
-        if (sessions.some((s) => s.id === id)) return;
-        api.moveSession(id, target).catch(report);
-      }}
+      {...dropProps}
     >
       <header className="board-area-head">
         <button
           type="button"
           className="board-area-title"
-          title="Open all the terminals of this area"
+          title={story ? 'Open all the terminals of this area; drag to reorder the areas' : 'Open all the terminals of this area'}
+          {...(story ? dragSource(AREA_DRAG, story.id) : {})}
           onClick={() => setView({ kind: 'grid', storyFilter: story ? story.id : null })}
         >
           <span className="board-area-name">{name}</span>

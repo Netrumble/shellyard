@@ -114,6 +114,15 @@ export function setSound(sound: boolean): void {
   set({ sound });
 }
 
+/**
+ * Shows a reorder or a move at once, before the server confirms it; the server's next
+ * update (or `refreshMeta()` for launchers) replaces it with the truth.
+ */
+export function applyLocally(patch: { sessions?: SessionInfo[]; stories?: Story[]; profiles?: Meta['profiles'] }): void {
+  const { profiles, ...rest } = patch;
+  set(profiles ? { ...rest, meta: { ...state.meta, profiles } } : rest);
+}
+
 export function setView(view: View): void {
   set({ view });
 }

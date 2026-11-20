@@ -1663,7 +1663,7 @@ button.new-story {
   border-style: dashed;
 }
 
-.board-area.drop-over {
+.board-area.drop-into {
   border-color: var(--done);
   background: var(--panel-2);
   opacity: 1;
@@ -2516,7 +2516,7 @@ button.worktree-chip[aria-expanded='true'] {
 }
 
 .section-title {
-  margin: 0;
+  margin: 18px 0 6px;
 }
 
 .section-toggle {
@@ -2532,6 +2532,11 @@ button.worktree-chip[aria-expanded='true'] {
   letter-spacing: inherit;
   color: inherit;
   text-align: left;
+}
+
+.section-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .app:has(.sidebar.folded) {
@@ -2588,8 +2593,29 @@ button.worktree-chip[aria-expanded='true'] {
   padding: 6px;
 }
 
-@media (max-width: 900px) {
-  .app:has(.sidebar.folded) {
-    grid-template-columns: 52px minmax(0, 1fr);
-  }
+/* Drag to reorder: a line where the dragged item will land. Rows take it on their top or
+   bottom edge; board areas and session dots, laid out in wrapping rows, on their left or right. */
+
+.drop-before {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.drop-after {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.board-area.drop-before,
+.board-dot.drop-before {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.board-area.drop-after,
+.board-dot.drop-after {
+  box-shadow: inset -2px 0 0 var(--accent);
+}
+
+.story-header.drop-into,
+.session-list.drop-into {
+  background: var(--panel-2);
+  box-shadow: inset 0 0 0 1px var(--done);
 }
