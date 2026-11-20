@@ -1,4 +1,4 @@
-import type { SessionGit, SessionInfo } from '../shared/types.js';
+import type { SessionGit, SessionInfo, Worktree, WorktreeListing } from '../shared/types.js';
 
 /** The last segment of a folder path, whichever separator it uses. */
 export function worktreeName(path: string): string {
@@ -32,4 +32,14 @@ export function sessionsIn(sessions: SessionInfo[], worktree: string, exceptId?:
 /** Where a new worktree goes by default: beside the main one, named `<folder>-<branch>`. Keeps the separator style given. */
 export function suggestedFolder(mainWorktree: string, branch: string): string {
   return `${mainWorktree.replace(/[\\/]+$/, '')}-${branch.replaceAll('/', '-')}`;
+}
+
+/** The worktrees a session can move to: every listed one but the one it is in, and none that git would prune. */
+export function moveTargets(listing: WorktreeListing | null, current: string): Worktree[] {
+  return (listing?.worktrees ?? []).filter((w) => !w.prunable && !samePathWeb(w.path, current));
+}
+
+/** Whether a session runs in WSL (`--cd`), where moving it to another worktree is not offered. */
+export function isWslSession(args: string[] | undefined): boolean {
+  return (args ?? []).includes('--cd');
 }

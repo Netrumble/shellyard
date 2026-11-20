@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chipText, samePathWeb, sessionsIn, suggestedFolder, worktreeName } from '../../src/web/worktrees.js';
+import { chipText, isWslSession, moveTargets, samePathWeb, sessionsIn, suggestedFolder, worktreeName } from '../../src/web/worktrees.js';
 import type { SessionGit, SessionInfo } from '../../src/shared/types.js';
 
 const git = (over: Partial<SessionGit> = {}): SessionGit => ({ worktree: 'C:\\r\\app-feat', branch: 'feat', head: '1a2b3c4', isMain: false, worktreeCount: 2, ...over });
@@ -55,5 +55,24 @@ describe('suggestedFolder', () => {
     expect(suggestedFolder('C:\\r\\app', 'feature/x')).toBe('C:\\r\\app-feature-x');
     expect(suggestedFolder('/home/me/app', 'feature/x')).toBe('/home/me/app-feature-x');
     expect(suggestedFolder('/home/me/app/', 'fix')).toBe('/home/me/app-fix');
+  });
+});
+
+describe('moveTargets', () => {
+  const wt = (path: string, prunable = false) => ({ path, branch: null, head: 'abc1234', isMain: false, locked: false, prunable });
+  it('leaves out the current worktree and prunable ones', () => {
+    const listing = { current: 'C:\\r\\app', worktrees: [wt('C:/r/app'), wt('C:/r/app-feat'), wt('C:/r/gone', true)] };
+    expect(moveTargets(listing, 'C:\\r\\app').map((w) => w.path)).toEqual(['C:/r/app-feat']);
+  });
+  it('is empty without a listing', () => {
+    expect(moveTargets(null, 'x')).toEqual([]);
+  });
+});
+
+describe('isWslSession', () => {
+  it('spots --cd', () => {
+    expect(isWslSession(['--cd', '/home'])).toBe(true);
+    expect(isWslSession(['-x'])).toBe(false);
+    expect(isWslSession(undefined)).toBe(false);
   });
 });
