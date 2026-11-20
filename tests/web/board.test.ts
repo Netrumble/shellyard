@@ -21,9 +21,9 @@ describe('boardAreas', () => {
     ]);
   });
 
-  it('puts the areas where someone is waiting first, without otherwise changing their order', () => {
+  it('keeps the story order even when a later area is waiting', () => {
     const sessions = [inArea(session('s1', 'working'), 'a'), inArea(session('s2', 'attention', 'blocked'), 'b'), inArea(session('s3', 'attention', 'finished'), 'c')];
-    expect(boardAreas(sessions, [a, b, c]).map((x) => x.story?.id ?? null)).toEqual(['b', 'c', 'a', null]);
+    expect(boardAreas(sessions, [a, b, c]).map((x) => x.story?.id ?? null)).toEqual(['a', 'b', 'c', null]);
   });
 
   it('keeps the area for sessions with no area last, even when one of them is waiting', () => {

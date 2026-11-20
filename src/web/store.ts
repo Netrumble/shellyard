@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import type { ClosedSession, Meta, Schedule, SessionInfo, Story, UsageSummary } from '../shared/types.js';
+import type { ClosedSession, Meta, Schedule, SessionInfo, SoundLibrary, Story, UsageSummary } from '../shared/types.js';
 import { api, configureApi } from './api.js';
 import { loadEffects, loadSound, saveEffects, saveSound, type EffectsLevel } from './effects.js';
 import { connect, type ConnectionState, type Socket } from './socket.js';
@@ -31,6 +31,7 @@ interface State {
   view: View;
   connection: ConnectionState;
   meta: Meta;
+  soundLibrary: SoundLibrary;
   /** How much the interface moves; a choice of this browser. */
   effects: EffectsLevel;
   sound: boolean;
@@ -50,6 +51,7 @@ let state: State = {
   view: { kind: 'board' },
   connection: 'connecting',
   meta: { profiles: [], models: [], saved: [] },
+  soundLibrary: { sounds: [], settings: { blocked: null, finished: null, maybeWaiting: null } },
   effects: 'reduced',
   sound: true,
   themeChoice: 'system',
@@ -129,6 +131,14 @@ export async function refreshMeta(): Promise<void> {
   }
 }
 
+export async function refreshSounds(): Promise<void> {
+  try {
+    set({ soundLibrary: await api.sounds() });
+  } catch {
+    // The library is not essential; it is read again after the next change.
+  }
+}
+
 /** Runs on every change of the session list, with the list before and after. */
 export function onSessionsChange(cb: (prev: SessionInfo[], next: SessionInfo[]) => void): void {
   sessionListeners.push(cb);
@@ -187,7 +197,10 @@ export function startStore(): void {
     // Once the token is known to be refused, a failing socket must not hide that message.
     if (state.connection === 'unauthorized') return;
     set({ connection });
-    if (connection === 'open') void refreshMeta();
+    if (connection === 'open') {
+      void refreshMeta();
+      void refreshSounds();
+    }
   });
   // A handshake refused for a stale token looks like a server that is not running. An API
   // call tells them apart (401 → onUnauthorized above), so ask after every failed attempt:
@@ -196,6 +209,7 @@ export function startStore(): void {
     if (state.connection !== 'unauthorized') void refreshMeta();
   });
   void refreshMeta();
+  void refreshSounds();
 }
 
 export function useStore(): State {

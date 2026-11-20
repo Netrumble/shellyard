@@ -18,17 +18,16 @@ function stateOf(sessions: SessionInfo[]): AreaState {
 }
 
 /**
- * The areas of the board. Areas where a session is waiting come first, otherwise in their
- * own order. The sessions that belong to no area come last; that place is always offered
+ * The areas of the board, in the order of the stories (which the user arranges). The
+ * sessions that belong to no area come last; that place is always offered
  * once areas exist, so that a session can be dragged out of an area.
  */
 export function boardAreas(sessions: SessionInfo[], stories: Story[]): BoardArea[] {
   const groups = groupByStory(sessions, stories);
   const named = groups.filter((g) => g.story !== null).map((g) => ({ story: g.story, sessions: g.sessions, state: stateOf(g.sessions) }));
   const loose = groups.find((g) => g.story === null)?.sessions ?? [];
-  const waitingFirst = [...named.filter((a) => a.state === 'attention'), ...named.filter((a) => a.state !== 'attention')];
   if (stories.length === 0 && loose.length === 0) return [];
-  return [...waitingFirst, { story: null, sessions: loose, state: stateOf(loose) }];
+  return [...named, { story: null, sessions: loose, state: stateOf(loose) }];
 }
 
 /** One line on what the sessions of an area are doing, most pressing first. */

@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App.js';
 import { newlyWaiting } from './attention.js';
 import { notify } from './notify.js';
-import { chime } from './sound.js';
+import { pickSound, playSound, shouldPlay } from './sounds.js';
 import { getState, onSessionsChange, setView, startStore } from './store.js';
 import './theme.css';
 
@@ -13,7 +13,8 @@ startStore();
 onSessionsChange((prev, next) => {
   const waiting = newlyWaiting(prev, next);
   for (const s of waiting) notify(s, () => setView({ kind: 'single', id: s.id }), getState().sound);
-  if (waiting.length > 0 && getState().sound) chime();
+  const { sound, stories, soundLibrary } = getState();
+  if (waiting.length > 0 && shouldPlay(document.hasFocus(), sound)) void playSound(pickSound(waiting, stories, soundLibrary.settings) ?? null);
 });
 
 const root = document.getElementById('root');

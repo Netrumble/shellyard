@@ -1,4 +1,4 @@
-import type { ConversationItem, CreateSessionRequest, FolderListing, Meta, Profile, Schedule, ScheduleRun, SessionInfo, Story, TerminalBackground, TerminalFont, WorktreeListing } from '../shared/types.js';
+import type { ConversationItem, CreateSessionRequest, FolderListing, Meta, Profile, Schedule, ScheduleRun, SessionInfo, SoundFile, SoundLibrary, SoundSettings, Story, TerminalBackground, TerminalFont, WorktreeListing } from '../shared/types.js';
 
 /** What a schedule is made or changed with; a change sends only the fields it changes. */
 export type ScheduleFields = Partial<Pick<Schedule, 'name' | 'prompt' | 'profileId' | 'model' | 'cwd' | 'storyId' | 'when' | 'enabled' | 'catchUp' | 'permissionMode'>>;
@@ -75,6 +75,39 @@ export async function uploadBackground(file: File): Promise<string> {
   return ((await res.json()) as { image: string }).image;
 }
 
+const soundUrls = new Map<string, Promise<string>>();
+
+/** A local object URL for a stored sound, fetched with the token and kept for next time. */
+export function soundUrl(id: string): Promise<string> {
+  let url = soundUrls.get(id);
+  if (!url) {
+    url = fetch(`/api/sounds/${encodeURIComponent(id)}`, { headers: { 'x-shellyard-token': token } }).then(async (res) => {
+      if (!res.ok) throw new Error(`Could not load the sound (${res.status}).`);
+      return URL.createObjectURL(await res.blob());
+    });
+    url.catch(() => soundUrls.delete(id));
+    soundUrls.set(id, url);
+  }
+  return url;
+}
+
+/** Sends an audio file to the sound library under its own file name. */
+async function uploadSound(file: File): Promise<SoundFile> {
+  const res = await fetch(`/api/sounds?name=${encodeURIComponent(file.name)}`, { method: 'POST', headers: { 'x-shellyard-token': token, 'content-type': 'application/octet-stream' }, body: file });
+  if (res.status === 401) onUnauthorized();
+  if (!res.ok) {
+    let message = `${res.status} ${res.statusText}`;
+    try {
+      const err = (await res.json()) as { error?: string };
+      if (err.error) message = err.error;
+    } catch {
+      // The status line will do.
+    }
+    throw new Error(message);
+  }
+  return (await res.json()) as SoundFile;
+}
+
 export const api = {
   meta: (): Promise<Meta> => call('GET', '/api/meta'),
   createSession: (req: CreateSessionRequest): Promise<SessionInfo> => call('POST', '/api/sessions', req),
@@ -84,6 +117,13 @@ export const api = {
   openEditor: (id: string): Promise<void> => call('POST', `/api/sessions/${encodeURIComponent(id)}/editor`),
   ackSession: (id: string): Promise<SessionInfo> => call('POST', `/api/sessions/${encodeURIComponent(id)}/ack`),
   deleteSession: (id: string): Promise<void> => call('DELETE', `/api/sessions/${encodeURIComponent(id)}`),
+  reorderStories: (ids: string[]): Promise<Story[]> => call('PUT', '/api/stories/order', ids),
+  reorderSessions: (ids: string[]): Promise<SessionInfo[]> => call('PUT', '/api/sessions/order', ids),
+  reorderProfiles: (ids: string[]): Promise<Profile[]> => call('PUT', '/api/profiles/order', ids),
+  sounds: (): Promise<SoundLibrary> => call('GET', '/api/sounds'),
+  addSound: (file: File): Promise<SoundFile> => uploadSound(file),
+  deleteSound: (id: string): Promise<void> => call('DELETE', `/api/sounds/${encodeURIComponent(id)}`),
+  saveSoundSettings: (settings: SoundSettings): Promise<SoundSettings> => call('PUT', '/api/sounds/settings', settings),
   saveProfiles: (profiles: Profile[]): Promise<Profile[]> => call('PUT', '/api/profiles', profiles),
   conversations: (): Promise<ConversationItem[]> => call('GET', '/api/conversations'),
   /** Reopens a closed session; `storyId` puts it in that area (null: in none), omitted: where it was. */
