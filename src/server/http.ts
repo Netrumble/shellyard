@@ -10,6 +10,8 @@ import { parseHookBody, parseHookRequest, permissionCommand } from './claude-lau
 import { RuleError, type RuleStore } from './area-rules.js';
 import { suggestPattern } from '../shared/rules.js';
 import { MAX_PROMPT } from '../shared/sessions.js';
+import { RecipeError, type RecipeStore } from './recipes.js';
+import { startFromTicket, TicketError } from './tickets.js';
 
 /** The most sessions one prompt is sent to at once. */
 const MAX_PROMPT_TARGETS = 50;
@@ -35,6 +37,10 @@ export interface HttpDeps {
   schedules?: ScheduleStore;
   /** The area rules; without them every permission is asked. */
   rules?: RuleStore;
+  /** The recipes of "Start from ticket". */
+  recipes?: RecipeStore;
+  /** Types a prompt into a new Claude session once it is ready (see PromptDelivery). */
+  deliverPrompt?: (sessionId: string, prompt: string) => void;
   /** Opens the editor on a session's folder; returns why not, or null when it was started. */
   openEditor?: (session: { command: string; args: string[]; cwd: string }) => string | null;
   /** A hosted Claude session reported a status line: its main screen is up. */
@@ -778,6 +784,69 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
         return send(res, 200, listFolders(url.searchParams.get('path') ?? undefined));
       } catch (e) {
         if (e instanceof FolderError) throw new HttpError(400, e.message);
+        throw e;
+      }
+    }
+
+    // The recipes of "Start from ticket".
+    if (path === '/api/recipes' || /^\/api\/recipes\/[^/]+$/.test(path)) {
+      const recipes = deps.recipes;
+      if (!recipes) throw new HttpError(409, 'Recipes are not available here.');
+      const id = path === '/api/recipes' ? null : decodeId(path.slice('/api/recipes/'.length));
+      const guarded = <T,>(fn: () => T): T => {
+        try {
+          return fn();
+        } catch (e) {
+          if (e instanceof RecipeError) throw new HttpError(400, e.message);
+          throw e;
+        }
+      };
+      if (id === null && method === 'GET') return send(res, 200, recipes.list());
+      if (id === null && method === 'POST') {
+        const body = await readObject(req);
+        return send(res, 201, guarded(() => recipes.create(body)));
+      }
+      if (id !== null && method === 'PUT') {
+        const body = await readObject(req);
+        const recipe = guarded(() => recipes.update(id, body));
+        if (!recipe) throw new HttpError(404, 'No such recipe');
+        return send(res, 200, recipe);
+      }
+      if (id !== null && method === 'DELETE') {
+        if (!guarded(() => recipes.remove(id))) throw new HttpError(404, 'No such recipe');
+        return send(res, 204);
+      }
+      throw new HttpError(405, 'Method not allowed');
+    }
+
+    // Start from ticket: worktree, area and sessions in one step.
+    if (path === '/api/tickets') {
+      if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
+      const recipes = deps.recipes;
+      if (!recipes) throw new HttpError(409, 'Recipes are not available here.');
+      const b = await readObject(req);
+      if (typeof b.recipeId !== 'string' || typeof b.ticket !== 'string') throw new HttpError(400, 'Give a recipe and a ticket code.');
+      try {
+        const started = await startFromTicket(
+          {
+            recipe: (rid) => recipes.get(rid),
+            stories: deps.stories,
+            profiles: () => manager.profiles(),
+            createSession: (r) => manager.create(r),
+            deliverPrompt: (sid, prompt) => deps.deliverPrompt?.(sid, prompt),
+            git: { branches, createWorktree, removeWorktree },
+            gitMessage: (e) => {
+              if (e instanceof GitError) return e.message;
+              throw e;
+            },
+            refreshGit: (repo) => manager.refreshGitIn(repo),
+          },
+          b.recipeId,
+          b.ticket,
+        );
+        return send(res, 201, started);
+      } catch (e) {
+        if (e instanceof TicketError) throw new HttpError(e.status, e.message);
         throw e;
       }
     }

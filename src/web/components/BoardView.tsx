@@ -15,6 +15,7 @@ import { RulesDialog } from './RulesDialog.js';
 import { SelectionBar } from './SelectionBar.js';
 import { SessionRow } from './SessionRow.js';
 import { StoryDialog } from './StoryDialog.js';
+import { TicketDialog } from './TicketDialog.js';
 
 const report = (e: unknown): void => window.alert((e as Error).message);
 
@@ -298,6 +299,7 @@ function boardSummary(sessions: number, areas: number, waiting: number): string 
 export function BoardView({ onNewSession }: { onNewSession: (storyId?: string) => void }): React.JSX.Element {
   const { sessions, stories, loaded } = useStore();
   const [dialog, setDialog] = useState<{ story?: Story } | null>(null);
+  const [ticketOpen, setTicketOpen] = useState(false);
   const [sizes, setSizes] = useState(loadAreaSizes);
   const areas = byActivity(boardAreas(sessions, stories));
   const waiting = sessions.filter((s) => s.status === 'attention' && s.reason !== 'finished').length;
@@ -313,7 +315,10 @@ export function BoardView({ onNewSession }: { onNewSession: (storyId?: string) =
     <div className="board">
       <div className="board-head">
         <p className="board-summary">{boardSummary(sessions.length, stories.length, waiting)}</p>
-        <button type="button" onClick={() => setDialog({})}>
+        <button type="button" onClick={() => setTicketOpen(true)}>
+          Start from ticket
+        </button>
+        <button type="button" className="board-head-quiet" onClick={() => setDialog({})}>
           New area
         </button>
       </div>
@@ -337,10 +342,18 @@ export function BoardView({ onNewSession }: { onNewSession: (storyId?: string) =
               onEdit={(story) => setDialog({ story })}
             />
           ))}
+          <section className="ticket-card" aria-labelledby="ticket-card-title">
+            <h3 id="ticket-card-title">New area for a ticket</h3>
+            <p className="hint">Give a ticket code: ShellYard makes the worktree on its branch and the area, then starts the sessions of a recipe there.</p>
+            <button type="button" onClick={() => setTicketOpen(true)}>
+              Create from ticket
+            </button>
+          </section>
         </div>
       </section>
       <SelectionBar />
       {dialog && <StoryDialog story={dialog.story} onClose={() => setDialog(null)} />}
+      {ticketOpen && <TicketDialog onClose={() => setTicketOpen(false)} />}
     </div>
   );
 }

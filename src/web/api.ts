@@ -1,5 +1,6 @@
 import type { AreaRule, ConversationItem, CreateSessionRequest, FolderListing, Meta, PermissionChoice, Profile, Schedule, ScheduleRun, SessionInfo, SoundFile, SoundLibrary, SoundSettings, Story, TerminalBackground, TerminalFont, WorktreeListing } from '../shared/types.js';
 import type { SendOutcome } from './selection.js';
+import type { Recipe } from '../shared/recipes.js';
 
 /** What a schedule is made or changed with; a change sends only the fields it changes. */
 export type ScheduleFields = Partial<Pick<Schedule, 'name' | 'prompt' | 'profileId' | 'model' | 'cwd' | 'storyId' | 'when' | 'enabled' | 'catchUp' | 'permissionMode'>>;
@@ -127,6 +128,12 @@ export const api = {
   deleteRule: (id: string): Promise<void> => call('DELETE', `/api/rules/${encodeURIComponent(id)}`),
   /** Types the same prompt into several sessions; each says whether it took it. */
   sendPrompt: (ids: string[], prompt: string): Promise<{ results: Array<{ id: string; outcome: SendOutcome }> }> => call('POST', '/api/sessions/prompt', { ids, prompt }),
+  recipes: (): Promise<Recipe[]> => call('GET', '/api/recipes'),
+  createRecipe: (r: Omit<Recipe, 'id'>): Promise<Recipe> => call('POST', '/api/recipes', r),
+  updateRecipe: (id: string, r: Omit<Recipe, 'id'>): Promise<Recipe> => call('PUT', `/api/recipes/${encodeURIComponent(id)}`, r),
+  deleteRecipe: (id: string): Promise<void> => call('DELETE', `/api/recipes/${encodeURIComponent(id)}`),
+  /** Worktree, area and sessions for a ticket, in one step. */
+  startTicket: (recipeId: string, ticket: string): Promise<{ story: Story; sessions: SessionInfo[]; newBranch: boolean }> => call('POST', '/api/tickets', { recipeId, ticket }),
   /** Opens VS Code on the folder of an area. */
   openAreaEditor: (storyId: string): Promise<void> => call('POST', `/api/stories/${encodeURIComponent(storyId)}/editor`),
   deleteSession: (id: string): Promise<void> => call('DELETE', `/api/sessions/${encodeURIComponent(id)}`),

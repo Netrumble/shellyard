@@ -13,6 +13,7 @@ import { SessionManager } from '../../src/server/session-manager.js';
 import { StoryStore } from '../../src/server/stories.js';
 import { ClosedStore } from '../../src/server/closed.js';
 import { RuleStore } from '../../src/server/area-rules.js';
+import { RecipeStore } from '../../src/server/recipes.js';
 import { UsageStore } from '../../src/server/usage.js';
 import type { Profile, SessionInfo } from '../../src/shared/types.js';
 import { fakePtyFactory, useTempHome } from '../helpers.js';
@@ -688,7 +689,7 @@ describe.skipIf(!hasGit)('http api: git', () => {
       hookScriptPath: '/h.js', statusScriptPath: '/s.js',
       builtins: () => [builtin],
     });
-    server.on('request', createRequestHandler({ manager: mgr, stories, usage: new UsageStore({ now: Date.now, file: join(home.dir(), 'usage.json') }), closed: new ClosedStore({ now: Date.now, file: join(home.dir(), 'closed.json') }), port, pageHost: PAGE, token: TOKEN, hookToken: HOOK_TOKEN, webDir: home.dir(), onShutdown: () => undefined }));
+    server.on('request', createRequestHandler({ manager: mgr, stories, recipes: new RecipeStore({ file: join(home.dir(), 'recipes.json') }), usage: new UsageStore({ now: Date.now, file: join(home.dir(), 'usage.json') }), closed: new ClosedStore({ now: Date.now, file: join(home.dir(), 'closed.json') }), port, pageHost: PAGE, token: TOKEN, hookToken: HOOK_TOKEN, webDir: home.dir(), onShutdown: () => undefined }));
   });
 
   afterEach(async () => {
@@ -889,5 +890,26 @@ describe.skipIf(!hasGit)('http api: git', () => {
     const r = await pending;
     expect(r.status).toBe(200);
     expect(r.json().listing.worktrees).toHaveLength(1);
+  });
+
+  it('starts from a ticket: a worktree on its branch, an area in it, the recipe sessions with their prompt', async () => {
+    const recipe = (await post('/api/recipes', { name: 'Bug fix', repo, base: 'main', branch: 'feat/{ticket-lower}', folder: '{repo}-{ticket-lower}', sessions: [{ profileId: 'builtin-node', prompt: '' }] })).json();
+    expect(recipe.id).toBeTruthy();
+    const r = await post('/api/tickets', { recipeId: recipe.id, ticket: 'hcm-7912' });
+    expect(r.status).toBe(201);
+    const out = r.json();
+    const worktree = `${repo}-hcm-7912`;
+    expect(out.story).toMatchObject({ name: 'HCM-7912', ticket: 'HCM-7912', cwd: worktree });
+    expect(out.sessions).toEqual([expect.objectContaining({ storyId: out.story.id, cwd: worktree })]);
+    expect(git(worktree, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('feat/hcm-7912');
+    expect((await post('/api/tickets', { recipeId: recipe.id, ticket: 'HCM-7912' })).status).toBe(409);
+  });
+
+  it('says what git says when the worktree cannot be made, and makes no area', async () => {
+    const recipe = (await post('/api/recipes', { name: 'Odd', repo, base: 'no-such-base', branch: 'feat/{ticket-lower}', folder: '{repo}-{ticket-lower}', sessions: [{ profileId: 'builtin-node', prompt: '' }] })).json();
+    const r = await post('/api/tickets', { recipeId: recipe.id, ticket: 'HCM-1' });
+    expect(r.status).toBe(409);
+    expect((await call('GET', '/api/recipes')).json()).toHaveLength(1);
+    expect(loadConfig().config.stories).toEqual([]);
   });
 });

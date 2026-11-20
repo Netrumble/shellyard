@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { newPageHost, newToken } from './auth.js';
 import { ActivityMeter } from './activity.js';
 import { RuleStore } from './area-rules.js';
+import { RecipeStore } from './recipes.js';
 import { ClosedStore } from './closed.js';
 import { clearServerState, dataDir, loadConfig, readServerState, writeServerState } from './config.js';
 import { openInEditor } from './editor.js';
@@ -119,6 +120,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   // Sessions that end or are closed are remembered, to be opened again from their area.
   const closed = new ClosedStore({ file: join(dataDir(), 'closed.json'), now: Date.now });
   const rules = new RuleStore({ file: join(dataDir(), 'rules.json'), now: Date.now });
+  const recipes = new RecipeStore({ file: join(dataDir(), 'recipes.json') });
   manager.onClosed((entry, sessionId) => closed.add(entry, sessionId));
 
   // Schedules: at its time, a schedule opens a Claude Code session like any other, and its
@@ -271,6 +273,9 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
       closed,
       schedules,
       rules,
+      recipes,
+      // The outcome is visible in the session itself; nothing waits on it here.
+      deliverPrompt: (id, prompt) => delivery.expect(id, prompt, () => undefined),
       openEditor: opts.openEditor ?? openInEditor,
       onClaudeStatus: (id) => delivery.ready(id),
       onPromptSubmitted: (id) => delivery.submitted(id),
