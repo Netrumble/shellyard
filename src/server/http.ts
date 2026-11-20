@@ -9,6 +9,10 @@ import { MAX_SOUND_BYTES, SoundStore } from './sounds.js';
 import { parseHookBody, parseHookRequest, permissionCommand } from './claude-launch.js';
 import { RuleError, type RuleStore } from './area-rules.js';
 import { suggestPattern } from '../shared/rules.js';
+import { MAX_PROMPT } from '../shared/sessions.js';
+
+/** The most sessions one prompt is sent to at once. */
+const MAX_PROMPT_TARGETS = 50;
 import type { ClosedStore } from './closed.js';
 import { findConversation } from './conversations.js';
 import { reopenEntry } from './restore.js';
@@ -449,6 +453,18 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       if (method !== 'PUT') throw new HttpError(405, 'Method not allowed');
       manager.reorder(await readIdList(req));
       return send(res, 200, manager.list());
+    }
+
+    // The same prompt typed into several sessions; each says whether it took it.
+    if (path === '/api/sessions/prompt') {
+      if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
+      const b = await readObject(req);
+      const ids = Array.isArray(b.ids) ? [...new Set(b.ids.filter((x): x is string => typeof x === 'string'))] : [];
+      const prompt = typeof b.prompt === 'string' ? b.prompt : '';
+      if (ids.length === 0 || ids.length > MAX_PROMPT_TARGETS) throw new HttpError(400, `Pick between 1 and ${MAX_PROMPT_TARGETS} sessions.`);
+      if (!prompt.trim()) throw new HttpError(400, 'Write the prompt to send.');
+      if (prompt.length > MAX_PROMPT) throw new HttpError(400, `A prompt is at most ${MAX_PROMPT} characters.`);
+      return send(res, 200, { results: ids.map((id) => ({ id, outcome: manager.typePrompt(id, prompt) })) });
     }
 
     const sessionMatch = /^\/api\/sessions\/([^/]+)(\/ack|\/editor|\/worktree|\/answer)?$/.exec(path);

@@ -335,6 +335,36 @@ describe('http api', () => {
     });
   });
 
+  describe('one prompt to several sessions', () => {
+    const send = (body: unknown) => call('POST', '/api/sessions/prompt', { body: JSON.stringify(body) });
+
+    it('types it into the sessions at their prompt and says which did not take it', async () => {
+      const a = await newSession('claude');
+      const b = await newSession('claude');
+      mgr.hook(b.id, 'UserPromptSubmit', false);
+      const sh = await newSession('shell');
+      const r = await send({ ids: [a.id, b.id, sh.id, 'gone', a.id], prompt: 'run the tests' });
+      expect(r.status).toBe(200);
+      expect((await r.json()).results).toEqual([
+        { id: a.id, outcome: 'sent' },
+        { id: b.id, outcome: 'busy' },
+        { id: sh.id, outcome: 'not-claude' },
+        { id: 'gone', outcome: 'missing' },
+      ]);
+      expect(ptys.ptys.find((p) => p.written.length > 0)?.written[0]).toBe('\x1b[200~run the tests\x1b[201~');
+    });
+
+    it('refuses an empty prompt, no sessions, too many, and the wrong method', async () => {
+      const a = await newSession('claude');
+      expect((await send({ ids: [a.id], prompt: '   ' })).status).toBe(400);
+      expect((await send({ ids: [], prompt: 'x' })).status).toBe(400);
+      expect((await send({ ids: Array.from({ length: 51 }, (_, i) => `s${i}`), prompt: 'x' })).status).toBe(400);
+      expect((await send({ ids: [a.id], prompt: 'x'.repeat(20_001) })).status).toBe(400);
+      expect((await call('GET', '/api/sessions/prompt')).status).toBe(405);
+      expect(ptys.last().written).toEqual([]);
+    });
+  });
+
   describe('area rules', () => {
     const permission = (command: string, tool = 'Bash') => JSON.stringify({ hook_event_name: 'PermissionRequest', tool_name: tool, tool_input: { command } });
     const inArea = async () => {

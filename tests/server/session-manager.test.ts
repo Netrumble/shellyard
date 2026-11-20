@@ -258,6 +258,53 @@ describe('order', () => {
     });
   });
 
+  describe('typePrompt', () => {
+    it('pastes the prompt into a session waiting at its prompt, then presses Enter', () => {
+      vi.useFakeTimers();
+      try {
+        const s = claude();
+        expect(mgr.typePrompt(s.id, 'Rebase on release/2026.12\nthen run the tests')).toBe('sent');
+        expect(ptys.last().written).toEqual(['\x1b[200~Rebase on release/2026.12\nthen run the tests\x1b[201~']);
+        vi.advanceTimersByTime(400);
+        expect(ptys.last().written.at(-1)).toBe('\r');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('also takes a session that has finished its turn', () => {
+      const s = claude();
+      mgr.hook(s.id, 'Stop', false);
+      expect(mgr.typePrompt(s.id, 'next')).toBe('sent');
+    });
+
+    it('types nothing into a session at work, blocked, a shell or an unknown one', () => {
+      const working = claude();
+      mgr.hook(working.id, 'UserPromptSubmit', false);
+      const blocked = claude();
+      mgr.hook(blocked.id, 'Notification', false);
+      const sh = shell();
+      expect(mgr.typePrompt(working.id, 'x')).toBe('busy');
+      expect(mgr.typePrompt(blocked.id, 'x')).toBe('busy');
+      expect(mgr.typePrompt(sh.id, 'x')).toBe('not-claude');
+      expect(mgr.typePrompt('nope', 'x')).toBe('missing');
+      for (const p of ptys.ptys) expect(p.written).toEqual([]);
+    });
+
+    it('does not press Enter once the session has moved on', () => {
+      vi.useFakeTimers();
+      try {
+        const s = claude();
+        mgr.typePrompt(s.id, 'x');
+        mgr.hook(s.id, 'Notification', false);
+        vi.advanceTimersByTime(400);
+        expect(ptys.last().written).toEqual(['\x1b[200~x\x1b[201~']);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   describe('status', () => {
     it('follows hook events', () => {
       const s = claude();

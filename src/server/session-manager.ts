@@ -15,6 +15,11 @@ import { PtySession, type PtyFactory } from './pty-session.js';
 import { applyOrder } from './order.js';
 import { detectProfiles, resolveExecutable, toLaunch } from './shells.js';
 import { initialState, reduce, type StatusEvent } from './state.js';
+import { pasteOf } from './prompt-delivery.js';
+import { promptRefusal, type PromptRefusal } from '../shared/sessions.js';
+
+/** Between the paste of a prompt and Enter, so that Claude Code has taken the paste in as one piece. */
+const PROMPT_ENTER_DELAY_MS = 400;
 
 export interface ManagerDeps {
   ptyFactory: PtyFactory;
@@ -616,6 +621,26 @@ export class SessionManager {
     if (!e) return null;
     this.dispatch(e, { type: 'ack' });
     return { ...e.info };
+  }
+
+  /**
+   * Types a prompt into a Claude session waiting at its prompt: pasted as one piece, then Enter
+   * a moment later, as a scheduled run does. Refuses (and types nothing into) a session that is
+   * not at its prompt. Enter is pressed only if the same process is still waiting there.
+   */
+  typePrompt(id: string, prompt: string): 'sent' | 'missing' | PromptRefusal {
+    const e = this.entries.get(id);
+    if (!e) return 'missing';
+    const refusal = promptRefusal(e.info);
+    if (refusal) return refusal;
+    if (!e.pty) return 'exited';
+    const generation = e.generation;
+    this.input(id, pasteOf(prompt));
+    setTimeout(() => {
+      if (this.entries.get(id) !== e || e.generation !== generation || promptRefusal(e.info)) return;
+      this.input(id, '\r');
+    }, PROMPT_ENTER_DELAY_MS);
+    return 'sent';
   }
 
   /**

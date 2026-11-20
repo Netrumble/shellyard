@@ -2114,6 +2114,142 @@ kbd.key {
   }
 }
 
+/* Picking several sessions on the board */
+
+.srow-item.picked .srow {
+  background: var(--panel-2);
+  border-color: var(--text);
+  box-shadow: inset 4px 0 0 var(--text);
+}
+
+/* Shift-click must pick, not select the text of the row. */
+.srow {
+  user-select: none;
+}
+
+.selection-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--panel);
+  border: 2px solid var(--text);
+  border-radius: 12px;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.selection-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+
+.selection-head .ny-link {
+  margin-left: auto;
+}
+
+.selection-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.selection-chip {
+  min-height: 44px;
+  padding: 4px 14px;
+  border-radius: 22px;
+  background: var(--panel-2);
+}
+
+.selection-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: start;
+}
+
+.selection-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.selection-prompt label {
+  font-weight: 600;
+}
+
+.selection-prompt textarea {
+  font: inherit;
+  color: inherit;
+  background: var(--inset);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+.selection-prompt .hint {
+  margin: 0;
+}
+
+.selection-prompt button,
+.selection-side button {
+  align-self: flex-start;
+  min-height: 44px;
+  padding: 6px 16px;
+}
+
+.selection-prompt .ny-primary {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+.selection-side {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.selection-move {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.selection-move label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.selection-move select {
+  min-height: 44px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+
+.selection-bar > p {
+  margin: 0;
+  min-height: 1.4em;
+}
+
+@media (max-width: 900px) {
+  .selection-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* Area rules */
 
 .rules-dialog {

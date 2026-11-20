@@ -12,6 +12,7 @@ import { MoreIcon } from './icons.js';
 import { NeedsYouLane } from './NeedsYouLane.js';
 import { Popover } from './Popover.js';
 import { RulesDialog } from './RulesDialog.js';
+import { SelectionBar } from './SelectionBar.js';
 import { SessionRow } from './SessionRow.js';
 import { StoryDialog } from './StoryDialog.js';
 
@@ -322,7 +323,7 @@ export function BoardView({ onNewSession }: { onNewSession: (storyId?: string) =
           <h2 id="areas-title" className="section-name">
             Areas
           </h2>
-          <span className="hint">Drag a session between areas · areas with activity float up · drag a corner to resize</span>
+          <span className="hint">Shift-click sessions to act on several · drag a session between areas · areas with activity float up</span>
         </header>
         {loaded && areas.length === 0 && <p className="empty">Nothing here yet. Create an area for a piece of work, then start sessions in it.</p>}
         <div className="board-areas">
@@ -338,6 +339,7 @@ export function BoardView({ onNewSession }: { onNewSession: (storyId?: string) =
           ))}
         </div>
       </section>
+      <SelectionBar />
       {dialog && <StoryDialog story={dialog.story} onClose={() => setDialog(null)} />}
     </div>
   );

@@ -4,6 +4,7 @@ import { api, configureApi } from './api.js';
 import { loadEffects, loadSound, saveEffects, saveSound, type EffectsLevel } from './effects.js';
 import { connect, type ConnectionState, type Socket } from './socket.js';
 import { emptyHistory, recordActivity, type SparkHistory } from './sparkline.js';
+import { pruneSelection, toggleSelected } from './selection.js';
 import { loadThemeChoice, resolveTheme, saveThemeChoice, systemPrefersLight, watchSystemTheme, type Theme, type ThemeChoice } from './theme.js';
 import { loadToken, rememberToken, wsProtocols } from './token.js';
 
@@ -31,6 +32,8 @@ interface State {
   activity: Record<string, number>;
   /** What each terminal printed over the last minutes, for the lines on the board. */
   sparks: SparkHistory;
+  /** Sessions picked on the board for one action on all of them, in the order picked. */
+  selection: string[];
   /** False until the first list arrives, so an empty list is not shown as "nothing open". */
   loaded: boolean;
   view: View;
@@ -54,6 +57,7 @@ let state: State = {
   usage: null,
   activity: {},
   sparks: emptyHistory(),
+  selection: [],
   loaded: false,
   view: { kind: 'board' },
   connection: 'connecting',
@@ -132,6 +136,15 @@ export function applyLocally(patch: { sessions?: SessionInfo[]; stories?: Story[
 
 export function setView(view: View): void {
   set({ view });
+}
+
+/** Picks a session on the board, or puts it back. */
+export function toggleSelection(id: string): void {
+  set({ selection: toggleSelected(state.selection, id) });
+}
+
+export function clearSelection(): void {
+  if (state.selection.length > 0) set({ selection: [] });
 }
 
 export async function refreshMeta(): Promise<void> {
@@ -246,7 +259,7 @@ export function startStore(): void {
     // A session shown on its own that no longer exists sends the user back to the grid.
     const current = state.view;
     const view: View = current.kind === 'single' && !sessions.some((s) => s.id === current.id) ? { kind: 'grid' } : current;
-    set({ sessions, loaded: true, view });
+    set({ sessions, loaded: true, view, selection: pruneSelection(state.selection, new Set(sessions.map((s) => s.id))) });
     if (wasLoaded) for (const cb of sessionListeners) cb(prev, sessions);
   });
   socket.onStories((stories) => set({ stories, view: withoutDeadFilter(state.view, stories) }));
