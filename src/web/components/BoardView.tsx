@@ -5,11 +5,11 @@ import { areaSummary, boardAreas, type BoardArea } from '../board.js';
 import { loadAreaSizes, NO_AREA_KEY, saveAreaSizes, withAreaSize, type AreaSize } from '../board-sizes.js';
 import { AREA_DRAG, SESSION_DRAG } from '../drag.js';
 import { dropArea, dropSessionOnArea, dropSessionOnSession, sessionInArea } from '../drag-actions.js';
-import { lampState } from '../effects.js';
 import { durationLabel } from '../gauges.js';
 import { statusLabel } from '../selectors.js';
 import { setView, useStore } from '../store.js';
 import { dragSource, useDropTarget } from './drag-target.js';
+import { StatusGlyph } from './StatusGlyph.js';
 import { StoryDialog } from './StoryDialog.js';
 
 const report = (e: unknown): void => window.alert((e as Error).message);
@@ -29,7 +29,7 @@ function Dot({ session }: { session: SessionInfo }): React.JSX.Element {
       {...dropProps}
       onClick={() => setView({ kind: 'single', id: session.id })}
     >
-      <span className={`lamp lamp-${lampState(session)}`} aria-hidden="true" />
+      <StatusGlyph session={session} size={18} />
       <span className="board-dot-name">{session.name}</span>
       <span className="board-dot-status">{statusLabel(session)}</span>
     </button>

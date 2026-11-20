@@ -34,6 +34,12 @@
   --exited-fill: #5a2326;
   --exited-edge: #7a2f33;
   --overlay: rgba(0, 0, 0, 0.6);
+  /* The colours of the state glyphs, picked from the ones above: each stands out at least 3:1
+     from the surfaces it is drawn on. Set again wherever those surfaces change. */
+  --glyph-needs: var(--accent-lit);
+  --glyph-working: var(--dial-yellow);
+  --glyph-finished: var(--ok);
+  --glyph-idle: var(--muted);
   /* DIN lettering, as on gauges and road signs; Bahnschrift ships with Windows. */
   --instrument: Bahnschrift, 'DIN Alternate', 'DIN Next', 'Roboto Condensed', 'Arial Narrow', system-ui, sans-serif;
   color-scheme: dark;
@@ -875,33 +881,83 @@ button.fold {
 
 .lamp {
   display: block;
-  width: 16px;
-  height: 16px;
-  padding: 0;
+  padding: 1px;
+  line-height: 0;
+  background: none;
+  border: 1px solid transparent;
   border-radius: 50%;
-  border: 2px solid var(--trim);
-  background: var(--lamp-off);
 }
 
-.lamp-working {
-  background: var(--ok);
-  border-color: var(--working-edge);
+.lamp:hover {
+  border-color: var(--muted);
 }
 
-.lamp-blocked {
-  background: var(--warn-fill);
-  border-color: #b87400;
+/* State glyphs: the shape says the state, the colour only confirms it. */
+
+.glyph {
+  display: inline-flex;
+  flex: none;
+  line-height: 0;
+  vertical-align: middle;
+  color: var(--glyph-idle);
 }
 
-.lamp-finished {
-  border-color: var(--text);
-  background:
-    conic-gradient(var(--text) 25%, var(--flag-alt) 0 50%, var(--text) 0 75%, var(--flag-alt) 0) 0 0 / 8px 8px;
+.glyph svg {
+  display: block;
+  overflow: visible;
+  transform-origin: 50% 50%;
 }
 
-.lamp-exited {
-  background: var(--exited-fill);
-  border-color: var(--exited-edge);
+.glyph-mark {
+  fill: currentColor;
+}
+
+.glyph-needs,
+.glyph-maybe {
+  color: var(--glyph-needs);
+}
+
+/* Only a guess that it waits: the same diamond, hollow. */
+.glyph-maybe .glyph-mark,
+.glyph-idle .glyph-mark {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+}
+
+.glyph-working {
+  color: var(--glyph-working);
+}
+
+.glyph-working .glyph-mark {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+}
+
+.glyph-finished {
+  color: var(--glyph-finished);
+}
+
+.glyph-check {
+  fill: none;
+  stroke: var(--bg);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.glyph-exited .glyph-mark {
+  fill: var(--exited-fill);
+  stroke: var(--exited-edge);
+  stroke-width: 1.5;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 /* Rev counter */
@@ -1346,8 +1402,29 @@ button.new-story {
   transition: transform 0.7s cubic-bezier(0.2, 0.9, 0.3, 1);
 }
 
-:root[data-effects='full'] .lamp-blocked {
-  animation: lamp-pulse 1.1s ease-in-out infinite;
+/* The glyphs move only when the user wants motion here and the system does not ask for less:
+   the diamond breathes every 2 s, the ring turns at the pace of the output. */
+@media (prefers-reduced-motion: no-preference) {
+  :root[data-effects='full'] .glyph-needs svg {
+    animation: glyph-pulse 2s ease-in-out infinite;
+  }
+
+  :root[data-effects='full'] .glyph-spinning svg {
+    animation: glyph-spin var(--glyph-spin, 1.6s) linear infinite;
+  }
+}
+
+@keyframes glyph-pulse {
+  50% {
+    opacity: 0.5;
+    transform: scale(0.82);
+  }
+}
+
+@keyframes glyph-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 :root[data-effects='full'] .shift-lights.urgent .shift-red {
@@ -1756,10 +1833,8 @@ button.new-story {
   cursor: grabbing;
 }
 
-.board-dot .lamp {
+.board-dot .glyph {
   grid-row: 1 / span 2;
-  width: 18px;
-  height: 18px;
 }
 
 .board-dot-name {
@@ -1827,6 +1902,10 @@ button.new-story {
   --exited-fill: #edc4c6;
   --exited-edge: #c22a2a;
   --overlay: rgba(30, 34, 42, 0.45);
+  --glyph-needs: var(--accent);
+  --glyph-working: var(--warn);
+  --glyph-finished: var(--ok);
+  --glyph-idle: var(--muted);
   color-scheme: light;
 }
 
@@ -1877,6 +1956,10 @@ button.new-story {
   --exited-fill: #f3c9cc;
   --exited-edge: #c4303a;
   --overlay: rgba(19, 11, 53, 0.5);
+  --glyph-needs: var(--accent);
+  --glyph-working: var(--warn);
+  --glyph-finished: var(--ok);
+  --glyph-idle: var(--muted);
   color-scheme: light;
 }
 
@@ -1896,6 +1979,11 @@ button.new-story {
   --trim: #4438b6;
   --lamp-off: #1d104e;
   --flag-alt: #23135f;
+  /* Magenta does not stand out from navy; the softer red does. */
+  --glyph-needs: var(--danger);
+  --glyph-working: var(--warn);
+  --glyph-finished: var(--ok);
+  --glyph-idle: var(--muted);
   color: var(--text);
   color-scheme: dark;
   border-right: none;

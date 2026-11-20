@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import type { SessionInfo } from '../../shared/types.js';
-import { lampState, type EffectsLevel } from '../effects.js';
+import type { EffectsLevel } from '../effects.js';
 import { limitDisplay, revLevel, shiftLights, zoneOf } from '../gauges.js';
 import { statusLabel } from '../selectors.js';
 import { setEffects, setSound, setTheme, setView, useStore } from '../store.js';
 import type { ThemeChoice } from '../theme.js';
 import { Dial } from './Dial.js';
 import { SoundsDialog } from './SoundsDialog.js';
+import { StatusGlyph } from './StatusGlyph.js';
 
 /** The current time, refreshed often enough for countdowns shown to the minute. */
 export function useNow(everyMs = 10_000): number {
@@ -56,7 +57,9 @@ function Lamps({ sessions }: { sessions: SessionInfo[] }): React.JSX.Element | n
         const text = `${s.name}: ${statusLabel(s)}`;
         return (
           <li key={s.id}>
-            <button type="button" className={`lamp lamp-${lampState(s)}`} title={text} aria-label={text} onClick={() => setView({ kind: 'single', id: s.id })} />
+            <button type="button" className="lamp" title={text} aria-label={text} onClick={() => setView({ kind: 'single', id: s.id })}>
+              <StatusGlyph session={s} />
+            </button>
           </li>
         );
       })}

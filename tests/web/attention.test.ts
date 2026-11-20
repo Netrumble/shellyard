@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { elapsedLabel, newlyWaiting, reasonLabel, titleFor, visibleCards } from '../../src/web/attention.js';
-import { session } from './store.test.js';
+import { session } from './session-fixture.js';
 
 const a = session('a', 'attention', 'blocked', 1);
 const b = session('b', 'attention', 'finished', 2);

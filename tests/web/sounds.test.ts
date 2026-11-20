@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { eventOf, pickSound, shouldPlay } from '../../src/web/sounds.js';
 import type { SoundSettings, Story } from '../../src/shared/types.js';
-import { session } from './store.test.js';
+import { session } from './session-fixture.js';
 
 const settings: SoundSettings = { blocked: 'sb', finished: 'sf', maybeWaiting: null };
 const story = (id: string, sound: string): Story => ({ id, name: id, ticket: '', cwd: '', color: '', sound });

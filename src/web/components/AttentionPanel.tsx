@@ -7,6 +7,7 @@ import { setView, useStore } from '../store.js';
 import { Tachometer } from './Cluster.js';
 import { ColorDot, Elapsed, SessionActions, StatusBadge, StoryFilter, StorySelect } from './SessionBits.js';
 import { BackgroundButton } from './BackgroundEditor.js';
+import { StatusGlyph } from './StatusGlyph.js';
 import { SessionBody } from './TerminalsGrid.js';
 
 const RELEASE_DELAY_MS = 400;
@@ -29,7 +30,10 @@ function Card({ session, onFocusChange }: { session: SessionInfo; onFocusChange:
         <SessionActions session={session} />
       </header>
       <div className="card-reason">
-        <span className={`reason tone-${statusTone(session)}`}>{reasonLabel(session)}</span>
+        <span className="reason status">
+          <StatusGlyph session={session} />
+          {reasonLabel(session)}
+        </span>
         {!waiting && <span className="hint">no longer waiting — this card leaves when you click elsewhere</span>}
         <span className="spacer" />
         {session.status === 'attention' && session.reason === 'finished' && (

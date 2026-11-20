@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { lampState, resolveEffects } from '../../src/web/effects.js';
+import { resolveEffects } from '../../src/web/effects.js';
 import { durationLabel, formatTokens, formatUsd, limitDisplay, needleAngle, odometerDigits, revLevel, shiftLights, zoneOf } from '../../src/web/gauges.js';
-import { session } from './store.test.js';
 
 describe('needleAngle', () => {
   it('sweeps 240 degrees, from -120 at zero to +120 at full scale', () => {
@@ -129,14 +128,5 @@ describe('effects', () => {
     expect(resolveEffects(null, false)).toBe('full');
     expect(resolveEffects(null, true)).toBe('reduced');
     expect(resolveEffects('nonsense', true)).toBe('reduced');
-  });
-  it('maps each session state to a lamp', () => {
-    expect(lampState(session('a', 'idle'))).toBe('off');
-    expect(lampState(session('a', 'running', null, 0, 'shell'))).toBe('working');
-    expect(lampState(session('a', 'working'))).toBe('working');
-    expect(lampState(session('a', 'attention', 'blocked'))).toBe('blocked');
-    expect(lampState(session('a', 'attention', 'maybe-waiting'))).toBe('blocked');
-    expect(lampState(session('a', 'attention', 'finished'))).toBe('finished');
-    expect(lampState(session('a', 'exited'))).toBe('exited');
   });
 });
