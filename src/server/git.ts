@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { existsSync, readFileSync, statSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import type { Worktree, WorktreeListing } from '../shared/types.js';
 
 /** The message is git's trimmed stderr, or a validation message. */
@@ -162,4 +162,81 @@ export async function branches(folder: string): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+function refuseDash(label: string, value: string): void {
+  if (value.startsWith('-')) throw new GitError(`${label} must not start with "-"`);
+}
+
+/** Returns the name when git accepts it as a branch name; throws GitError otherwise. */
+export async function validateBranch(folder: string, name: string): Promise<string> {
+  if (name.length === 0) throw new GitError('Branch name is empty');
+  refuseDash('Branch name', name);
+  await runGit(['check-ref-format', '--branch', name], folder);
+  return name;
+}
+
+async function listingOf(repo: string): Promise<WorktreeListing> {
+  const listing = await worktreesOf(repo);
+  if (!listing) throw new GitError('Not a git repository');
+  return listing;
+}
+
+export async function createWorktree(
+  repo: string,
+  o: { path: string; branch: string; newBranch: boolean; base?: string },
+): Promise<WorktreeListing> {
+  if (!isAbsolute(o.path)) throw new GitError('The worktree path must be absolute');
+  refuseDash('Path', o.path);
+  await validateBranch(repo, o.branch);
+  const base = o.base ?? 'HEAD';
+  refuseDash('Base', base);
+  if (existsSync(o.path)) {
+    let entries: string[];
+    try {
+      entries = readdirSync(o.path);
+    } catch {
+      throw new GitError('The worktree path exists and is not a folder');
+    }
+    if (entries.length > 0) throw new GitError('The worktree folder already exists and is not empty');
+  }
+  const args = o.newBranch
+    ? ['worktree', 'add', '-b', o.branch, '--', o.path, base]
+    : ['worktree', 'add', '--', o.path, o.branch];
+  await runGit(args, repo);
+  return listingOf(repo);
+}
+
+export async function removeWorktree(
+  repo: string,
+  path: string,
+  o: { force: boolean; deleteBranch: boolean },
+): Promise<{ listing: WorktreeListing; warning: string | null }> {
+  refuseDash('Path', path);
+  const target = (await listingOf(repo)).worktrees.find((w) => samePath(w.path, path));
+  if (!target) throw new GitError('Not a worktree of this repository');
+  if (target.isMain) throw new GitError('The main worktree cannot be removed');
+  if (target.prunable) await runGit(['worktree', 'prune'], repo);
+  else await runGit(['worktree', 'remove', ...(o.force ? ['--force'] : []), '--', target.path], repo);
+  let warning: string | null = null;
+  if (o.deleteBranch && target.branch) {
+    try {
+      await runGit(['branch', '-d', '--', target.branch], repo);
+    } catch (e) {
+      warning = e instanceof Error ? e.message : String(e);
+    }
+  }
+  return { listing: await listingOf(repo), warning };
+}
+
+export async function switchBranch(
+  worktreePath: string,
+  o: { branch: string; create: boolean },
+): Promise<void> {
+  await validateBranch(worktreePath, o.branch);
+  await runGit(['switch', ...(o.create ? ['-c'] : []), o.branch], worktreePath);
+}
+
+export function defaultWorktreeFolder(mainWorktree: string, branch: string): string {
+  return resolve(`${dirname(mainWorktree)}/${basename(mainWorktree)}-${branch.replaceAll('/', '-')}`);
 }

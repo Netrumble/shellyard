@@ -1,9 +1,20 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { branches, headOf, samePath, worktreeStatus, worktreesOf } from '../../src/server/git.js';
+import {
+  branches,
+  createWorktree,
+  defaultWorktreeFolder,
+  GitError,
+  headOf,
+  removeWorktree,
+  samePath,
+  switchBranch,
+  worktreeStatus,
+  worktreesOf,
+} from '../../src/server/git.js';
 
 let hasGit = true;
 try {
@@ -127,5 +138,99 @@ describe.skipIf(!hasGit)('git worktrees', () => {
     const b = await branches(repo);
     expect(b).toContain('main');
     expect(b).toContain('feat');
+  });
+
+  it('creates a worktree on a new branch from a base', async () => {
+    const l = await createWorktree(repo, { path: wtDir, branch: 'feat', newBranch: true, base: 'main' });
+    expect(l.worktrees.some((w) => w.branch === 'feat' && samePath(w.path, wtDir))).toBe(true);
+    expect(headOf(wtDir)!.branch).toBe('feat');
+  });
+
+  it('creates a worktree for an existing branch', async () => {
+    git(repo, 'branch', 'feat');
+    const l = await createWorktree(repo, { path: wtDir, branch: 'feat', newBranch: false });
+    expect(l.worktrees.some((w) => w.branch === 'feat')).toBe(true);
+  });
+
+  it('creates a worktree for a branch with a slash in a folder with a space', async () => {
+    const p = join(root, 'my repo-feature-x');
+    await createWorktree(repo, { path: p, branch: 'feature/x', newBranch: true });
+    expect(headOf(p)!.branch).toBe('feature/x');
+  });
+
+  it('refuses a relative path', async () => {
+    await expect(createWorktree(repo, { path: 'rel/wt', branch: 'feat', newBranch: true })).rejects.toBeInstanceOf(GitError);
+    expect(await branches(repo)).not.toContain('feat');
+  });
+
+  it('refuses an existing non-empty folder', async () => {
+    mkdirSync(wtDir);
+    writeFileSync(join(wtDir, 'f.txt'), 'x');
+    await expect(createWorktree(repo, { path: wtDir, branch: 'feat', newBranch: true })).rejects.toBeInstanceOf(GitError);
+    expect(await branches(repo)).not.toContain('feat');
+  });
+
+  it('refuses a branch starting with - and an invalid branch name', async () => {
+    await expect(createWorktree(repo, { path: wtDir, branch: '-x', newBranch: true })).rejects.toBeInstanceOf(GitError);
+    await expect(createWorktree(repo, { path: wtDir, branch: 'a..b', newBranch: true })).rejects.toBeInstanceOf(GitError);
+    expect((await worktreesOf(repo))!.worktrees.length).toBe(1);
+  });
+
+  it('refuses to remove the main worktree', async () => {
+    await expect(removeWorktree(repo, repo, { force: true, deleteBranch: false })).rejects.toBeInstanceOf(GitError);
+  });
+
+  it('refuses to remove a path that is not a worktree of the repository', async () => {
+    await expect(removeWorktree(repo, root, { force: true, deleteBranch: false })).rejects.toBeInstanceOf(GitError);
+  });
+
+  it('refuses to remove a worktree with changes unless forced', async () => {
+    await createWorktree(repo, { path: wtDir, branch: 'feat', newBranch: true });
+    writeFileSync(join(wtDir, 'new.txt'), 'x');
+    await expect(removeWorktree(repo, wtDir, { force: false, deleteBranch: false })).rejects.toBeInstanceOf(GitError);
+    const r = await removeWorktree(repo, wtDir, { force: true, deleteBranch: false });
+    expect(r.listing.worktrees.length).toBe(1);
+  });
+
+  it('removes the branch too when asked', async () => {
+    await createWorktree(repo, { path: wtDir, branch: 'feat', newBranch: true });
+    const r = await removeWorktree(repo, wtDir, { force: false, deleteBranch: true });
+    expect(r.warning).toBeNull();
+    expect(await branches(repo)).not.toContain('feat');
+  });
+
+  it('keeps the worktree removed and warns when the branch is not merged', async () => {
+    await createWorktree(repo, { path: wtDir, branch: 'feat', newBranch: true });
+    writeFileSync(join(wtDir, 'b.txt'), 'b');
+    git(wtDir, 'add', '.');
+    git(wtDir, 'commit', '-m', 'second');
+    const r = await removeWorktree(repo, wtDir, { force: false, deleteBranch: true });
+    expect(r.warning).not.toBeNull();
+    expect(r.listing.worktrees.length).toBe(1);
+    expect(await branches(repo)).toContain('feat');
+  });
+
+  it('removes a prunable worktree by pruning', async () => {
+    await createWorktree(repo, { path: wtDir, branch: 'feat', newBranch: true });
+    rmSync(wtDir, { recursive: true, force: true });
+    const r = await removeWorktree(repo, wtDir, { force: false, deleteBranch: false });
+    expect(r.listing.worktrees.length).toBe(1);
+  });
+
+  it('switches a worktree to an existing and to a new branch', async () => {
+    git(repo, 'branch', 'other');
+    await switchBranch(repo, { branch: 'other', create: false });
+    expect(headOf(repo)!.branch).toBe('other');
+    await switchBranch(repo, { branch: 'brand-new', create: true });
+    expect(headOf(repo)!.branch).toBe('brand-new');
+  });
+
+  it("reports git's refusal when the branch is checked out elsewhere", async () => {
+    await createWorktree(repo, { path: wtDir, branch: 'feat', newBranch: true });
+    await expect(switchBranch(repo, { branch: 'feat', create: false })).rejects.toThrow(/already|used by worktree/i);
+  });
+
+  it('defaultWorktreeFolder joins the parent, name and branch', () => {
+    expect(defaultWorktreeFolder('C:/r/shellyard', 'feature/x')).toBe(resolve('C:/r/shellyard-feature-x'));
   });
 });
