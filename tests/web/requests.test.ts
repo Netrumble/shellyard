@@ -20,6 +20,7 @@ describe('answerable', () => {
   it('is true only for a known permission request of a blocked session', () => {
     expect(answerable(blocked(pending()))).toBe(true);
     expect(answerable(blocked(null))).toBe(false);
+    expect(answerable(blocked(pending({ detail: null })))).toBe(false);
     expect(answerable(blocked(pending({ kind: 'question' })))).toBe(false);
     expect(answerable({ ...blocked(pending()), status: 'working', reason: null })).toBe(false);
   });

@@ -501,11 +501,16 @@ export class SessionManager {
       // Silence is measured from the later of "last output" and "work started", so a
       // session that sat quiet for an hour is not flagged the instant it starts working.
       if (next.status === 'working') entry.lastOutputAt = Math.max(entry.lastOutputAt, now);
+      const wasBlocked = info.status === 'attention' && info.reason === 'blocked';
+      const nowBlocked = next.status === 'attention' && next.reason === 'blocked';
       info.status = next.status;
       info.reason = next.reason;
       info.statusSince = now;
-      // A request lasts as long as the block it explains.
-      if (!(next.status === 'attention' && next.reason === 'blocked')) info.pending = null;
+      // A request lasts until its block ends (answered), or the turn or the session does. Going
+      // quiet before the menu shows (working ↔ possibly waiting) does not end it: the menu
+      // drawing itself is output, and Claude Code may take a while to say the menu is up.
+      const turnOver = next.status === 'idle' || next.status === 'exited' || (next.status === 'attention' && next.reason === 'finished');
+      if ((wasBlocked && !nowBlocked) || turnOver) info.pending = null;
     }
     if (changed || force) this.emitChange();
   }
@@ -668,7 +673,7 @@ export class SessionManager {
       this.emitChange();
     }
     if (this.notePending(e, name, request)) {
-      if (name === 'PermissionRequest' && e.info.pending) e.pendingCommand = { requestId: e.info.pending.id, command };
+      if (name === 'PermissionRequest' && e.info.pending?.kind === 'permission') e.pendingCommand = { requestId: e.info.pending.id, command };
       this.emitChange();
     }
     return true;
@@ -698,6 +703,14 @@ export class SessionManager {
     // Known before the menu shows (it may never show); the page offers answers only once the
     // session is blocked on it, and the next tool event clears it if it was settled elsewhere.
     if (name === 'PermissionRequest') {
+      // Another request while one is already waiting (a subagent, parallel tool calls): which
+      // menu is on screen can no longer be told from here, so neither is answered from outside.
+      // The new id turns away clicks meant for the first one.
+      if (info.pending) {
+        info.pending = { ...info.pending, kind: 'question', id: randomUUID(), message: 'Several requests are waiting: answer them in the terminal.' };
+        e.pendingCommand = null;
+        return true;
+      }
       info.pending = { ...request, id: randomUUID(), since: this.deps.now() };
       return true;
     }
@@ -718,7 +731,8 @@ export class SessionManager {
     if (!e) return 'missing';
     const p = e.info.pending;
     const blocked = e.info.status === 'attention' && e.info.reason === 'blocked';
-    if (!p || p.id !== requestId || p.kind !== 'permission' || !blocked || !e.pty) return 'stale';
+    // Only a request the user could read in full: one known only from the notification names no command.
+    if (!p || p.id !== requestId || p.kind !== 'permission' || !p.detail || !blocked || !e.pty) return 'stale';
     this.input(id, ANSWER_KEYS[choice]);
     return 'answered';
   }

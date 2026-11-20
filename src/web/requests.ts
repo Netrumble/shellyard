@@ -20,7 +20,8 @@ export const REQUEST_BADGE: Record<RequestKind, string> = {
 
 /** Whether the request on screen can be allowed or denied from outside the terminal. */
 export function answerable(s: SessionInfo): boolean {
-  return s.status === 'attention' && s.reason === 'blocked' && s.pending?.kind === 'permission';
+  // Only a request shown in full: one known only from the notification says no command.
+  return s.status === 'attention' && s.reason === 'blocked' && s.pending?.kind === 'permission' && !!s.pending.detail;
 }
 
 /**

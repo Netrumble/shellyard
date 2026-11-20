@@ -103,19 +103,25 @@ function clean(v: unknown): string | null {
   return text.length > DETAIL_MAX ? `${text.slice(0, DETAIL_MAX - 1)}…` : text;
 }
 
-/** The one thing a tool would act on: the command, the file, the address; else its input in short. */
-function detailOf(tool: string | null, input: unknown): string | null {
-  if (typeof input !== 'object' || input === null || Array.isArray(input)) return null;
+/**
+ * The one thing a tool would act on (the command, the file, the address; else its input in
+ * short) as shown, and whether what is shown is all of it: nothing cut off, nothing removed.
+ */
+function detailWithCompleteness(tool: string | null, input: unknown): { text: string | null; complete: boolean } {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) return { text: null, complete: false };
   const i = input as Record<string, unknown>;
-  for (const key of ['command', 'file_path', 'notebook_path', 'url', 'query', 'pattern', 'path']) {
-    if (key in i) return clean(i[key]);
+  let raw: unknown;
+  const key = ['command', 'file_path', 'notebook_path', 'url', 'query', 'pattern', 'path'].find((k) => k in i);
+  if (key) raw = i[key];
+  else if (tool !== 'Bash') {
+    try {
+      raw = JSON.stringify(i);
+    } catch {
+      raw = undefined;
+    }
   }
-  if (tool === 'Bash') return null;
-  try {
-    return clean(JSON.stringify(i));
-  } catch {
-    return null;
-  }
+  const text = clean(raw);
+  return { text, complete: typeof raw === 'string' && text !== null && text === raw.trim() };
 }
 
 /** The first question of an AskUserQuestion input, fit to show. */
@@ -159,15 +165,16 @@ export function parseHookRequest(body: unknown): HookRequest | null {
   const b = body as Record<string, unknown>;
   const tool = typeof b.tool_name === 'string' ? clean(b.tool_name) : null;
   switch (b.hook_event_name) {
-    case 'PermissionRequest':
+    case 'PermissionRequest': {
       // Only a menu that opens on a plain "Yes" can be answered from outside: anything else
       // (ExitPlanMode, AskUserQuestion, a tool we do not know) is shown as a question.
-      return {
-        kind: plainYesMenu(tool) ? 'permission' : 'question',
-        tool,
-        detail: tool === 'AskUserQuestion' ? firstQuestion(b.tool_input) : detailOf(tool, b.tool_input),
-        message: null,
-      };
+      if (tool === 'AskUserQuestion') return { kind: 'question', tool, detail: firstQuestion(b.tool_input), message: null };
+      const { text, complete } = detailWithCompleteness(tool, b.tool_input);
+      // Allowing from outside is offered only for what the user can read in full: a request cut
+      // short, or with characters that cannot be shown, is answered in the terminal.
+      if (plainYesMenu(tool) && !complete) return { kind: 'question', tool, detail: text, message: 'The full request does not fit here: answer it in the terminal.' };
+      return { kind: plainYesMenu(tool) ? 'permission' : 'question', tool, detail: text, message: null };
+    }
     case 'Notification': {
       if (parseHookBody(b)?.idleReminder) return null;
       const message = clean(b.message);
