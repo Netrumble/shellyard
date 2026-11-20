@@ -243,15 +243,13 @@ code {
   font-weight: 400;
 }
 
-.profile-list,
-.rows {
+.profile-list {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-.profile,
-.row {
+.profile {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -405,8 +403,7 @@ code {
   font-weight: 400;
 }
 
-.grid-view,
-.attention {
+.grid-view {
   display: flex;
   flex-direction: column;
   min-height: 100%;
@@ -427,8 +424,7 @@ code {
   overflow: hidden;
 }
 
-.tile,
-.card {
+.tile {
   display: flex;
   flex-direction: column;
   background: var(--panel);
@@ -438,9 +434,7 @@ code {
   min-width: 0;
 }
 
-.tile-header,
-.card-header,
-.card-reason {
+.tile-header {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -450,11 +444,6 @@ code {
 
 .tile-header {
   border-top: 3px solid var(--border);
-}
-
-.card-reason {
-  padding-top: 0;
-  flex-wrap: wrap;
 }
 
 .grid {
@@ -469,44 +458,6 @@ code {
   height: 100%;
 }
 
-.cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(660px, 1fr));
-  gap: 12px;
-}
-
-.card {
-  height: 440px;
-  border-left-width: 4px;
-}
-
-.tone-border-warn {
-  border-left-color: var(--warn-fill);
-}
-
-.tone-border-done {
-  border-left-color: var(--done);
-}
-
-.tone-border-ok {
-  border-left-color: var(--ok);
-}
-
-.tone-border-muted,
-.tone-border-dead {
-  border-left-color: var(--border);
-}
-
-.rows li + li {
-  border-top: 1px solid var(--border);
-}
-
-.row {
-  padding: 8px 6px;
-  border-radius: 0;
-}
-
-.row:hover,
 .profile:hover {
   background: var(--panel-2);
 }
@@ -610,9 +561,6 @@ code {
 @media (max-width: 900px) {
   .app {
     grid-template-columns: 220px minmax(0, 1fr);
-  }
-  .cards {
-    grid-template-columns: minmax(0, 1fr);
   }
   .grid {
     grid-template-columns: minmax(0, 1fr);
@@ -1143,21 +1091,7 @@ button.new-story {
   flex: 1;
 }
 
-/* The flag and the all-clear mark. Both sit in header areas, never over a terminal. */
-
-.card-header {
-  position: relative;
-  overflow: hidden;
-}
-
-.flag-sweep {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 90px;
-  pointer-events: none;
-  opacity: 0;
-  background: conic-gradient(var(--text) 25%, transparent 0 50%, var(--text) 0 75%, transparent 0) 0 0 / 14px 14px;
-}
+/* The all-clear mark. */
 
 .empty.all-clear {
   color: var(--ok);
@@ -1202,24 +1136,8 @@ button.new-story {
   }
 }
 
-:root[data-effects='full'] .flag-sweep {
-  animation: flag-pass 0.9s ease-out 1;
-}
-
 :root[data-effects='full'] .empty.all-clear {
   animation: all-clear 0.9s ease-out 1;
-}
-
-
-@keyframes flag-pass {
-  0% {
-    opacity: 0.9;
-    transform: translateX(-100%);
-  }
-  100% {
-    opacity: 0;
-    transform: translateX(900%);
-  }
 }
 
 @keyframes all-clear {
@@ -2028,6 +1946,185 @@ button.new-story {
 
 .chip-finished.chip-lit {
   border-color: var(--glyph-finished);
+}
+
+/* Answer queue: the waiting sessions on the left, the one selected on the right */
+
+.queue {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 100%;
+}
+
+.queue-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 380px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.queue-side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.queue-side .section-head {
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.queue-count {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  color: var(--glyph-needs);
+  font-weight: 700;
+}
+
+.queue-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.queue-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 60px;
+  padding: 10px 14px;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 4px solid transparent;
+  border-radius: 10px;
+}
+
+.queue-item.selected {
+  background: var(--panel-2);
+  border-left-color: var(--glyph-needs);
+}
+
+.queue-item-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.queue-item-name {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-item-line,
+.queue-item-age {
+  font-size: 13px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-item-age {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+}
+
+.queue-keys {
+  margin: 4px 2px 0;
+}
+
+.queue-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px 18px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.queue-moved {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.queue-moved button {
+  min-height: 44px;
+}
+
+.queue-terminal {
+  height: 380px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.queue-terminal > * {
+  flex: 1;
+  min-height: 0;
+}
+
+.queue-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.queue-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 6px 14px;
+}
+
+.queue-actions .ny-primary {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+kbd.key {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 0 5px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+@media (max-width: 1100px) {
+  .queue-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Read by screen readers, not shown. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* The light theme: the same instruments on a light panel. Only the values change. */

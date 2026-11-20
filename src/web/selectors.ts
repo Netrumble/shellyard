@@ -64,11 +64,3 @@ export function statusLabel(s: SessionInfo): string {
   }
   return s.status;
 }
-
-/** A class name for colouring a status; the colours themselves live in theme.css. */
-export function statusTone(s: SessionInfo): 'warn' | 'done' | 'ok' | 'muted' | 'dead' {
-  if (s.status === 'attention') return s.reason === 'finished' ? 'done' : 'warn';
-  if (s.status === 'working' || s.status === 'running') return 'ok';
-  if (s.status === 'exited') return 'dead';
-  return 'muted';
-}

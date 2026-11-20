@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { titleFor } from './attention.js';
-import { AttentionPanel } from './components/AttentionPanel.js';
+import { AnswerQueue } from './components/AnswerQueue.js';
 import { BoardView } from './components/BoardView.js';
 import { Cluster } from './components/Cluster.js';
 import { ConversationsView } from './components/ConversationsView.js';
@@ -66,7 +66,7 @@ export function App(): React.JSX.Element {
         )}
         <div className="content">
           {view.kind === 'board' && <BoardView onNewSession={(storyId) => setDialog({ storyId })} />}
-          {view.kind === 'attention' && <AttentionPanel storyFilter={view.storyFilter} />}
+          {view.kind === 'attention' && <AnswerQueue storyFilter={view.storyFilter} />}
           {view.kind === 'grid' && <TerminalsGrid storyFilter={view.storyFilter} />}
           {view.kind === 'usage' && <UsageView />}
           {view.kind === 'conversations' && <ConversationsView />}

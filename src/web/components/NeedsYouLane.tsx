@@ -1,33 +1,16 @@
 import { useState } from 'react';
 import type { PermissionChoice, SessionInfo } from '../../shared/types.js';
 import { api } from '../api.js';
+import { answerable, askLine, REQUEST_BADGE, requestKind, type RequestKind } from '../requests.js';
 import { selectAttention } from '../selectors.js';
 import { modelLabel, waitClock } from '../session-text.js';
 import { setView, useStore } from '../store.js';
 import { useNow } from './Cluster.js';
 import { StatusGlyph } from './StatusGlyph.js';
 
-type CardKind = 'permission' | 'question' | 'maybe' | 'finished';
-
-function kindOf(s: SessionInfo): CardKind {
-  if (s.reason === 'finished') return 'finished';
-  if (s.reason === 'maybe-waiting') return 'maybe';
-  return s.pending?.kind === 'question' ? 'question' : 'permission';
-}
-
-const BADGE: Record<CardKind, string> = {
-  permission: 'Permission',
-  question: 'Question',
-  maybe: 'Possibly waiting',
-  finished: 'Finished',
-};
-
-/** "Allow this command in C:\repos\hcm?" — what the terminal is asking, in a line. */
-function askLine(s: SessionInfo): string {
-  const tool = s.pending?.tool;
-  const what = tool === 'Bash' ? 'this command' : tool ? `${tool} here` : 'this';
-  return `Allow ${what} in ${s.liveCwd ?? s.cwd}?`;
-}
+type CardKind = RequestKind;
+const kindOf = requestKind;
+const BADGE = REQUEST_BADGE;
 
 function CardHead({ session, kind, since }: { session: SessionInfo; kind: CardKind; since: number }): React.JSX.Element {
   const now = useNow(1000);
@@ -59,7 +42,7 @@ function PermissionCard({ session }: { session: SessionInfo }): React.JSX.Elemen
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const p = session.pending;
-  const answerable = p?.kind === 'permission';
+  const canAnswer = answerable(session);
 
   const answer = async (choice: PermissionChoice): Promise<void> => {
     if (!p) return;
@@ -85,7 +68,7 @@ function PermissionCard({ session }: { session: SessionInfo }): React.JSX.Elemen
         ) : (
           <p className="ny-message">{p?.message ?? 'Claude Code is waiting for a permission or an answer.'}</p>
         )}
-        {answerable && <p className="ny-ask">{askLine(session)}</p>}
+        {canAnswer && <p className="ny-ask">{askLine(session)}</p>}
       </div>
       {error && (
         <p className="error" role="alert">
@@ -93,7 +76,7 @@ function PermissionCard({ session }: { session: SessionInfo }): React.JSX.Elemen
         </p>
       )}
       <div className="ny-actions">
-        {answerable && (
+        {canAnswer && (
           <>
             <button type="button" className="ny-primary" disabled={busy} onClick={() => void answer('once')}>
               Allow once
