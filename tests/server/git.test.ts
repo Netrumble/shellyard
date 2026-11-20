@@ -8,6 +8,8 @@ import {
   createWorktree,
   defaultWorktreeFolder,
   GitError,
+  GitRefusal,
+  retryWhileBusy,
   headOf,
   removeWorktree,
   samePath,
@@ -232,5 +234,52 @@ describe.skipIf(!hasGit)('git worktrees', () => {
 
   it('defaultWorktreeFolder joins the parent, name and branch', () => {
     expect(defaultWorktreeFolder('C:/r/shellyard', 'feature/x')).toBe(resolve('C:/r/shellyard-feature-x'));
+  });
+});
+
+describe('retryWhileBusy', () => {
+  const noWait = async (): Promise<void> => undefined;
+
+  it('retries a folder still in use until git succeeds', async () => {
+    let calls = 0;
+    const waits: number[] = [];
+    const result = await retryWhileBusy(
+      async () => {
+        calls += 1;
+        if (calls < 3) throw new GitError("error: failed to delete 'C:/r/app-x': Permission denied");
+        return 'done';
+      },
+      { attempts: 5, delayMs: 400, sleep: async (ms) => void waits.push(ms) },
+    );
+    expect(result).toBe('done');
+    expect(calls).toBe(3);
+    expect(waits).toEqual([400, 400]);
+  });
+
+  it('gives up after the last attempt with git\'s error', async () => {
+    let calls = 0;
+    const busy = (): Promise<never> => {
+      calls += 1;
+      return Promise.reject(new GitError('Device or resource busy'));
+    };
+    await expect(retryWhileBusy(busy, { attempts: 5, delayMs: 1, sleep: noWait })).rejects.toThrow('Device or resource busy');
+    expect(calls).toBe(5);
+  });
+
+  it('does not retry a refusal, nor a git error that is not about a busy folder', async () => {
+    let calls = 0;
+    await expect(
+      retryWhileBusy(() => {
+        calls += 1;
+        return Promise.reject(new GitRefusal('The main worktree cannot be removed'));
+      }, { sleep: noWait }),
+    ).rejects.toThrow('The main worktree cannot be removed');
+    await expect(
+      retryWhileBusy(() => {
+        calls += 1;
+        return Promise.reject(new GitError("fatal: 'x' contains modified or untracked files, use --force to delete it"));
+      }, { sleep: noWait }),
+    ).rejects.toThrow('contains modified');
+    expect(calls).toBe(2);
   });
 });

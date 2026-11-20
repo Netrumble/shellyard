@@ -81,28 +81,41 @@ describe('deleteConfirmations', () => {
   const path = 'C:\\r\\app-feat';
   const final = `Delete worktree ${path}? Files ignored by git (like .env) are deleted too.`;
   it('asks only the final question for a clean worktree with no sessions', () => {
-    expect(deleteConfirmations({ sessionNames: [], path, prunable: false, status: { dirty: false, unreachable: 0 } })).toEqual({ prompts: [final], force: false });
+    expect(deleteConfirmations({ sessionNames: [], path, prunable: false, detached: false, status: { dirty: false, unreachable: 0 } })).toEqual({ prompts: [final], force: false });
   });
   it('asks in order: sessions, changes, lost commits, then the final question, and forces', () => {
-    expect(deleteConfirmations({ sessionNames: ['a', 'b'], path, prunable: false, status: { dirty: true, unreachable: 3 } })).toEqual({
+    expect(deleteConfirmations({ sessionNames: ['a', 'b'], path, prunable: false, detached: false, status: { dirty: true, unreachable: 3 } })).toEqual({
       prompts: ['Close a, b and delete?', `Uncommitted changes in ${path} will be lost.`, '3 commits on no branch will be lost.', final],
       force: true,
     });
   });
   it('forces for lost commits alone', () => {
-    expect(deleteConfirmations({ sessionNames: [], path, prunable: false, status: { dirty: false, unreachable: 1 } })).toEqual({
+    expect(deleteConfirmations({ sessionNames: [], path, prunable: false, detached: false, status: { dirty: false, unreachable: 1 } })).toEqual({
       prompts: ['1 commits on no branch will be lost.', final],
       force: true,
     });
   });
   it('asks about changes when the status is unknown, before forcing', () => {
-    expect(deleteConfirmations({ sessionNames: ['a'], path, prunable: false, status: null })).toEqual({
-      prompts: ['Close a and delete?', `Uncommitted changes in ${path} will be lost.`, final],
+    expect(deleteConfirmations({ sessionNames: ['a'], path, prunable: false, detached: false, status: null })).toEqual({
+      prompts: ['Close a and delete?', `Could not read the status of ${path}; any uncommitted changes will be lost.`, final],
       force: true,
     });
   });
+  it('also warns about commits on no branch when the status is unknown and the worktree is detached', () => {
+    expect(deleteConfirmations({ sessionNames: [], path, prunable: false, detached: true, status: null })).toEqual({
+      prompts: [
+        `Could not read the status of ${path}; any uncommitted changes will be lost.`,
+        `Commits on no branch (if any) in ${path} will be lost.`,
+        final,
+      ],
+      force: true,
+    });
+  });
+  it('trusts a known status of a detached worktree', () => {
+    expect(deleteConfirmations({ sessionNames: [], path, prunable: false, detached: true, status: { dirty: false, unreachable: 0 } })).toEqual({ prompts: [final], force: false });
+  });
   it('has nothing to lose in a prunable worktree, whose folder is gone', () => {
-    expect(deleteConfirmations({ sessionNames: [], path, prunable: true, status: null })).toEqual({ prompts: [final], force: false });
+    expect(deleteConfirmations({ sessionNames: [], path, prunable: true, detached: false, status: null })).toEqual({ prompts: [final], force: false });
   });
 });
 

@@ -10,7 +10,7 @@ import type { ClosedStore } from './closed.js';
 import { findConversation } from './conversations.js';
 import { reopenEntry } from './restore.js';
 import { FolderError, listFolders } from './folders.js';
-import { branches, createWorktree, GitError, removeWorktree, samePath, switchBranch, worktreesOf, worktreeStatus } from './git.js';
+import { branches, createWorktree, GitError, removeWorktree, retryWhileBusy, samePath, switchBranch, worktreesOf, worktreeStatus } from './git.js';
 import { assertConfigWritable, ConfigInvalidError, loadConfig, normalizeProfiles, saveConfig } from './config.js';
 import { listConversations } from './conversations.js';
 import { ScheduleError, type ScheduleStore } from './schedules.js';
@@ -611,7 +611,9 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
         const b = await readObject(req);
         const repo = absolutePath(b.repo, 'repo');
         const target = absolutePath(b.path);
-        const result = await gitCall(() => removeWorktree(repo, target, { force: b.force === true, deleteBranch: b.deleteBranch === true }));
+        // A session closed just before (as the worktrees dialog does) may still hold the folder for a
+        // moment on Windows: git then fails on a busy folder, so try again a few times.
+        const result = await gitCall(() => retryWhileBusy(() => removeWorktree(repo, target, { force: b.force === true, deleteBranch: b.deleteBranch === true })));
         // The sessions that were in the removed worktree are no longer in the listing.
         const inRemoved = manager.list().filter((s) => s.git && samePath(s.git.worktree, target));
         await Promise.all([manager.refreshGitIn(repo), ...inRemoved.map((s) => manager.refreshGit(s.id))]);

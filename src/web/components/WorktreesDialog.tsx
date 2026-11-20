@@ -135,7 +135,7 @@ export function WorktreesDialog({ folder, onClose, onCreated }: { folder: string
     // Asked fresh, as files may have changed since the list was shown; a failure counts as unknown.
     setBusy(true);
     const status = w.prunable ? null : await api.worktreeStatus(w.path).catch(() => null);
-    const { prompts, force } = deleteConfirmations({ sessionNames: open.map((s) => s.name), path: w.path, prunable: w.prunable, status });
+    const { prompts, force } = deleteConfirmations({ sessionNames: open.map((s) => s.name), path: w.path, prunable: w.prunable, detached: w.branch === null, status });
     // Every question first: a "no" to any of them leaves everything as it was.
     for (const p of prompts) {
       if (!window.confirm(p)) {
@@ -146,12 +146,17 @@ export function WorktreesDialog({ folder, onClose, onCreated }: { folder: string
     try {
       for (const s of open) await api.deleteSession(s.id);
       const result = await api.removeWorktree({ repo: main.path, path: w.path, force, deleteBranch: w.branch !== null && deleteBranch[w.path] === true });
-      if (!live.current) return;
+      if (!live.current) {
+        // Closed meanwhile (it was opened from a session that was in this worktree): say it here.
+        if (result.warning) window.alert(result.warning);
+        return;
+      }
       setListing(result.listing);
       setWarning(result.warning);
       loadBranches();
     } catch (err) {
       if (live.current) setError((err as Error).message);
+      else window.alert((err as Error).message);
     } finally {
       if (live.current) setBusy(false);
     }
@@ -221,7 +226,13 @@ export function WorktreesDialog({ folder, onClose, onCreated }: { folder: string
                       </button>
                     )}
                     {!w.isMain && (
-                      <button type="button" className="danger" disabled={busy} onClick={() => void remove(w)}>
+                      <button
+                        type="button"
+                        className="danger"
+                        disabled={busy || w.locked}
+                        title={w.locked ? 'Locked worktrees cannot be deleted here' : undefined}
+                        onClick={() => void remove(w)}
+                      >
                         Delete
                       </button>
                     )}

@@ -6,6 +6,38 @@ import type { Worktree, WorktreeListing } from '../shared/types.js';
 /** The message is git's trimmed stderr, or a validation message. */
 export class GitError extends Error {}
 
+/** A request this module turns down itself (main worktree, not a worktree, bad name...): never worth retrying. */
+export class GitRefusal extends GitError {}
+
+/**
+ * What git says when a folder is still held by a process that is going away (Windows keeps the
+ * cwd of a dying process busy for a moment): "Permission denied", "Device or resource busy",
+ * "being used by another process", "Directory not empty", "failed to delete", "unable to ...".
+ */
+const BUSY = /busy|permission denied|being used|not empty|failed to delete|unable to/i;
+
+/**
+ * Runs a git operation again, a few times and a short while apart, while it fails because a folder
+ * is busy. Refusals and other git errors (like changes that need force) are thrown at once.
+ */
+export async function retryWhileBusy<T>(
+  fn: () => Promise<T>,
+  o: { attempts?: number; delayMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<T> {
+  const attempts = o.attempts ?? 5;
+  const delayMs = o.delayMs ?? 400;
+  const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  for (let i = 1; ; i += 1) {
+    try {
+      return await fn();
+    } catch (e) {
+      const busy = e instanceof GitError && !(e instanceof GitRefusal) && BUSY.test(e.message);
+      if (!busy || i >= attempts) throw e;
+      await sleep(delayMs);
+    }
+  }
+}
+
 const TIMEOUT_MS = 15000;
 
 /** Runs git without a shell and returns stdout. Throws GitError when git fails or is missing. */
@@ -165,12 +197,12 @@ export async function branches(folder: string): Promise<string[]> {
 }
 
 function refuseDash(label: string, value: string): void {
-  if (value.startsWith('-')) throw new GitError(`${label} must not start with "-"`);
+  if (value.startsWith('-')) throw new GitRefusal(`${label} must not start with "-"`);
 }
 
 /** Returns the name when git accepts it as a branch name; throws GitError otherwise. */
 export async function validateBranch(folder: string, name: string): Promise<string> {
-  if (name.length === 0) throw new GitError('Branch name is empty');
+  if (name.length === 0) throw new GitRefusal('Branch name is empty');
   refuseDash('Branch name', name);
   await runGit(['check-ref-format', '--branch', name], folder);
   return name;
@@ -178,7 +210,7 @@ export async function validateBranch(folder: string, name: string): Promise<stri
 
 async function listingOf(repo: string): Promise<WorktreeListing> {
   const listing = await worktreesOf(repo);
-  if (!listing) throw new GitError('Not a git repository');
+  if (!listing) throw new GitRefusal('Not a git repository');
   return listing;
 }
 
@@ -186,7 +218,7 @@ export async function createWorktree(
   repo: string,
   o: { path: string; branch: string; newBranch: boolean; base?: string },
 ): Promise<WorktreeListing> {
-  if (!isAbsolute(o.path)) throw new GitError('The worktree path must be absolute');
+  if (!isAbsolute(o.path)) throw new GitRefusal('The worktree path must be absolute');
   refuseDash('Path', o.path);
   await validateBranch(repo, o.branch);
   const base = o.base ?? 'HEAD';
@@ -196,9 +228,9 @@ export async function createWorktree(
     try {
       entries = readdirSync(o.path);
     } catch {
-      throw new GitError('The worktree path exists and is not a folder');
+      throw new GitRefusal('The worktree path exists and is not a folder');
     }
-    if (entries.length > 0) throw new GitError('The worktree folder already exists and is not empty');
+    if (entries.length > 0) throw new GitRefusal('The worktree folder already exists and is not empty');
   }
   const args = o.newBranch
     ? ['worktree', 'add', '-b', o.branch, '--', o.path, base]
@@ -214,8 +246,8 @@ export async function removeWorktree(
 ): Promise<{ listing: WorktreeListing; warning: string | null }> {
   refuseDash('Path', path);
   const target = (await listingOf(repo)).worktrees.find((w) => samePath(w.path, path));
-  if (!target) throw new GitError('Not a worktree of this repository');
-  if (target.isMain) throw new GitError('The main worktree cannot be removed');
+  if (!target) throw new GitRefusal('Not a worktree of this repository');
+  if (target.isMain) throw new GitRefusal('The main worktree cannot be removed');
   if (target.prunable) await runGit(['worktree', 'prune'], repo);
   else await runGit(['worktree', 'remove', ...(o.force ? ['--force'] : []), '--', target.path], repo);
   let warning: string | null = null;

@@ -54,17 +54,25 @@ export function deleteConfirmations(c: {
   sessionNames: string[];
   path: string;
   prunable: boolean;
+  /** No branch checked out: its commits may be held by nothing else. */
+  detached: boolean;
   status: { dirty: boolean; unreachable: number } | null;
 }): { prompts: string[]; force: boolean } {
   const prompts: string[] = [];
   let force = false;
   if (c.sessionNames.length > 0) prompts.push(`Close ${c.sessionNames.join(', ')} and delete?`);
-  if (!c.prunable) {
-    if (c.status === null || c.status.dirty) {
+  if (!c.prunable && c.status === null) {
+    // Unknown: say so, and since removal also drops the worktree's HEAD history, warn about
+    // commits that only a detached HEAD holds.
+    prompts.push(`Could not read the status of ${c.path}; any uncommitted changes will be lost.`);
+    if (c.detached) prompts.push(`Commits on no branch (if any) in ${c.path} will be lost.`);
+    force = true;
+  } else if (!c.prunable && c.status) {
+    if (c.status.dirty) {
       prompts.push(`Uncommitted changes in ${c.path} will be lost.`);
       force = true;
     }
-    if (c.status && c.status.unreachable > 0) {
+    if (c.status.unreachable > 0) {
       prompts.push(`${c.status.unreachable} commits on no branch will be lost.`);
       force = true;
     }
