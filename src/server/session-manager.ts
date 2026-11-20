@@ -2,12 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute } from 'node:path';
-import type { Conversation, SessionGit, WorktreeListing, CreateSessionRequest, HookName, Profile, SessionInfo, SessionKind, Story, TerminalBackground, TerminalFont } from '../shared/types.js';
+import type { Conversation, SessionGit, WorktreeListing, CreateSessionRequest, HookName, PermissionChoice, Profile, SessionInfo, SessionKind, Story, TerminalBackground, TerminalFont } from '../shared/types.js';
 import { normalizeBackground } from './backgrounds.js';
 import { normalizeFont } from './fonts.js';
 import { findConversation } from './conversations.js';
 import type { RestoreEntry } from './restore.js';
-import { cleanupClaudeLaunch, prepareClaudeLaunch, withoutClaudeSessionMarkers } from './claude-launch.js';
+import { cleanupClaudeLaunch, prepareClaudeLaunch, withoutClaudeSessionMarkers, type HookRequest } from './claude-launch.js';
 import type { Config } from './config.js';
 import { headOf, isInside, samePath, worktreesOf } from './git.js';
 import { isTerminalReport } from './input.js';
@@ -72,7 +72,17 @@ interface Entry {
   retired: Set<string>;
   /** The environment the launcher adds to every start of this session. */
   env: Record<string, string>;
+  /** A question Claude announced (PreToolUse of AskUserQuestion), shown once it blocks on it. */
+  asked: HookRequest | null;
 }
+
+/**
+ * The keys that answer Claude Code's permission menu: Enter takes "Yes", the first choice and
+ * the one selected when the menu opens; Escape refuses.
+ */
+const ANSWER_KEYS: Record<PermissionChoice, string> = { once: '\r', deny: '\x1b' };
+
+export type AnswerOutcome = 'answered' | 'stale' | 'missing';
 
 function isDirectory(p: string): boolean {
   try {
@@ -243,6 +253,7 @@ export class SessionManager {
       font: req.font !== undefined ? normalizeFont(req.font) : normalizeFont(profile?.font),
       git: null,
       liveCwd: null,
+      pending: null,
     };
     const entry: Entry = {
       info,
@@ -258,6 +269,7 @@ export class SessionManager {
       generation: 0,
       retired: new Set(),
       env: { ...(profile?.env ?? {}) },
+      asked: null,
     };
     this.entries.set(id, entry);
 
@@ -343,6 +355,8 @@ export class SessionManager {
     info.error = null;
     info.resumed = false;
     info.liveCwd = null;
+    info.pending = null;
+    entry.asked = null;
     info.cwd = cwd;
     if (info.kind === 'claude') {
       if (entry.conversationId) entry.retired.add(entry.conversationId);
@@ -477,6 +491,8 @@ export class SessionManager {
       info.status = next.status;
       info.reason = next.reason;
       info.statusSince = now;
+      // A request lasts as long as the block it explains.
+      if (!(next.status === 'attention' && next.reason === 'blocked')) info.pending = null;
     }
     if (changed || force) this.emitChange();
   }
@@ -598,11 +614,48 @@ export class SessionManager {
     return { ...e.info };
   }
 
-  hook(id: string, name: HookName, idleReminder: boolean): boolean {
+  /** `request`: what the hook says the session asks for, if it says (see parseHookRequest). */
+  hook(id: string, name: HookName, idleReminder: boolean, request: HookRequest | null = null): boolean {
     const e = this.entries.get(id);
     if (!e || e.info.status === 'exited') return false;
+    if (name === 'PreToolUse' && request) e.asked = request;
+    else if (name === 'PostToolUse' || name === 'UserPromptSubmit' || name === 'Stop') e.asked = null;
     this.dispatch(e, { type: 'hook', name, idleReminder });
+    if (this.notePending(e, name, request)) this.emitChange();
     return true;
+  }
+
+  /**
+   * Records what a blocked session asks. A permission request names it fully and replaces what
+   * was there; a notification only fills in when nothing is known yet, borrowing the question
+   * Claude announced. True when the request shown changed.
+   */
+  private notePending(e: Entry, name: HookName, request: HookRequest | null): boolean {
+    const { info } = e;
+    if (!request || !(info.status === 'attention' && info.reason === 'blocked')) return false;
+    if (name === 'PermissionRequest') {
+      info.pending = { ...request, id: randomUUID(), since: this.deps.now() };
+      return true;
+    }
+    if (name !== 'Notification' || info.pending) return false;
+    const asked = request.kind === 'question' ? e.asked : null;
+    info.pending = { ...request, ...(asked ? { tool: asked.tool, detail: asked.detail } : {}), id: randomUUID(), since: this.deps.now() };
+    return true;
+  }
+
+  /**
+   * Answers a permission request by pressing the key the terminal's menu expects. Only the
+   * request still on screen can be answered: once the user has answered it in the terminal, or
+   * another request has come, a late click must not type into whatever is there now.
+   */
+  answer(id: string, requestId: string, choice: PermissionChoice): AnswerOutcome {
+    const e = this.entries.get(id);
+    if (!e) return 'missing';
+    const p = e.info.pending;
+    const blocked = e.info.status === 'attention' && e.info.reason === 'blocked';
+    if (!p || p.id !== requestId || p.kind !== 'permission' || !blocked || !e.pty) return 'stale';
+    this.input(id, ANSWER_KEYS[choice]);
+    return 'answered';
   }
 
   input(id: string, data: string): void {

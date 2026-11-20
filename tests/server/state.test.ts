@@ -21,6 +21,7 @@ describe('reduce (claude)', () => {
     ['PreToolUse', { type: 'hook', name: 'PreToolUse' }, [idle, working, finished, maybe], working],
     ['PostToolUse', { type: 'hook', name: 'PostToolUse' }, [idle, working, finished, maybe], working],
     ['Notification', { type: 'hook', name: 'Notification', idleReminder: false }, live, blocked],
+    ['PermissionRequest', { type: 'hook', name: 'PermissionRequest' }, live, blocked],
     ['idle reminder while working', { type: 'hook', name: 'Notification', idleReminder: true }, [working], blocked],
     ['Stop', { type: 'hook', name: 'Stop' }, live, finished],
     ['input on blocked', { type: 'input' }, [blocked], working],

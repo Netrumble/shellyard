@@ -44,13 +44,14 @@ function contrast(a: string, b: string): number {
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
 }
 
-const places: Array<[string, (name: string) => string]> = [
-  ['dark', resolver(dark)],
-  ['light', resolver(dark, light)],
-  ['talentia', resolver(dark, talentia)],
-  ['talentia sidebar', resolver(dark, talentia, talentiaSidebar)],
+/** Each place with the surfaces drawn there; the sidebar has no inset boxes (request cards live on the board). */
+const page = ['--bg', '--panel', '--panel-2', '--inset'];
+const places: Array<[string, (name: string) => string, string[]]> = [
+  ['dark', resolver(dark), page],
+  ['light', resolver(dark, light), page],
+  ['talentia', resolver(dark, talentia), page],
+  ['talentia sidebar', resolver(dark, talentia, talentiaSidebar), ['--bg', '--panel', '--panel-2']],
 ];
-const surfaces = ['--bg', '--panel', '--panel-2'];
 
 describe('theme.css', () => {
   it('gives the Talentia theme a value for every colour the light theme sets', () => {
@@ -68,13 +69,13 @@ describe('theme.css', () => {
     expect(THEME_TERMINAL.talentia).toEqual({ termBg: talentia['--term-bg'], termFg: talentia['--term-fg'] });
   });
 
-  it.each(places)('keeps text at 4.5:1 or more on every surface (%s)', (_, get) => {
+  it.each(places)('keeps text at 4.5:1 or more on every surface (%s)', (_, get, surfaces) => {
     for (const fg of ['--text', '--muted']) {
       for (const bg of surfaces) expect(contrast(get(fg), get(bg)), `${fg} on ${bg}`).toBeGreaterThanOrEqual(4.5);
     }
   });
 
-  it.each(places)('makes every state glyph stand out 3:1 or more from every surface (%s)', (_, get) => {
+  it.each(places)('makes every state glyph stand out 3:1 or more from every surface (%s)', (_, get, surfaces) => {
     for (const fg of ['--glyph-needs', '--glyph-working', '--glyph-finished', '--glyph-idle']) {
       for (const bg of surfaces) expect(contrast(get(fg), get(bg)), `${fg} on ${bg}`).toBeGreaterThanOrEqual(3);
     }

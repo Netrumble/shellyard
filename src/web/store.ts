@@ -3,6 +3,7 @@ import type { ClosedSession, Meta, Schedule, SessionInfo, SoundFile, SoundLibrar
 import { api, configureApi } from './api.js';
 import { loadEffects, loadSound, saveEffects, saveSound, type EffectsLevel } from './effects.js';
 import { connect, type ConnectionState, type Socket } from './socket.js';
+import { emptyHistory, recordActivity, type SparkHistory } from './sparkline.js';
 import { loadThemeChoice, resolveTheme, saveThemeChoice, systemPrefersLight, watchSystemTheme, type Theme, type ThemeChoice } from './theme.js';
 import { loadToken, rememberToken, wsProtocols } from './token.js';
 
@@ -26,6 +27,8 @@ interface State {
   usage: UsageSummary | null;
   /** Bytes printed in the last second per session; absent means quiet. */
   activity: Record<string, number>;
+  /** What each terminal printed over the last minutes, for the lines on the board. */
+  sparks: SparkHistory;
   /** False until the first list arrives, so an empty list is not shown as "nothing open". */
   loaded: boolean;
   view: View;
@@ -47,6 +50,7 @@ let state: State = {
   schedules: [],
   usage: null,
   activity: {},
+  sparks: emptyHistory(),
   loaded: false,
   view: { kind: 'board' },
   connection: 'connecting',
@@ -246,7 +250,7 @@ export function startStore(): void {
   socket.onClosed((closed) => set({ closed }));
   socket.onSchedules((schedules) => set({ schedules }));
   socket.onUsage((usage) => set({ usage }));
-  socket.onActivity((activity) => set({ activity }));
+  socket.onActivity((activity) => set({ activity, sparks: recordActivity(state.sparks, activity, Date.now()) }));
   socket.onState((connection) => {
     // Once the token is known to be refused, a failing socket must not hide that message.
     if (state.connection === 'unauthorized') return;

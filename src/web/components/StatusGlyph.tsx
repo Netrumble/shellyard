@@ -25,6 +25,17 @@ function Shape({ glyph }: { glyph: Glyph }): React.JSX.Element {
   }
 }
 
+/** A glyph on its own, standing for a state rather than for a session (in counts, in legends). */
+export function GlyphMark({ glyph, size = 14 }: { glyph: Glyph; size?: number }): React.JSX.Element {
+  return (
+    <span className={`glyph glyph-${glyph}`} aria-hidden="true">
+      <svg width={size} height={size} viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+        <Shape glyph={glyph} />
+      </svg>
+    </span>
+  );
+}
+
 /**
  * The state of a session as a shape. Where the state is not written next to it, pass
  * `labelled` so that it is announced; otherwise it is decoration and stays silent.

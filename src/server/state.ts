@@ -43,6 +43,8 @@ export function reduce(kind: SessionKind, s: StatusState, e: StatusEvent): Statu
           return WORKING;
         case 'Stop':
           return { status: 'attention', reason: 'finished' };
+        case 'PermissionRequest':
+          return { status: 'attention', reason: 'blocked' };
         case 'Notification':
           // An idle reminder only matters if we still believed Claude was working.
           if (e.idleReminder && s.status !== 'working') return s;

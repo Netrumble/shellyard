@@ -6,7 +6,7 @@ import type { ConversationItem, CreateSessionRequest, Meta } from '../shared/typ
 import { classifyHost, healthProof, isChallenge, originAllowed, requestAuthorized, safeEqual } from './auth.js';
 import { MAX_IMAGE_BYTES, readImage, saveImage } from './backgrounds.js';
 import { MAX_SOUND_BYTES, SoundStore } from './sounds.js';
-import { parseHookBody } from './claude-launch.js';
+import { parseHookBody, parseHookRequest } from './claude-launch.js';
 import type { ClosedStore } from './closed.js';
 import { findConversation } from './conversations.js';
 import { reopenEntry } from './restore.js';
@@ -345,7 +345,7 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
         send(res, 204);
         return;
       }
-      if (!manager.hook(hookedId, parsed.name, parsed.idleReminder)) throw new HttpError(404, 'No such live session');
+      if (!manager.hook(hookedId, parsed.name, parsed.idleReminder, parseHookRequest(raw))) throw new HttpError(404, 'No such live session');
       noteConversation(hookedId, raw);
       manager.setLiveCwd(hookedId, (raw as { cwd?: unknown }).cwd);
       if (parsed.name === 'UserPromptSubmit') deps.onPromptSubmitted?.(hookedId);
@@ -432,9 +432,19 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       return send(res, 200, manager.list());
     }
 
-    const sessionMatch = /^\/api\/sessions\/([^/]+)(\/ack|\/editor|\/worktree)?$/.exec(path);
+    const sessionMatch = /^\/api\/sessions\/([^/]+)(\/ack|\/editor|\/worktree|\/answer)?$/.exec(path);
     if (sessionMatch) {
       const id = decodeId(sessionMatch[1]!);
+      if (sessionMatch[2] === '/answer') {
+        if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
+        const b = await readObject(req);
+        const choice = b.choice === 'once' || b.choice === 'deny' ? b.choice : null;
+        if (typeof b.requestId !== 'string' || !choice) throw new HttpError(400, 'Give the request id and a choice: once or deny');
+        const outcome = manager.answer(id, b.requestId, choice);
+        if (outcome === 'missing') throw new HttpError(404, 'No such session');
+        if (outcome === 'stale') throw new HttpError(409, 'That request is no longer waiting: it was answered in the terminal, or another one came.');
+        return send(res, 200, manager.get(id));
+      }
       if (sessionMatch[2] === '/worktree') {
         if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
         const s = manager.get(id);
@@ -508,9 +518,19 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       throw new HttpError(405, 'Method not allowed');
     }
 
-    const storyMatch = /^\/api\/stories\/([^/]+)$/.exec(path);
+    const storyMatch = /^\/api\/stories\/([^/]+)(\/editor)?$/.exec(path);
     if (storyMatch) {
       const id = decodeId(storyMatch[1]!);
+      if (storyMatch[2]) {
+        if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
+        const story = deps.stories.list().find((s) => s.id === id);
+        if (!story) throw new HttpError(404, 'No such story');
+        if (!story.cwd) throw new HttpError(409, 'This area has no folder. Set one by editing the area.');
+        // The folder is the area's own, never one the request names.
+        const problem = deps.openEditor ? deps.openEditor({ command: '', args: [], cwd: story.cwd }) : 'Opening an editor is not available here.';
+        if (problem) throw new HttpError(409, problem);
+        return send(res, 204);
+      }
       if (method === 'PATCH') {
         const story = deps.stories.update(id, toStoryInput(await readObject(req)));
         if (!story) throw new HttpError(404, 'No such story');

@@ -20,21 +20,6 @@ export function zoneOf(pct: number): Zone {
   return 'ok';
 }
 
-export type ShiftLight = 'off' | 'green' | 'amber' | 'red';
-
-/** The row of lights over the cluster: lit in proportion, green first, red at the end. */
-export function shiftLights(pct: number, count = 10): ShiftLight[] {
-  const safe = Number.isFinite(pct) ? Math.min(100, Math.max(0, pct)) : 0;
-  const lit = Math.floor((safe / 100) * count);
-  return Array.from({ length: count }, (_, i): ShiftLight => {
-    if (i >= lit) return 'off';
-    const position = i / count;
-    if (position < 0.5) return 'green';
-    if (position < 0.8) return 'amber';
-    return 'red';
-  });
-}
-
 /** Two units at most: "45s", "5m", "1h 12m", "3d 4h". */
 export function durationLabel(ms: number): string {
   const seconds = Math.floor(ms / 1000);

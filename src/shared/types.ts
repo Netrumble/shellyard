@@ -1,7 +1,7 @@
 export type SessionKind = 'claude' | 'shell';
 export type Status = 'idle' | 'working' | 'attention' | 'running' | 'exited';
 export type Reason = 'blocked' | 'finished' | 'maybe-waiting' | null;
-export type HookName = 'UserPromptSubmit' | 'PreToolUse' | 'PostToolUse' | 'Notification' | 'Stop';
+export type HookName = 'UserPromptSubmit' | 'PreToolUse' | 'PostToolUse' | 'Notification' | 'Stop' | 'PermissionRequest';
 
 export const HOOK_NAMES: readonly HookName[] = [
   'UserPromptSubmit',
@@ -9,7 +9,26 @@ export const HOOK_NAMES: readonly HookName[] = [
   'PostToolUse',
   'Notification',
   'Stop',
+  'PermissionRequest',
 ];
+
+/**
+ * What a blocked session is asking. A permission names the tool and what it would act on
+ * (the command, the file); a question carries Claude Code's message or the question itself.
+ * Any part may be missing: older Claude Code versions say only that they wait.
+ */
+export interface PendingRequest {
+  /** New for every request, so that an answer meant for an earlier one is refused. */
+  id: string;
+  kind: 'permission' | 'question';
+  tool: string | null;
+  detail: string | null;
+  message: string | null;
+  since: number;
+}
+
+/** How the user answers a permission from outside the terminal. */
+export type PermissionChoice = 'once' | 'deny';
 
 /**
  * What is behind the text of a terminal: a colour, or an uploaded image (by the name ShellYard
@@ -87,6 +106,8 @@ export interface SessionInfo {
   git: SessionGit | null;
   /** For a Claude session, the folder Claude reports it is working in now. */
   liveCwd: string | null;
+  /** While the session is blocked: what it asks, as far as Claude Code said. */
+  pending: PendingRequest | null;
 }
 
 export interface SessionGit {

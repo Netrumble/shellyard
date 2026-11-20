@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { cleanupClaudeLaunch, parseHookBody, prepareClaudeLaunch, withoutClaudeSessionMarkers } from '../../src/server/claude-launch.js';
+import { cleanupClaudeLaunch, parseHookBody, parseHookRequest, prepareClaudeLaunch, withoutClaudeSessionMarkers } from '../../src/server/claude-launch.js';
 import { useTempHome } from '../helpers.js';
 
 const base = { sessionId: 'sess-1', port: 7717, hookToken: 'hook-token', hookScriptPath: 'C:\\pkg\\dist\\hook\\hook.js', statusScriptPath: 'C:\\pkg\\dist\\hook\\statusline.js', extraArgs: [] };
@@ -32,12 +32,12 @@ describe('prepareClaudeLaunch', () => {
     expect(settings.statusLine).toEqual({ type: 'command', command: `"${process.execPath}" "C:\\pkg\\dist\\hook\\statusline.js"` });
   });
 
-  it('writes a settings file holding only the five hooks and the status line', () => {
+  it('writes a settings file holding only its hooks and the status line', () => {
     const out = prepareClaudeLaunch({ ...base, model: null });
     expect(out.settingsPath).toBe(join(home.dir(), 'run', 'sess-1.settings.json'));
     const settings = JSON.parse(readFileSync(out.settingsPath, 'utf8'));
     expect(Object.keys(settings).sort()).toEqual(['hooks', 'statusLine']);
-    expect(Object.keys(settings.hooks).sort()).toEqual(['Notification', 'PostToolUse', 'PreToolUse', 'Stop', 'UserPromptSubmit']);
+    expect(Object.keys(settings.hooks).sort()).toEqual(['Notification', 'PermissionRequest', 'PostToolUse', 'PreToolUse', 'Stop', 'UserPromptSubmit']);
     for (const entries of Object.values<any>(settings.hooks)) {
       expect(entries).toEqual([{ hooks: [{ type: 'command', command: `"${process.execPath}" "C:\\pkg\\dist\\hook\\hook.js"` }] }]);
     }
@@ -114,5 +114,51 @@ describe('parseHookBody', () => {
     expect(parseHookBody({ hook_event_name: 'Notification' })).toEqual({ name: 'Notification', idleReminder: false });
     expect(parseHookBody({ hook_event_name: 'Notification', notification_type: 'something_new' }))
       .toEqual({ name: 'Notification', idleReminder: false });
+  });
+});
+
+describe('parseHookRequest', () => {
+  it('reads the command of a Bash permission request', () => {
+    expect(parseHookRequest({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'dotnet test src/Hcm.Payroll.Tests', description: 'Run tests' } }))
+      .toEqual({ kind: 'permission', tool: 'Bash', detail: 'dotnet test src/Hcm.Payroll.Tests', message: null });
+  });
+
+  it('names the file, address or pattern other tools would act on', () => {
+    const detail = (tool_name: string, tool_input: unknown) => parseHookRequest({ hook_event_name: 'PermissionRequest', tool_name, tool_input })?.detail;
+    expect(detail('Edit', { file_path: String.raw`C:\repos\hcm\a.cs`, old_string: 'x' })).toBe(String.raw`C:\repos\hcm\a.cs`);
+    expect(detail('Write', { file_path: '/tmp/b.txt', content: 'y' })).toBe('/tmp/b.txt');
+    expect(detail('WebFetch', { url: 'https://example.com', prompt: 'p' })).toBe('https://example.com');
+    expect(detail('WebSearch', { query: 'vitest' })).toBe('vitest');
+    expect(detail('mcp__x__y', { a: 1 })).toBe('{"a":1}');
+    expect(detail('Bash', {})).toBeNull();
+    expect(detail('Bash', 'nonsense')).toBeNull();
+  });
+
+  it('keeps a long detail short and without control characters', () => {
+    const r = parseHookRequest({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: `echo \x1b[31mred\x07 ${'x'.repeat(2000)}` } });
+    expect(r!.detail!.length).toBeLessThanOrEqual(500);
+    expect(r!.detail).not.toMatch(/[\x00-\x08\x0b-\x1f\x7f]/);
+    expect(r!.detail!.endsWith('…')).toBe(true);
+  });
+
+  it('reads a permission notification, with the tool it names', () => {
+    expect(parseHookRequest({ hook_event_name: 'Notification', notification_type: 'permission_prompt', message: 'Claude needs your permission to use Bash' }))
+      .toEqual({ kind: 'permission', tool: 'Bash', detail: null, message: 'Claude needs your permission to use Bash' });
+  });
+
+  it('reads any other notification as a question, but not the idle reminder', () => {
+    expect(parseHookRequest({ hook_event_name: 'Notification', message: 'Which version?' })).toEqual({ kind: 'question', tool: null, detail: null, message: 'Which version?' });
+    expect(parseHookRequest({ hook_event_name: 'Notification', notification_type: 'idle_prompt', message: 'Claude is waiting for your input' })).toBeNull();
+  });
+
+  it('reads the question Claude is about to ask', () => {
+    expect(parseHookRequest({ hook_event_name: 'PreToolUse', tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: 'Which version?', options: [] }] } }))
+      .toEqual({ kind: 'question', tool: 'AskUserQuestion', detail: 'Which version?', message: null });
+  });
+
+  it('has nothing to say about other events', () => {
+    expect(parseHookRequest({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'ls' } })).toBeNull();
+    expect(parseHookRequest({ hook_event_name: 'Stop' })).toBeNull();
+    expect(parseHookRequest(null)).toBeNull();
   });
 });

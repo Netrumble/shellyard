@@ -161,6 +161,92 @@ describe('order', () => {
     });
   });
 
+  describe('pending requests', () => {
+    const bash = { kind: 'permission' as const, tool: 'Bash', detail: 'dotnet test', message: null };
+
+    it('records what a permission request asks, and forgets it once the session moves on', () => {
+      const s = claude();
+      mgr.hook(s.id, 'UserPromptSubmit', false);
+      mgr.hook(s.id, 'PermissionRequest', false, bash);
+      const p = mgr.get(s.id)!.pending!;
+      expect(mgr.get(s.id)).toMatchObject({ status: 'attention', reason: 'blocked' });
+      expect(p).toMatchObject({ kind: 'permission', tool: 'Bash', detail: 'dotnet test', since: clock.now() });
+      mgr.input(s.id, '1');
+      expect(mgr.get(s.id)).toMatchObject({ status: 'working', pending: null });
+    });
+
+    it('keeps the full request when the notification of the same wait follows', () => {
+      const s = claude();
+      mgr.hook(s.id, 'PermissionRequest', false, bash);
+      const id = mgr.get(s.id)!.pending!.id;
+      mgr.hook(s.id, 'Notification', false, { kind: 'permission', tool: 'Bash', detail: null, message: 'Claude needs your permission to use Bash' });
+      expect(mgr.get(s.id)!.pending).toMatchObject({ id, detail: 'dotnet test' });
+    });
+
+    it('gives each new permission request a new id', () => {
+      const s = claude();
+      mgr.hook(s.id, 'PermissionRequest', false, bash);
+      const first = mgr.get(s.id)!.pending!.id;
+      mgr.hook(s.id, 'PermissionRequest', false, { ...bash, detail: 'dotnet build' });
+      expect(mgr.get(s.id)!.pending).toMatchObject({ detail: 'dotnet build' });
+      expect(mgr.get(s.id)!.pending!.id).not.toBe(first);
+    });
+
+    it('shows the question Claude announced once it waits on it', () => {
+      const s = claude();
+      mgr.hook(s.id, 'PreToolUse', false, { kind: 'question', tool: 'AskUserQuestion', detail: 'Which version?', message: null });
+      expect(mgr.get(s.id)!.pending).toBeNull();
+      mgr.hook(s.id, 'Notification', false, { kind: 'question', tool: null, detail: null, message: 'Claude is waiting for your answer' });
+      expect(mgr.get(s.id)!.pending).toMatchObject({ kind: 'question', tool: 'AskUserQuestion', detail: 'Which version?', message: 'Claude is waiting for your answer' });
+    });
+
+    it('does not carry an answered question over to a later wait', () => {
+      const s = claude();
+      mgr.hook(s.id, 'PreToolUse', false, { kind: 'question', tool: 'AskUserQuestion', detail: 'Which version?', message: null });
+      mgr.hook(s.id, 'PostToolUse', false);
+      mgr.hook(s.id, 'Notification', false, { kind: 'question', tool: null, detail: null, message: 'Waiting' });
+      expect(mgr.get(s.id)!.pending).toMatchObject({ tool: null, detail: null, message: 'Waiting' });
+    });
+
+    it('records nothing for a session that is not blocked', () => {
+      const s = claude();
+      mgr.hook(s.id, 'Notification', true, { kind: 'question', tool: null, detail: null, message: 'x' });
+      expect(mgr.get(s.id)).toMatchObject({ status: 'idle', pending: null });
+    });
+
+    it('answers the request on screen with the key of the choice', () => {
+      const s = claude();
+      mgr.hook(s.id, 'PermissionRequest', false, bash);
+      const id = mgr.get(s.id)!.pending!.id;
+      expect(mgr.answer(s.id, id, 'once')).toBe('answered');
+      expect(ptys.last().written).toEqual(['\r']);
+      expect(mgr.get(s.id)).toMatchObject({ status: 'working', pending: null });
+
+      mgr.hook(s.id, 'PermissionRequest', false, bash);
+      expect(mgr.answer(s.id, mgr.get(s.id)!.pending!.id, 'deny')).toBe('answered');
+      expect(ptys.last().written).toEqual(['\r', '\x1b']);
+    });
+
+    it('refuses an answer meant for a request no longer on screen, typing nothing', () => {
+      const s = claude();
+      mgr.hook(s.id, 'PermissionRequest', false, bash);
+      const old = mgr.get(s.id)!.pending!.id;
+      mgr.hook(s.id, 'PermissionRequest', false, bash);
+      expect(mgr.answer(s.id, old, 'once')).toBe('stale');
+      mgr.input(s.id, '1'); // answered in the terminal
+      expect(mgr.answer(s.id, old, 'once')).toBe('stale');
+      expect(ptys.last().written).toEqual(['1']);
+      expect(mgr.answer('nope', old, 'once')).toBe('missing');
+    });
+
+    it('does not answer a question with permission keys', () => {
+      const s = claude();
+      mgr.hook(s.id, 'Notification', false, { kind: 'question', tool: null, detail: null, message: 'Which?' });
+      expect(mgr.answer(s.id, mgr.get(s.id)!.pending!.id, 'once')).toBe('stale');
+      expect(ptys.last().written).toEqual([]);
+    });
+  });
+
   describe('status', () => {
     it('follows hook events', () => {
       const s = claude();

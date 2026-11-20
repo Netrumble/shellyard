@@ -1,6 +1,6 @@
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { HOOK_NAMES, type HookName } from '../shared/types.js';
+import { HOOK_NAMES, type HookName, type PendingRequest } from '../shared/types.js';
 import { runDir } from './config.js';
 
 export interface ClaudeLaunchInput {
@@ -87,6 +87,67 @@ export function parseHookBody(body: unknown): { name: HookName; idleReminder: bo
     else idleReminder = typeof b.message === 'string' && /waiting for your input/i.test(b.message);
   }
   return { name: b.hook_event_name, idleReminder };
+}
+
+/** What a hook says the session is asking for; the id and the time are the manager's. */
+export type HookRequest = Omit<PendingRequest, 'id' | 'since'>;
+
+const DETAIL_MAX = 500;
+
+/** Text fit to show: one piece, no control characters, at most DETAIL_MAX characters. */
+function clean(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  // eslint-disable-next-line no-control-regex
+  const text = v.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '').trim();
+  if (!text) return null;
+  return text.length > DETAIL_MAX ? `${text.slice(0, DETAIL_MAX - 1)}…` : text;
+}
+
+/** The one thing a tool would act on: the command, the file, the address; else its input in short. */
+function detailOf(tool: string | null, input: unknown): string | null {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) return null;
+  const i = input as Record<string, unknown>;
+  for (const key of ['command', 'file_path', 'notebook_path', 'url', 'query', 'pattern', 'path']) {
+    if (key in i) return clean(i[key]);
+  }
+  if (tool === 'Bash') return null;
+  try {
+    return clean(JSON.stringify(i));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reads what a blocked session asks, from the hooks that say it: a permission request (with
+ * the tool and its input), a notification (its message; the idle reminder asks nothing), or a
+ * question Claude is about to put (PreToolUse of AskUserQuestion). Null for anything else.
+ */
+export function parseHookRequest(body: unknown): HookRequest | null {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return null;
+  const b = body as Record<string, unknown>;
+  const tool = typeof b.tool_name === 'string' ? clean(b.tool_name) : null;
+  switch (b.hook_event_name) {
+    case 'PermissionRequest':
+      return { kind: 'permission', tool, detail: detailOf(tool, b.tool_input), message: null };
+    case 'Notification': {
+      if (parseHookBody(b)?.idleReminder) return null;
+      const message = clean(b.message);
+      if (b.notification_type === 'permission_prompt' || (message !== null && /permission/i.test(message))) {
+        const named = message ? /permission to use ([\w.-]+)/i.exec(message) : null;
+        return { kind: 'permission', tool: named ? named[1]! : null, detail: null, message };
+      }
+      return { kind: 'question', tool: null, detail: null, message };
+    }
+    case 'PreToolUse': {
+      if (tool !== 'AskUserQuestion') return null;
+      const questions = (b.tool_input as { questions?: unknown } | null)?.questions;
+      const first = Array.isArray(questions) ? (questions[0] as { question?: unknown } | undefined)?.question : undefined;
+      return { kind: 'question', tool, detail: clean(first), message: null };
+    }
+    default:
+      return null;
+  }
 }
 
 /**

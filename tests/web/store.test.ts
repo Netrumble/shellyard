@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groupByStory, inStory, sidebarGroups, selectAttention, selectCounts, statusLabel } from '../../src/web/selectors.js';
+import { groupByStory, inStory, selectAttention, selectCounts, statusLabel } from '../../src/web/selectors.js';
 import type { SessionInfo, Story } from '../../src/shared/types.js';
 import { session } from './session-fixture.js';
 
@@ -90,19 +90,6 @@ describe('stories', () => {
     });
     it('is empty with nothing at all', () => {
       expect(groupByStory([], [])).toEqual([]);
-    });
-  });
-
-  describe('sidebarGroups', () => {
-    it('adds an empty No area group when there are areas and every session is in one', () => {
-      const groups = sidebarGroups([a1], [story('a')]);
-      expect(groups.map((g) => [g.story?.id ?? null, g.sessions.length])).toEqual([['a', 1], [null, 0]]);
-    });
-    it('keeps the loose group it already has', () => {
-      expect(sidebarGroups([free], [story('a')]).map((g) => [g.story?.id ?? null, g.sessions.length])).toEqual([['a', 0], [null, 1]]);
-    });
-    it('has no No area group without areas', () => {
-      expect(sidebarGroups([], [])).toEqual([]);
     });
   });
 

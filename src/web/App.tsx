@@ -5,6 +5,7 @@ import { BoardView } from './components/BoardView.js';
 import { Cluster } from './components/Cluster.js';
 import { ConversationsView } from './components/ConversationsView.js';
 import { SchedulesView } from './components/SchedulesView.js';
+import { SettingsMenu } from './components/SettingsMenu.js';
 import { UsageView } from './components/UsageView.js';
 import { NewSessionDialog } from './components/NewSessionDialog.js';
 import { Sidebar } from './components/Sidebar.js';
@@ -56,20 +57,7 @@ export function App(): React.JSX.Element {
             {filterName && <span className="heading-filter">, {filterName}</span>}
           </h1>
           <Cluster />
-          <dl className="counts">
-            <div className={counts.attention > 0 ? 'count-item warn' : 'count-item'}>
-              <dt>Needs attention</dt>
-              <dd>{counts.attention}</dd>
-            </div>
-            <div className="count-item">
-              <dt>Working</dt>
-              <dd>{counts.working}</dd>
-            </div>
-            <div className="count-item">
-              <dt>Idle</dt>
-              <dd>{counts.idle}</dd>
-            </div>
-          </dl>
+          <SettingsMenu />
         </header>
         {connection !== 'open' && (
           <div className="banner" role="status">

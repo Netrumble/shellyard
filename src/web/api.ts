@@ -1,4 +1,4 @@
-import type { ConversationItem, CreateSessionRequest, FolderListing, Meta, Profile, Schedule, ScheduleRun, SessionInfo, SoundFile, SoundLibrary, SoundSettings, Story, TerminalBackground, TerminalFont, WorktreeListing } from '../shared/types.js';
+import type { ConversationItem, CreateSessionRequest, FolderListing, Meta, PermissionChoice, Profile, Schedule, ScheduleRun, SessionInfo, SoundFile, SoundLibrary, SoundSettings, Story, TerminalBackground, TerminalFont, WorktreeListing } from '../shared/types.js';
 
 /** What a schedule is made or changed with; a change sends only the fields it changes. */
 export type ScheduleFields = Partial<Pick<Schedule, 'name' | 'prompt' | 'profileId' | 'model' | 'cwd' | 'storyId' | 'when' | 'enabled' | 'catchUp' | 'permissionMode'>>;
@@ -118,6 +118,11 @@ export const api = {
   /** Opens VS Code on the session's folder, on the computer ShellYard runs on. */
   openEditor: (id: string): Promise<void> => call('POST', `/api/sessions/${encodeURIComponent(id)}/editor`),
   ackSession: (id: string): Promise<SessionInfo> => call('POST', `/api/sessions/${encodeURIComponent(id)}/ack`),
+  /** Answers the permission request `requestId`; refused (409) once it is no longer on screen. */
+  answer: (id: string, requestId: string, choice: PermissionChoice): Promise<SessionInfo> =>
+    call('POST', `/api/sessions/${encodeURIComponent(id)}/answer`, { requestId, choice }),
+  /** Opens VS Code on the folder of an area. */
+  openAreaEditor: (storyId: string): Promise<void> => call('POST', `/api/stories/${encodeURIComponent(storyId)}/editor`),
   deleteSession: (id: string): Promise<void> => call('DELETE', `/api/sessions/${encodeURIComponent(id)}`),
   reorderStories: (ids: string[]): Promise<Story[]> => call('PUT', '/api/stories/order', ids),
   reorderSessions: (ids: string[]): Promise<SessionInfo[]> => call('PUT', '/api/sessions/order', ids),

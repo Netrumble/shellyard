@@ -309,6 +309,28 @@ describe('http api', () => {
       expect(mgr.get(c.id)).toMatchObject({ status: 'attention', reason: 'blocked' });
     });
 
+    it('records what a permission request asks, and lets the user answer it once', async () => {
+      const c = await newSession('claude');
+      const hook = { hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'dotnet test' } };
+      expect((await call('POST', `/api/hooks/${c.id}`, { auth: 'hook', body: JSON.stringify(hook) })).status).toBe(204);
+      const pending = mgr.get(c.id)!.pending!;
+      expect(pending).toMatchObject({ kind: 'permission', tool: 'Bash', detail: 'dotnet test' });
+
+      const answer = (body: unknown, id = c.id) => call('POST', `/api/sessions/${id}/answer`, { body: JSON.stringify(body) });
+      expect((await answer({ requestId: pending.id, choice: 'always' })).status).toBe(400);
+      expect((await answer({ choice: 'once' })).status).toBe(400);
+      expect((await answer({ requestId: pending.id, choice: 'once' }, 'nope')).status).toBe(404);
+      expect((await answer({ requestId: 'other', choice: 'once' })).status).toBe(409);
+      expect(ptys.last().written).toEqual([]);
+
+      const ok = await answer({ requestId: pending.id, choice: 'once' });
+      expect(ok.status).toBe(200);
+      expect((await ok.json()).pending).toBeNull();
+      expect(ptys.last().written).toEqual(['\r']);
+      expect((await answer({ requestId: pending.id, choice: 'deny' })).status).toBe(409);
+      expect((await call('GET', `/api/sessions/${c.id}/answer`)).status).toBe(405);
+    });
+
     it('answers 400 for a malformed body or unknown event, changing nothing', async () => {
       const c = await newSession('claude');
       expect((await call('POST', `/api/hooks/${c.id}`, { auth: 'hook', body: '{"hook_event_name":"Sto' })).status).toBe(400);
