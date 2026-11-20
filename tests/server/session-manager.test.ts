@@ -742,6 +742,22 @@ describe('SessionManager restartIn', () => {
     expect(mgr.restorable()[0]!.conversationId).toBe(after);
   });
 
+  it('restartIn retires the conversation it replaces', () => {
+    const s = mgr.create({ kind: 'claude', command: node, cwd: work });
+    const before = mgr.conversationOf(s.id)!;
+    expect(mgr.isRetiredConversation(s.id, before)).toBe(false);
+    mgr.restartIn(s.id, other);
+    const after = mgr.conversationOf(s.id)!;
+    expect(mgr.isRetiredConversation(s.id, before)).toBe(true);
+    expect(mgr.isRetiredConversation(s.id, after)).toBe(false);
+    mgr.restartIn(s.id, work);
+    expect(mgr.isRetiredConversation(s.id, before)).toBe(true);
+    expect(mgr.isRetiredConversation(s.id, after)).toBe(true);
+    expect(mgr.isRetiredConversation(s.id, 42)).toBe(false);
+    expect(mgr.isRetiredConversation(s.id, undefined)).toBe(false);
+    expect(mgr.isRetiredConversation('nope', before)).toBe(false);
+  });
+
   it('restartIn adds nothing to the closed list', () => {
     const closed: string[] = [];
     mgr.onClosed((_e, id) => closed.push(id));

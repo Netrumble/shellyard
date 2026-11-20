@@ -231,10 +231,13 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
     manager.tick();
     schedules.tick();
   }, 1000);
+  // A branch switched or a commit made inside a terminal shows up without a git process.
+  const headTicker = setInterval(() => manager.refreshHeads(), 10_000);
 
   const stop = (): Promise<void> => {
     stopping ??= (async () => {
       clearInterval(ticker);
+      clearInterval(headTicker);
       clearInterval(deliveryTicker);
       scanning = false;
       clearTimeout(scanTimer);

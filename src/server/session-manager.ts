@@ -65,6 +65,8 @@ interface Entry {
   gitSeq: number;
   /** Counts the processes started, so that the callbacks of a replaced one are ignored. */
   generation: number;
+  /** Conversations replaced by restartIn: late reports naming them come from a stopped process. */
+  retired: Set<string>;
   /** The environment the launcher adds to every start of this session. */
   env: Record<string, string>;
 }
@@ -204,6 +206,7 @@ export class SessionManager {
       conversationId: kind === 'claude' ? (conversation?.id ?? id) : null,
       gitSeq: 0,
       generation: 0,
+      retired: new Set(),
       env: { ...(profile?.env ?? {}) },
     };
     this.entries.set(id, entry);
@@ -295,6 +298,7 @@ export class SessionManager {
     info.liveCwd = null;
     info.cwd = cwd;
     if (info.kind === 'claude') {
+      if (entry.conversationId) entry.retired.add(entry.conversationId);
       entry.conversationId = randomUUID();
       info.model = entry.launchModel;
     }
@@ -469,6 +473,12 @@ export class SessionManager {
   /** The conversation a session holds, as far as is known. */
   conversationOf(id: string): string | null {
     return this.entries.get(id)?.conversationId ?? null;
+  }
+
+  /** Whether a report naming this conversation comes from a process restartIn has replaced. */
+  isRetiredConversation(id: string, conversationId: unknown): boolean {
+    if (typeof conversationId !== 'string') return false;
+    return this.entries.get(id)?.retired.has(conversationId) ?? false;
   }
 
   /** The conversation Claude Code says the session is holding (it changes with /clear or /resume). */

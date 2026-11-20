@@ -159,7 +159,7 @@ The user wants, when a session's folder is in a git repository with worktrees:
 |---|---|---|
 | `GET /api/git/worktrees?path=` | | `WorktreeListing` or `null` |
 | `GET /api/git/branches?path=` | | local branch names |
-| `GET /api/git/dirty?path=` | | `{ dirty: boolean, unreachable: number }` for one worktree |
+| `GET /api/git/status?path=` | | `{ dirty: boolean, unreachable: number }` for one worktree |
 | `POST /api/git/worktrees` | `{ repo, path, branch, newBranch, base? }` | creates; returns the new listing |
 | `DELETE /api/git/worktrees` | `{ repo, path, force, deleteBranch }` | removes; returns listing + optional warning |
 | `POST /api/git/switch` | `{ path, branch, create }` | switches the branch of the worktree at `path` |
@@ -192,7 +192,7 @@ the `git` field of every session in that repository and announces the change.
   - **Delete** (not on the main worktree): if sessions are open in it, lists them and offers
     "Close them and delete"; if it has changes, a second confirmation that names the loss
     ("Uncommitted changes in <path> will be lost") before sending `force: true`; if it is
-    detached with commits on no branch (`GET /api/git/dirty` also returns `unreachable: n`), a
+    detached with commits on no branch (`GET /api/git/status` also returns `unreachable: n`), a
     confirmation that says "n commits on no branch will be lost"; every delete confirmation
     also says that files ignored by git (e.g. `.env`) are deleted too *(our call)*; a "Also delete
     the branch <b>" checkbox (safe delete; git's refusal is shown as a warning).

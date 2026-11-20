@@ -1,16 +1,19 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, request, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { healthProof, newChallenge } from '../../src/server/auth.js';
 import { loadConfig } from '../../src/server/config.js';
+import { headOf, samePath } from '../../src/server/git.js';
 import { createRequestHandler } from '../../src/server/http.js';
 import { SessionManager } from '../../src/server/session-manager.js';
 import { StoryStore } from '../../src/server/stories.js';
 import { ClosedStore } from '../../src/server/closed.js';
 import { UsageStore } from '../../src/server/usage.js';
-import type { Profile } from '../../src/shared/types.js';
+import type { Profile, SessionInfo } from '../../src/shared/types.js';
 import { fakePtyFactory, useTempHome } from '../helpers.js';
 
 const TOKEN = 't'.repeat(64);
@@ -25,6 +28,26 @@ interface Res {
   json: () => any;
 }
 
+type CallOpts = { body?: string; headers?: Record<string, string>; auth?: 'user' | 'none' | 'hook' };
+
+/** Raw request so the Host header and the path can be anything. */
+function callAt(port: number, method: string, path: string, opts: CallOpts = {}): Promise<Res> {
+  const headers: Record<string, string> = { host: `${PAGE}:${port}`, ...opts.headers };
+  const auth = opts.auth ?? 'user';
+  if (auth === 'user') headers['x-shellyard-token'] = TOKEN;
+  if (auth === 'hook') headers['x-shellyard-hook-token'] = HOOK_TOKEN;
+  if (opts.body !== undefined) headers['content-length'] = String(Buffer.byteLength(opts.body));
+  return new Promise((resolve, reject) => {
+    const req = request({ host: '127.0.0.1', port, method, path, headers }, (res) => {
+      let text = '';
+      res.on('data', (d) => (text += d));
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, headers: res.headers, text, json: () => JSON.parse(text) }));
+    });
+    req.on('error', reject);
+    req.end(opts.body);
+  });
+}
+
 describe('http api', () => {
   const home = useTempHome();
   let server: Server;
@@ -35,23 +58,7 @@ describe('http api', () => {
   let webDir = '';
   let stories: StoryStore;
 
-  /** Raw request so the Host header and the path can be anything. */
-  function call(method: string, path: string, opts: { body?: string; headers?: Record<string, string>; auth?: 'user' | 'none' | 'hook' } = {}): Promise<Res> {
-    const headers: Record<string, string> = { host: `${PAGE}:${port}`, ...opts.headers };
-    const auth = opts.auth ?? 'user';
-    if (auth === 'user') headers['x-shellyard-token'] = TOKEN;
-    if (auth === 'hook') headers['x-shellyard-hook-token'] = HOOK_TOKEN;
-    if (opts.body !== undefined) headers['content-length'] = String(Buffer.byteLength(opts.body));
-    return new Promise((resolve, reject) => {
-      const req = request({ host: '127.0.0.1', port, method, path, headers }, (res) => {
-        let text = '';
-        res.on('data', (d) => (text += d));
-        res.on('end', () => resolve({ status: res.statusCode ?? 0, headers: res.headers, text, json: () => JSON.parse(text) }));
-      });
-      req.on('error', reject);
-      req.end(opts.body);
-    });
-  }
+  const call = (method: string, path: string, opts: CallOpts = {}): Promise<Res> => callAt(port, method, path, opts);
 
   beforeEach(async () => {
     shutdowns = 0;
@@ -450,5 +457,233 @@ describe('http api', () => {
   it('shuts down on request', async () => {
     expect((await call('POST', '/api/shutdown')).status).toBe(204);
     expect(shutdowns).toBe(1);
+  });
+});
+
+let hasGit = true;
+try {
+  execFileSync('git', ['--version'], { stdio: 'ignore' });
+} catch {
+  hasGit = false;
+}
+
+function git(cwd: string, ...args: string[]): string {
+  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+}
+
+describe.skipIf(!hasGit)('http api: git', () => {
+  const home = useTempHome();
+  let server: Server;
+  let port = 0;
+  let mgr: SessionManager;
+  let root = '';
+  let repo = '';
+  let linked = '';
+  let plain = '';
+
+  const call = (method: string, path: string, opts: CallOpts = {}): Promise<Res> => callAt(port, method, path, opts);
+  const q = (p: string): string => encodeURIComponent(p);
+  const post = (path: string, body: unknown) => call('POST', path, { body: JSON.stringify(body) });
+  const del = (path: string, body: unknown) => call('DELETE', path, { body: JSON.stringify(body) });
+  const claudeIn = (cwd: string): SessionInfo => mgr.create({ kind: 'claude', command: process.execPath, cwd });
+  const status = (body: Record<string, unknown>) => JSON.stringify({ model: { id: 'claude-opus', display_name: 'Opus' }, cost: { total_cost_usd: 1 }, ...body });
+
+  beforeEach(async () => {
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'shellyard-http-git-')));
+    repo = join(root, 'repo');
+    linked = join(root, 'repo-feature');
+    plain = join(root, 'plain');
+    mkdirSync(repo);
+    mkdirSync(plain);
+    git(repo, 'init', '-b', 'main');
+    git(repo, 'config', 'user.name', 'Test');
+    git(repo, 'config', 'user.email', 'test@example.com');
+    git(repo, 'config', 'commit.gpgsign', 'false');
+    writeFileSync(join(repo, 'a.txt'), 'a');
+    git(repo, 'add', '.');
+    git(repo, 'commit', '-m', 'first');
+    git(repo, 'worktree', 'add', '-b', 'feature', linked);
+
+    server = createServer();
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    port = (server.address() as AddressInfo).port;
+    const stories = new StoryStore();
+    // The real git functions: no gitOf / headOf stubs here.
+    mgr = new SessionManager({
+      stories: () => stories.list(),
+      ptyFactory: fakePtyFactory().factory,
+      now: Date.now,
+      config: () => loadConfig().config,
+      port,
+      hookToken: HOOK_TOKEN,
+      hookScriptPath: '/h.js', statusScriptPath: '/s.js',
+      builtins: () => [builtin],
+    });
+    server.on('request', createRequestHandler({ manager: mgr, stories, usage: new UsageStore({ now: Date.now, file: join(home.dir(), 'usage.json') }), closed: new ClosedStore({ now: Date.now, file: join(home.dir(), 'closed.json') }), port, pageHost: PAGE, token: TOKEN, hookToken: HOOK_TOKEN, webDir: home.dir(), onShutdown: () => undefined }));
+  });
+
+  afterEach(async () => {
+    mgr.shutdown();
+    server.closeAllConnections();
+    await new Promise((r) => server.close(r));
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  });
+
+  it('needs the page token on every git route', async () => {
+    const none = { auth: 'none' as const };
+    const body = JSON.stringify({});
+    expect((await call('GET', `/api/git/worktrees?path=${q(repo)}`, none)).status).toBe(401);
+    expect((await call('GET', `/api/git/branches?path=${q(repo)}`, none)).status).toBe(401);
+    expect((await call('GET', `/api/git/status?path=${q(repo)}`, none)).status).toBe(401);
+    expect((await call('POST', '/api/git/worktrees', { ...none, body })).status).toBe(401);
+    expect((await call('DELETE', '/api/git/worktrees', { ...none, body })).status).toBe(401);
+    expect((await call('POST', '/api/git/switch', { ...none, body })).status).toBe(401);
+    expect((await call('POST', '/api/sessions/x/worktree', { ...none, body })).status).toBe(401);
+    expect((await call('GET', `/api/git/worktrees?path=${q(repo)}`, { auth: 'hook' })).status).toBe(401);
+  });
+
+  it('lists the worktrees of a repository, and null for a plain folder', async () => {
+    const r = await call('GET', `/api/git/worktrees?path=${q(linked)}`);
+    expect(r.status).toBe(200);
+    const listing = r.json();
+    expect(listing.worktrees).toHaveLength(2);
+    expect(samePath(listing.current, linked)).toBe(true);
+    expect(listing.worktrees.map((w: { branch: string }) => w.branch)).toEqual(['main', 'feature']);
+    const p = await call('GET', `/api/git/worktrees?path=${q(plain)}`);
+    expect(p.status).toBe(200);
+    expect(p.json()).toBeNull();
+  });
+
+  it('answers 400 for a missing, relative or non-string path', async () => {
+    for (const route of ['worktrees', 'branches', 'status']) {
+      expect((await call('GET', `/api/git/${route}`)).status, route).toBe(400);
+      expect((await call('GET', `/api/git/${route}?path=relative/dir`)).status, route).toBe(400);
+    }
+    expect((await post('/api/git/worktrees', { repo: 'repo', path: join(root, 'x'), branch: 'x', newBranch: true })).status).toBe(400);
+    expect((await post('/api/git/worktrees', { repo, path: 'x', branch: 'x', newBranch: true })).status).toBe(400);
+    expect((await post('/api/git/worktrees', { repo, path: 7, branch: 'x', newBranch: true })).status).toBe(400);
+    expect((await del('/api/git/worktrees', { repo, path: 'repo-feature', force: false, deleteBranch: false })).status).toBe(400);
+    expect((await del('/api/git/worktrees', { repo: '', path: linked, force: false, deleteBranch: false })).status).toBe(400);
+    expect((await post('/api/git/switch', { path: 'repo', branch: 'x', create: true })).status).toBe(400);
+    expect((await post('/api/git/switch', { path: null, branch: 'x', create: true })).status).toBe(400);
+  });
+
+  it('lists branches and tells whether a worktree is dirty', async () => {
+    expect((await call('GET', `/api/git/branches?path=${q(repo)}`)).json().sort()).toEqual(['feature', 'main']);
+    expect((await call('GET', `/api/git/status?path=${q(repo)}`)).json()).toEqual({ dirty: false, unreachable: 0 });
+    writeFileSync(join(repo, 'b.txt'), 'b');
+    expect((await call('GET', `/api/git/status?path=${q(repo)}`)).json()).toEqual({ dirty: true, unreachable: 0 });
+    // Not a worktree at all: git's complaint, as a 400.
+    const r = await call('GET', `/api/git/status?path=${q(plain)}`);
+    expect(r.status).toBe(400);
+    expect(r.json().error).toBeTruthy();
+  });
+
+  it('creates a worktree (201, with the new listing) and refuses a bad branch with the reason', async () => {
+    const path = join(root, 'repo-new');
+    const r = await post('/api/git/worktrees', { repo, path, branch: 'new-thing', newBranch: true });
+    expect(r.status).toBe(201);
+    expect(r.json().worktrees.some((w: { path: string; branch: string }) => samePath(w.path, path) && w.branch === 'new-thing')).toBe(true);
+    const bad = await post('/api/git/worktrees', { repo, path: join(root, 'repo-bad'), branch: 'bad..name', newBranch: true });
+    expect(bad.status).toBe(400);
+    expect(bad.json().error).toBeTruthy();
+    const dash = await post('/api/git/worktrees', { repo, path: join(root, 'repo-dash'), branch: '-x', newBranch: true });
+    expect(dash.status).toBe(400);
+    expect(dash.json().error).toMatch(/must not start with "-"/);
+  });
+
+  it('refuses to remove the main worktree, and removes a linked one', async () => {
+    const main = await del('/api/git/worktrees', { repo, path: repo, force: false, deleteBranch: false });
+    expect(main.status).toBe(400);
+    expect(main.json().error).toMatch(/main worktree/i);
+    const r = await del('/api/git/worktrees', { repo, path: linked, force: false, deleteBranch: true });
+    expect(r.status).toBe(200);
+    expect(r.json().listing.worktrees).toHaveLength(1);
+    expect(r.json().warning).toBeNull();
+    expect(git(repo, 'branch', '--list', 'feature')).toBe('');
+  });
+
+  it('refreshes the sessions of a removed worktree and of the rest of the repository', async () => {
+    const inLinked = claudeIn(linked);
+    const inMain = claudeIn(repo);
+    await vi.waitFor(() => expect(mgr.get(inLinked.id)!.git?.worktreeCount).toBe(2));
+    await vi.waitFor(() => expect(mgr.get(inMain.id)!.git?.worktreeCount).toBe(2));
+    expect((await del('/api/git/worktrees', { repo, path: linked, force: true, deleteBranch: false })).status).toBe(200);
+    await vi.waitFor(() => expect(mgr.get(inMain.id)!.git?.worktreeCount).toBe(1));
+    await vi.waitFor(() => expect(mgr.get(inLinked.id)!.git).toBeNull());
+  });
+
+  it('switches the branch of a worktree (204), and only of a worktree', async () => {
+    const r = await post('/api/git/switch', { path: linked, branch: 'other', create: true });
+    expect(r.status).toBe(204);
+    expect(headOf(linked)?.branch).toBe('other');
+    expect((await post('/api/git/switch', { path: plain, branch: 'x', create: true })).status).toBe(422);
+    const sub = join(linked, 'sub');
+    mkdirSync(sub);
+    expect((await post('/api/git/switch', { path: sub, branch: 'y', create: true })).status).toBe(422);
+    const taken = await post('/api/git/switch', { path: linked, branch: 'main', create: false });
+    expect(taken.status).toBe(400);
+    expect(taken.json().error).toBeTruthy();
+  });
+
+  it('restarts a session in another worktree of its repository', async () => {
+    const s = claudeIn(repo);
+    await vi.waitFor(() => expect(mgr.get(s.id)!.git).not.toBeNull());
+    const r = await post(`/api/sessions/${s.id}/worktree`, { path: linked });
+    expect(r.status).toBe(200);
+    expect(samePath(r.json().cwd, linked)).toBe(true);
+    expect(r.json().id).toBe(s.id);
+    await vi.waitFor(() => expect(samePath(mgr.get(s.id)!.git?.worktree ?? '', linked)).toBe(true));
+  });
+
+  it('refuses to restart a session in a folder that is not a worktree of its repository', async () => {
+    const s = claudeIn(repo);
+    expect((await post(`/api/sessions/${s.id}/worktree`, { path: plain })).status).toBe(422);
+    expect((await post(`/api/sessions/${s.id}/worktree`, { path: 'repo-feature' })).status).toBe(400);
+    expect((await post(`/api/sessions/${s.id}/worktree`, { path: 3 })).status).toBe(400);
+    expect((await post('/api/sessions/nope/worktree', { path: linked })).status).toBe(404);
+    expect(samePath(mgr.get(s.id)!.cwd, repo)).toBe(true);
+  });
+
+  it('follows the folder a hook reports into the linked worktree', async () => {
+    const s = claudeIn(repo);
+    await vi.waitFor(() => expect(mgr.get(s.id)!.git).not.toBeNull());
+    const r = await call('POST', `/api/hooks/${s.id}`, { auth: 'hook', body: JSON.stringify({ hook_event_name: 'PostToolUse', cwd: linked }) });
+    expect(r.status).toBe(204);
+    expect(mgr.get(s.id)!.liveCwd).toBe(linked);
+    await vi.waitFor(() => expect(samePath(mgr.get(s.id)!.git?.worktree ?? '', linked)).toBe(true));
+  });
+
+  it('follows the folder a status report names, preferring the workspace folder', async () => {
+    const s = claudeIn(repo);
+    const r = await call('POST', `/api/status/${s.id}`, { auth: 'hook', body: status({ cwd: plain, workspace: { current_dir: linked } }) });
+    expect(r.status).toBe(204);
+    expect(mgr.get(s.id)!.liveCwd).toBe(linked);
+    await call('POST', `/api/status/${s.id}`, { auth: 'hook', body: status({ cwd: plain }) });
+    expect(mgr.get(s.id)!.liveCwd).toBe(plain);
+  });
+
+  it('ignores late reports of the conversation a restart replaced', async () => {
+    const s = claudeIn(repo);
+    const old = mgr.conversationOf(s.id)!;
+    mgr.restartIn(s.id, linked);
+    const fresh = mgr.conversationOf(s.id)!;
+    expect(fresh).not.toBe(old);
+
+    const stale = await call('POST', `/api/hooks/${s.id}`, { auth: 'hook', body: JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: old, cwd: plain }) });
+    expect(stale.status).toBe(204);
+    const staleStatus = await call('POST', `/api/status/${s.id}`, { auth: 'hook', body: status({ session_id: old, cwd: plain }) });
+    expect(staleStatus.status).toBe(204);
+    expect(mgr.conversationOf(s.id)).toBe(fresh);
+    expect(mgr.get(s.id)!.liveCwd).toBeNull();
+    expect(mgr.get(s.id)!.status).toBe('idle');
+    expect(mgr.get(s.id)!.model).toBeNull();
+    expect((await call('GET', '/api/usage')).json().today.costUsd).toBe(0);
+
+    const current = await call('POST', `/api/hooks/${s.id}`, { auth: 'hook', body: JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: fresh, cwd: plain }) });
+    expect(current.status).toBe(204);
+    expect(mgr.get(s.id)!.liveCwd).toBe(plain);
+    expect(mgr.get(s.id)!.status).toBe('working');
+    expect(mgr.conversationOf(s.id)).toBe(fresh);
   });
 });

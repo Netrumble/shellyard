@@ -1,7 +1,7 @@
 import { createReadStream, statSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { pipeline } from 'node:stream';
-import { extname, resolve, sep } from 'node:path';
+import { extname, isAbsolute, resolve, sep } from 'node:path';
 import type { ConversationItem, CreateSessionRequest, Meta } from '../shared/types.js';
 import { classifyHost, healthProof, isChallenge, originAllowed, requestAuthorized, safeEqual } from './auth.js';
 import { MAX_IMAGE_BYTES, readImage, saveImage } from './backgrounds.js';
@@ -10,6 +10,7 @@ import type { ClosedStore } from './closed.js';
 import { findConversation } from './conversations.js';
 import { reopenEntry } from './restore.js';
 import { FolderError, listFolders } from './folders.js';
+import { branches, createWorktree, GitError, removeWorktree, samePath, switchBranch, worktreesOf, worktreeStatus } from './git.js';
 import { assertConfigWritable, ConfigInvalidError, loadConfig, normalizeProfiles, saveConfig } from './config.js';
 import { listConversations } from './conversations.js';
 import { ScheduleError, type ScheduleStore } from './schedules.js';
@@ -148,6 +149,25 @@ async function readObject(req: IncomingMessage): Promise<Record<string, unknown>
 }
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+
+/** A folder named by a request: only a non-empty absolute path is taken. */
+function absolutePath(v: unknown, label = 'path'): string {
+  if (typeof v !== 'string' || v.length === 0 || !isAbsolute(v)) throw new HttpError(400, `${label} must be an absolute path`);
+  return v;
+}
+
+/** What git refuses is the client's to correct: it is answered with git's reason. */
+async function gitCall<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (e instanceof GitError) throw new HttpError(400, e.message);
+    throw e;
+  }
+}
+
+/** The conversation a hook or status report names, if any. */
+const reportedConversation = (body: unknown): unknown => (body as { session_id?: unknown } | null)?.session_id;
 
 function decodeId(raw: string): string {
   try {
@@ -297,8 +317,16 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       const parsed = parseHookBody(raw);
       if (!parsed) throw new HttpError(400, 'Unknown hook event');
       const hookedId = decodeId(hookMatch[1]!);
+      // A late report from the process a restart replaced: acknowledged, and nothing more.
+      if (manager.isRetiredConversation(hookedId, reportedConversation(raw))) {
+        const live = manager.get(hookedId);
+        if (!live || live.status === 'exited') throw new HttpError(404, 'No such live session');
+        send(res, 204);
+        return;
+      }
       if (!manager.hook(hookedId, parsed.name, parsed.idleReminder)) throw new HttpError(404, 'No such live session');
       noteConversation(hookedId, raw);
+      manager.setLiveCwd(hookedId, (raw as { cwd?: unknown }).cwd);
       if (parsed.name === 'UserPromptSubmit') deps.onPromptSubmitted?.(hookedId);
       send(res, 204);
       return;
@@ -318,6 +346,11 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       // An exited session may still deliver its last figures; an unknown one is refused.
       const session = manager.get(id);
       if (!session) throw new HttpError(404, 'No such session');
+      // A late report from the process a restart replaced: its figures and folder are not this one's.
+      if (manager.isRetiredConversation(id, reportedConversation(rawStatus))) {
+        send(res, 204);
+        return;
+      }
       const story = session.storyId ? deps.stories.list().find((s) => s.id === session.storyId) : undefined;
       // The conversation is named first, so that what is counted here is set against it:
       // the same spending turns up again in the transcript when the session ends.
@@ -331,6 +364,8 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       deps.usage.learnModelName(payload.modelId, payload.modelName);
       noteConversation(id, rawStatus);
       if (payload.modelName) manager.setModel(id, payload.modelName);
+      const reported = rawStatus as { cwd?: unknown; workspace?: { current_dir?: unknown } | null };
+      manager.setLiveCwd(id, reported.workspace?.current_dir ?? reported.cwd);
       deps.onClaudeStatus?.(id);
       send(res, 204);
       return;
@@ -370,9 +405,23 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       throw new HttpError(405, 'Method not allowed');
     }
 
-    const sessionMatch = /^\/api\/sessions\/([^/]+)(\/ack|\/editor)?$/.exec(path);
+    const sessionMatch = /^\/api\/sessions\/([^/]+)(\/ack|\/editor|\/worktree)?$/.exec(path);
     if (sessionMatch) {
       const id = decodeId(sessionMatch[1]!);
+      if (sessionMatch[2] === '/worktree') {
+        if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
+        const s = manager.get(id);
+        if (!s) throw new HttpError(404, 'No such session');
+        const target = absolutePath((await readObject(req)).path);
+        // Only a worktree of the session's own repository, as git lists it.
+        const listing = await worktreesOf(s.git?.worktree ?? s.liveCwd ?? s.cwd);
+        const worktree = listing?.worktrees.find((w) => samePath(w.path, target));
+        if (!worktree) throw new HttpError(422, "Not a worktree of this session's repository");
+        if (worktree.prunable) throw new HttpError(422, 'The folder of that worktree is missing');
+        const restarted = manager.restartIn(id, worktree.path);
+        if (!restarted) throw new HttpError(404, 'No such session');
+        return send(res, 200, restarted);
+      }
       if (sessionMatch[2] === '/editor') {
         if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
         const s = manager.get(id);
@@ -537,6 +586,52 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
         if (e instanceof FolderError) throw new HttpError(400, e.message);
         throw e;
       }
+    }
+
+    if (path === '/api/git/worktrees' || path === '/api/git/branches' || path === '/api/git/status') {
+      if (method === 'GET') {
+        const folder = absolutePath(url.searchParams.get('path'));
+        if (path === '/api/git/worktrees') return send(res, 200, await worktreesOf(folder));
+        if (path === '/api/git/branches') return send(res, 200, await branches(folder));
+        return send(res, 200, await gitCall(() => worktreeStatus(folder)));
+      }
+      if (path === '/api/git/worktrees' && method === 'POST') {
+        const b = await readObject(req);
+        const repo = absolutePath(b.repo, 'repo');
+        const target = absolutePath(b.path);
+        if (typeof b.branch !== 'string') throw new HttpError(400, 'branch must be a string');
+        if (b.base !== undefined && typeof b.base !== 'string') throw new HttpError(400, 'base must be a string');
+        const branch = b.branch;
+        const base = b.base as string | undefined;
+        const listing = await gitCall(() => createWorktree(repo, { path: target, branch, newBranch: b.newBranch === true, base }));
+        await manager.refreshGitIn(repo);
+        return send(res, 201, listing);
+      }
+      if (path === '/api/git/worktrees' && method === 'DELETE') {
+        const b = await readObject(req);
+        const repo = absolutePath(b.repo, 'repo');
+        const target = absolutePath(b.path);
+        const result = await gitCall(() => removeWorktree(repo, target, { force: b.force === true, deleteBranch: b.deleteBranch === true }));
+        // The sessions that were in the removed worktree are no longer in the listing.
+        const inRemoved = manager.list().filter((s) => s.git && samePath(s.git.worktree, target));
+        await Promise.all([manager.refreshGitIn(repo), ...inRemoved.map((s) => manager.refreshGit(s.id))]);
+        return send(res, 200, result);
+      }
+      throw new HttpError(405, 'Method not allowed');
+    }
+
+    if (path === '/api/git/switch') {
+      if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
+      const b = await readObject(req);
+      const target = absolutePath(b.path);
+      if (typeof b.branch !== 'string') throw new HttpError(400, 'branch must be a string');
+      const branch = b.branch;
+      // Only the top folder of a worktree, as its own repository lists it.
+      const listing = await worktreesOf(target);
+      if (!listing?.worktrees.some((w) => samePath(w.path, target))) throw new HttpError(422, 'Not a worktree');
+      await gitCall(() => switchBranch(target, { branch, create: b.create === true }));
+      await manager.refreshGitIn(target);
+      return send(res, 204);
     }
 
     if (path === '/api/usage') {
