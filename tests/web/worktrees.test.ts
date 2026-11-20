@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { branchNameFor, chipText, countOf, deleteConfirmations, freeBranches, isWslSession, leaveDetachedPrompt, moveTargets, joinPath, relativeInside, samePathWeb, sessionChoices, sessionsIn, suggestedFolder, worktreeName } from '../../src/web/worktrees.js';
+import { branchLabel, branchNameFor, chipText, countOf, deleteConfirmations, freeBranches, isWslSession, leaveDetachedPrompt, moveTargets, joinPath, relativeInside, samePathWeb, sessionChoices, sessionsIn, suggestedFolder, worktreeName } from '../../src/web/worktrees.js';
 import type { SessionGit, SessionInfo } from '../../src/shared/types.js';
 
 const git = (over: Partial<SessionGit> = {}): SessionGit => ({ worktree: 'C:\\r\\app-feat', branch: 'feat', head: '1a2b3c4', isMain: false, worktreeCount: 2, ...over });
@@ -11,6 +11,15 @@ describe('chipText', () => {
   });
   it('shows the short head when detached', () => {
     expect(chipText(git({ branch: null }))).toBe('⎇ 1a2b3c4 · app-feat');
+  });
+});
+
+describe('branchLabel', () => {
+  it('shows the branch', () => {
+    expect(branchLabel(git())).toBe('⎇ feat');
+  });
+  it('shows the short head when detached', () => {
+    expect(branchLabel(git({ branch: null }))).toBe('⎇ 1a2b3c4');
   });
 });
 

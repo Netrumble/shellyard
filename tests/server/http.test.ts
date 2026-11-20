@@ -356,6 +356,8 @@ describe('http api', () => {
       const csp = String((await call('GET', '/', { auth: 'none' })).headers['content-security-policy']);
       expect(csp).toContain("default-src 'self'");
       expect(csp).toContain(`connect-src 'self' ws://${PAGE}:${port};`);
+      // A sound the user added is fetched with the token and played from a blob: URL.
+      expect(csp).toContain("media-src 'self' blob:;");
       expect(csp).toContain("frame-ancestors 'none'");
       expect(csp).toContain("base-uri 'none'");
       expect(csp).toContain("form-action 'none'");

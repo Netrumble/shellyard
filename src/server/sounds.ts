@@ -45,7 +45,7 @@ export class SoundStore {
     const kind = soundKind(bytes);
     if (!kind) return null;
     assertConfigWritable();
-    const file: SoundFile = { id: `${randomUUID()}.${kind.ext}`, name: name.trim().slice(0, MAX_NAME) || 'sound' };
+    const file: SoundFile = { id: `${randomUUID()}.${kind.ext}`, name: name.trim().slice(0, MAX_NAME) || 'sound', start: 0, end: null };
     writeFileSync(join(folder(), file.id), bytes);
     const { config } = loadConfig();
     saveConfig({ ...config, soundFiles: [...config.soundFiles, file] });
@@ -58,6 +58,17 @@ export class SoundStore {
     if (!existsSync(path)) return null;
     const ext = id.slice(id.lastIndexOf('.') + 1) as keyof typeof TYPES;
     return { bytes: readFileSync(path), type: TYPES[ext] };
+  }
+
+  /** Sets the part of the sound that plays (already checked with parseTrim); null for an unknown sound. */
+  setTrim(id: string, trim: { start: number; end: number | null }): SoundFile | null {
+    const { config } = loadConfig();
+    const found = config.soundFiles.find((f) => f.id === id);
+    if (!found) return null;
+    assertConfigWritable();
+    const file: SoundFile = { ...found, start: trim.start, end: trim.end };
+    saveConfig({ ...config, soundFiles: config.soundFiles.map((f) => (f.id === id ? file : f)) });
+    return file;
   }
 
   /** Deletes the sound; settings and areas that used it fall back to none. */

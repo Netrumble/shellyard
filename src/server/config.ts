@@ -2,6 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, wri
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { Profile, SoundFile, SoundSettings, Story } from '../shared/types.js';
+import { parseTrim, type Trim } from '../shared/trim.js';
 import { normalizeBackground } from './backgrounds.js';
 import { normalizeFont } from './fonts.js';
 
@@ -39,13 +40,20 @@ export function noSounds(): SoundSettings {
   return { blocked: null, finished: null, maybeWaiting: null };
 }
 
+/** A stored cut: a valid start is kept even when the end is not; a bad end means the end of the file. */
+function storedTrim(start: unknown, end: unknown): Trim {
+  const from = parseTrim(start ?? 0, null) ?? { start: 0, end: null };
+  return parseTrim(from.start, end) ?? from;
+}
+
 export function normalizeSoundFiles(v: unknown): SoundFile[] {
   if (!Array.isArray(v)) return [];
   const out: SoundFile[] = [];
   for (const item of v) {
     if (!isRecord(item) || typeof item.id !== 'string' || !SOUND_ID.test(item.id)) continue;
     if (out.some((s) => s.id === item.id)) continue;
-    out.push({ id: item.id, name: typeof item.name === 'string' && item.name.trim() ? item.name.trim().slice(0, 80) : 'sound' });
+    const trim = storedTrim(item.start, item.end);
+    out.push({ id: item.id, name: typeof item.name === 'string' && item.name.trim() ? item.name.trim().slice(0, 80) : 'sound', ...trim });
   }
   return out;
 }

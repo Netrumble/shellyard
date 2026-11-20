@@ -11,6 +11,11 @@ export function chipText(git: SessionGit): string {
   return `⎇ ${git.branch ?? git.head} · ${worktreeName(git.worktree)}`;
 }
 
+/** The short label in the sidebar: just the branch (or short head when detached). */
+export function branchLabel(git: SessionGit): string {
+  return `⎇ ${git.branch ?? git.head}`;
+}
+
 function normalise(path: string): string {
   const slashed = path.replaceAll('\\', '/');
   return slashed.length > 1 ? slashed.replace(/\/+$/, '') : slashed;

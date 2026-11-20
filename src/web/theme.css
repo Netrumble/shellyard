@@ -333,6 +333,13 @@ code {
   white-space: nowrap;
 }
 
+/* The branch can be long: it shrinks and ends with an ellipsis rather than widening the row. */
+.model.branch {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .status,
 .reason {
   font-size: 12px;
@@ -763,29 +770,42 @@ button.fold {
   margin-left: auto;
 }
 
+/* One row, so the header stays one line high: dials with their readings, then the shift lights. */
 .cluster-limits {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 4px;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 5px 10px 4px;
+  padding: 3px 10px;
 }
 
 .cluster-dials {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .cluster-reading {
   display: flex;
-  flex-direction: column;
-  line-height: 1.1;
+  align-items: baseline;
+  gap: 4px;
+  line-height: 1;
   text-align: left;
   margin-right: 6px;
+  white-space: nowrap;
+}
+
+.cluster-limits .shift-lights {
+  order: 2;
+  width: 90px;
+}
+
+.cluster-limits .cluster-age {
+  order: 3;
+  white-space: nowrap;
 }
 
 .cluster-caption {
@@ -795,7 +815,7 @@ button.fold {
 
 .cluster-figure {
   font-family: var(--instrument);
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
@@ -824,7 +844,7 @@ button.fold {
 .shift-light {
   flex: 1;
   height: 5px;
-  min-width: 9px;
+  min-width: 6px;
   border-radius: 2px;
   background: var(--track);
 }
@@ -2639,14 +2659,58 @@ button.worktree-chip[aria-expanded='true'] {
   gap: 4px;
 }
 
+/* The list and the file picker share the field's wide column. */
+.sound-library {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sound-library input[type='file'] {
+  max-width: 100%;
+}
+
+/* Name on its own line, its controls below: a long file name never squeezes them, nor they it. */
 .sound-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.sound-list li + li {
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+
+.sound-controls {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
+}
+
+.sound-trim {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sound-trim label {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.sound-trim input {
+  width: 4.5em;
 }
 
 .sound-list .sound-name {
-  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

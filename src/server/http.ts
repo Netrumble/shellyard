@@ -13,6 +13,7 @@ import { reopenEntry } from './restore.js';
 import { FolderError, listFolders } from './folders.js';
 import { branches, createWorktree, GitError, removeWorktree, retryWhileBusy, samePath, switchBranch, worktreesOf, worktreeStatus } from './git.js';
 import { assertConfigWritable, ConfigInvalidError, loadConfig, normalizeProfiles, saveConfig } from './config.js';
+import { parseTrim, TRIM_RULE } from '../shared/trim.js';
 import { listConversations } from './conversations.js';
 import { ScheduleError, type ScheduleStore } from './schedules.js';
 import type { SessionManager } from './session-manager.js';
@@ -283,7 +284,8 @@ function serveStatic(webDir: string, pathname: string, method: string, res: Serv
     // 'self' does not cover the ws: scheme in every browser, so the WebSocket is named.
     headers['content-security-policy'] =
       // blob: is how the page shows a terminal background it fetched with its token.
-      "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; " +
+      // blob: is also how it plays a sound the user added (fetched the same way).
+      "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; " +
       `connect-src 'self' ws://${pageHost}:${port}; ` +
       "frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
   }
@@ -568,6 +570,15 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       if (method === 'DELETE') {
         if (!sounds.remove(id)) throw new HttpError(404, 'No such sound');
         return send(res, 204);
+      }
+      if (method === 'PATCH') {
+        const body = await readObject(req);
+        if (!sounds.list().some((s) => s.id === id)) throw new HttpError(404, 'No such sound');
+        const trim = parseTrim(body.start, body.end);
+        if (!trim) throw new HttpError(400, TRIM_RULE);
+        const file = sounds.setTrim(id, trim);
+        if (!file) throw new HttpError(404, 'No such sound');
+        return send(res, 200, file);
       }
       throw new HttpError(405, 'Method not allowed');
     }

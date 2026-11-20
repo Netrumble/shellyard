@@ -130,6 +130,8 @@ export const api = {
     soundUrls.delete(id);
     cached?.then((u) => URL.revokeObjectURL(u), () => {});
   },
+  /** The part of the sound that plays, in seconds; end null: to the end of the file. */
+  trimSound: (id: string, trim: { start: number; end: number | null }): Promise<SoundFile> => call('PATCH', `/api/sounds/${encodeURIComponent(id)}`, trim),
   saveSoundSettings: (settings: SoundSettings): Promise<SoundSettings> => call('PUT', '/api/sounds/settings', settings),
   saveProfiles: (profiles: Profile[]): Promise<Profile[]> => call('PUT', '/api/profiles', profiles),
   conversations: (): Promise<ConversationItem[]> => call('GET', '/api/conversations'),

@@ -93,7 +93,7 @@ export function StoryDialog({ story, onClose }: { story?: Story; onClose: () => 
               ))}
             </select>
             {sound && library.some((f) => f.id === sound) && (
-              <button type="button" onClick={() => void playSound(sound)}>
+              <button type="button" onClick={() => void playSound(sound, library)}>
                 Play
               </button>
             )}

@@ -4,7 +4,8 @@ import { App } from './App.js';
 import { newlyWaiting } from './attention.js';
 import { notify } from './notify.js';
 import { pickSound, playSound, shouldPlay } from './sounds.js';
-import { getState, onSessionsChange, setView, startStore } from './store.js';
+import type { SessionInfo } from '../shared/types.js';
+import { getState, onSessionsChange, refreshSounds, setView, startStore } from './store.js';
 import './theme.css';
 
 startStore();
@@ -13,9 +14,20 @@ startStore();
 onSessionsChange((prev, next) => {
   const waiting = newlyWaiting(prev, next);
   for (const s of waiting) notify(s, () => setView({ kind: 'single', id: s.id }), getState().sound);
-  const { sound, stories, soundLibrary } = getState();
-  if (waiting.length > 0 && shouldPlay(document.hasFocus(), sound)) void playSound(pickSound(waiting, stories, soundLibrary.settings) ?? null);
+  if (waiting.length > 0 && shouldPlay(document.hasFocus(), getState().sound)) void playEventSound(waiting);
 });
+
+/**
+ * Reads the library first, as another tab may have changed a sound, its cut or the settings; but
+ * waits for it only briefly, as a late sound is worse than one from the library already held.
+ */
+async function playEventSound(waiting: SessionInfo[]): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([refreshSounds(), new Promise((r) => (timer = setTimeout(r, 500)))]);
+  clearTimeout(timer);
+  const { stories, soundLibrary } = getState();
+  await playSound(pickSound(waiting, stories, soundLibrary.settings) ?? null, soundLibrary.sounds);
+}
 
 const root = document.getElementById('root');
 if (root) {

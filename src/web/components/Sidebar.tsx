@@ -20,6 +20,7 @@ import {
   TerminalsIcon,
   UsageIcon,
 } from './icons.js';
+import { branchLabel, chipText } from '../worktrees.js';
 import { ColorDot, SessionActions, StatusBadge } from './SessionBits.js';
 import { ProfileDialog } from './ProfileDialog.js';
 import { StoryDialog } from './StoryDialog.js';
@@ -62,6 +63,11 @@ function SessionRow({ session, selected }: { session: SessionInfo; selected: boo
         <span className="row-sub">
           <StatusBadge session={session} />
           {session.model && <span className="model">{session.model}</span>}
+          {session.git && (
+            <span className="model branch" title={chipText(session.git)}>
+              {branchLabel(session.git)}
+            </span>
+          )}
         </span>
       </button>
       <SessionActions session={session} />

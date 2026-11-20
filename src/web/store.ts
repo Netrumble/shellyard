@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import type { ClosedSession, Meta, Schedule, SessionInfo, SoundLibrary, Story, UsageSummary } from '../shared/types.js';
+import type { ClosedSession, Meta, Schedule, SessionInfo, SoundFile, SoundLibrary, Story, UsageSummary } from '../shared/types.js';
 import { api, configureApi } from './api.js';
 import { loadEffects, loadSound, saveEffects, saveSound, type EffectsLevel } from './effects.js';
 import { connect, type ConnectionState, type Socket } from './socket.js';
@@ -140,11 +140,56 @@ export async function refreshMeta(): Promise<void> {
   }
 }
 
+/**
+ * Cut saves, numbered in the order they were sent. A library read that overlaps one is dropped,
+ * as it may hold a cut older than the one the save answers with, and made again once no save is
+ * on its way.
+ */
+let trimsSent = 0;
+let trimsInFlight = 0;
+let readDropped = false;
+const lastTrimSent = new Map<string, number>();
+
 export async function refreshSounds(): Promise<void> {
+  // Kept only when no save was on its way while it was read: none when it started, none sent since.
+  const quietBefore = trimsInFlight === 0;
+  const sentBefore = trimsSent;
   try {
-    set({ soundLibrary: await api.sounds() });
+    const library = await api.sounds();
+    if (quietBefore && trimsSent === sentBefore) set({ soundLibrary: library });
+    else if (trimsInFlight > 0) readDropped = true; // read again once the saves have answered
+    else return await refreshSounds(); // the saves it overlapped have all answered: read again now
   } catch {
     // The library is not essential; it is read again after the next change.
+  }
+}
+
+/**
+ * Saves the cut of a sound and puts the sound as the server now has it into the library, unless a
+ * later save of the same sound was sent meanwhile (its answer is the one that counts).
+ */
+export async function saveSoundTrim(id: string, trim: { start: number; end: number | null }): Promise<SoundFile> {
+  const n = ++trimsSent;
+  lastTrimSent.set(id, n);
+  trimsInFlight++;
+  try {
+    const file = await api.trimSound(id, trim);
+    if (lastTrimSent.get(id) === n) {
+      const { sounds, settings } = state.soundLibrary;
+      set({ soundLibrary: { settings, sounds: sounds.map((s) => (s.id === file.id ? file : s)) } });
+    }
+    return file;
+  } catch (err) {
+    // The newest save failed, but an earlier one may have been stored: read what the server keeps.
+    if (lastTrimSent.get(id) === n) readDropped = true;
+    throw err;
+  } finally {
+    if (lastTrimSent.get(id) === n) lastTrimSent.delete(id);
+    trimsInFlight--;
+    if (trimsInFlight === 0 && readDropped) {
+      readDropped = false;
+      void refreshSounds();
+    }
   }
 }
 

@@ -43,6 +43,9 @@ export interface Story {
 export interface SoundFile {
   id: string;
   name: string;
+  /** The part of the file that plays, in seconds: from start, to end (null: the end of the file). */
+  start: number;
+  end: number | null;
 }
 
 /** Which sound plays for each event; null means the chime. */

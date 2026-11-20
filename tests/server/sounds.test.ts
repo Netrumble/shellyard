@@ -3,7 +3,8 @@ import type { AddressInfo } from 'node:net';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { defaultConfig, loadConfig, saveConfig } from '../../src/server/config.js';
+import { defaultConfig, loadConfig, normalizeSoundFiles, saveConfig } from '../../src/server/config.js';
+import { parseTrim } from '../../src/shared/trim.js';
 import { startServer, type RunningServer } from '../../src/server/index.js';
 import { MAX_SOUND_BYTES, SoundStore, soundKind } from '../../src/server/sounds.js';
 import { StoryStore } from '../../src/server/stories.js';
@@ -29,6 +30,36 @@ describe('soundKind', () => {
   });
 });
 
+describe('parseTrim', () => {
+  it('takes a start of 0 or more and an end after it, or no end', () => {
+    expect(parseTrim(0, null)).toEqual({ start: 0, end: null });
+    expect(parseTrim(1.234, 2.5)).toEqual({ start: 1.23, end: 2.5 });
+    expect(parseTrim(2, undefined)).toEqual({ start: 2, end: null });
+  });
+  it('refuses a negative or missing start, an end not after the start, and absurd values', () => {
+    expect(parseTrim(-1, null)).toBeNull();
+    expect(parseTrim('1', null)).toBeNull();
+    expect(parseTrim(undefined, null)).toBeNull();
+    expect(parseTrim(2, 2)).toBeNull();
+    expect(parseTrim(2, 1)).toBeNull();
+    expect(parseTrim(Number.NaN, null)).toBeNull();
+    expect(parseTrim(0, 3601)).toBeNull();
+  });
+});
+
+describe('normalizeSoundFiles', () => {
+  const id = '00000000-0000-0000-0000-000000000000.mp3';
+  it('keeps a valid cut and drops a broken one', () => {
+    expect(normalizeSoundFiles([{ id, name: 'a', start: 1, end: 2 }])).toEqual([{ id, name: 'a', start: 1, end: 2 }]);
+    expect(normalizeSoundFiles([{ id, name: 'a', start: -1, end: 2 }])).toEqual([{ id, name: 'a', start: 0, end: 2 }]);
+    expect(normalizeSoundFiles([{ id, name: 'a' }])).toEqual([{ id, name: 'a', start: 0, end: null }]);
+  });
+  it('keeps a valid start when only the end is broken', () => {
+    expect(normalizeSoundFiles([{ id, name: 'a', start: 2, end: 1 }])).toEqual([{ id, name: 'a', start: 2, end: null }]);
+    expect(normalizeSoundFiles([{ id, name: 'a', start: 2, end: '3' }])).toEqual([{ id, name: 'a', start: 2, end: null }]);
+  });
+});
+
 describe('SoundStore', () => {
   const home = useTempHome();
   let stories: StoryStore;
@@ -51,6 +82,17 @@ describe('SoundStore', () => {
     expect(readFileSync(join(home.dir(), 'sounds', a.id))).toEqual(MP3_ID3);
     expect(store.read(a.id)).toEqual({ bytes: MP3_ID3, type: 'audio/mpeg' });
     expect(store.list().map((s) => s.id)).toContain(a.id);
+  });
+
+  it('a new sound plays whole: start 0, no end', () => {
+    expect(store.add(OGG, 'o')).toMatchObject({ start: 0, end: null });
+  });
+
+  it('keeps the cut of a sound, and refuses it for an unknown sound', () => {
+    const a = store.add(MP3_ID3, 'a')!;
+    expect(store.setTrim(a.id, { start: 1.5, end: 3 })).toEqual({ ...a, start: 1.5, end: 3 });
+    expect(loadConfig().config.soundFiles[0]).toEqual({ ...a, start: 1.5, end: 3 });
+    expect(store.setTrim('00000000-0000-0000-0000-000000000000.mp3', { start: 0, end: null })).toBeNull();
   });
 
   it('refuses a sound over the size limit', () => {
@@ -121,6 +163,23 @@ describe('sounds over http', () => {
   });
   afterEach(async () => {
     for (const r of running.splice(0)) await r.stop();
+  });
+
+  it('sets the cut of a sound, refusing a bad one, an unknown sound and a missing token', async () => {
+    const file = (await (await upload(MP3_ID3)).json()) as { id: string };
+    const patch = (id: string, body: unknown, token = true): Promise<Response> =>
+      fetch(url(`/api/sounds/${id}`), { method: 'PATCH', headers: token ? authed({ 'content-type': 'application/json' }) : { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const ok = await patch(file.id, { start: 0.5, end: 2 });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toMatchObject({ id: file.id, start: 0.5, end: 2 });
+    expect((await patch(file.id, { start: 2, end: 1 })).status).toBe(400);
+    const tooLong = await patch(file.id, { start: 5000, end: null });
+    expect(tooLong.status).toBe(400);
+    expect(await tooLong.text()).toContain('3600');
+    expect((await patch('00000000-0000-0000-0000-000000000000.mp3', { start: 0, end: null })).status).toBe(404);
+    expect((await patch(file.id, { start: 0, end: null }, false)).status).toBe(401);
+    const list = (await (await fetch(url('/api/sounds'), { headers: authed() })).json()) as { sounds: unknown[] };
+    expect(list.sounds[0]).toMatchObject({ start: 0.5, end: 2 });
   });
 
   it('uploads, lists, serves with its content type, and deletes', async () => {
