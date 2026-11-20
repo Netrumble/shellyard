@@ -1,4 +1,4 @@
-import type { ConversationItem, CreateSessionRequest, FolderListing, Meta, Profile, Schedule, ScheduleRun, SessionInfo, Story, TerminalBackground, TerminalFont } from '../shared/types.js';
+import type { ConversationItem, CreateSessionRequest, FolderListing, Meta, Profile, Schedule, ScheduleRun, SessionInfo, Story, TerminalBackground, TerminalFont, WorktreeListing } from '../shared/types.js';
 
 /** What a schedule is made or changed with; a change sends only the fields it changes. */
 export type ScheduleFields = Partial<Pick<Schedule, 'name' | 'prompt' | 'profileId' | 'model' | 'cwd' | 'storyId' | 'when' | 'enabled' | 'catchUp' | 'permissionMode'>>;
@@ -99,5 +99,14 @@ export const api = {
   createSchedule: (fields: ScheduleFields): Promise<Schedule> => call('POST', '/api/schedules', fields),
   updateSchedule: (id: string, fields: ScheduleFields): Promise<Schedule> => call('PATCH', `/api/schedules/${encodeURIComponent(id)}`, fields),
   deleteSchedule: (id: string): Promise<void> => call('DELETE', `/api/schedules/${encodeURIComponent(id)}`),
+  worktrees: (path: string): Promise<WorktreeListing | null> => call('GET', `/api/git/worktrees?path=${encodeURIComponent(path)}`),
+  branches: (path: string): Promise<string[]> => call('GET', `/api/git/branches?path=${encodeURIComponent(path)}`),
+  worktreeStatus: (path: string): Promise<{ dirty: boolean; unreachable: number }> => call('GET', `/api/git/status?path=${encodeURIComponent(path)}`),
+  /** `base` is left out when absent; the server rejects null. */
+  createWorktree: (b: { repo: string; path: string; branch: string; newBranch: boolean; base?: string }): Promise<WorktreeListing> => call('POST', '/api/git/worktrees', b),
+  removeWorktree: (b: { repo: string; path: string; force: boolean; deleteBranch: boolean }): Promise<{ listing: WorktreeListing; warning: string | null }> =>
+    call('DELETE', '/api/git/worktrees', b),
+  switchBranch: (b: { path: string; branch: string; create: boolean }): Promise<void> => call('POST', '/api/git/switch', b),
+  moveSessionToWorktree: (id: string, path: string): Promise<SessionInfo> => call('POST', `/api/sessions/${encodeURIComponent(id)}/worktree`, { path }),
   runSchedule: (id: string): Promise<ScheduleRun> => call('POST', `/api/schedules/${encodeURIComponent(id)}/run`),
 };
