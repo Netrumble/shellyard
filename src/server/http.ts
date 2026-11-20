@@ -148,6 +148,13 @@ async function readObject(req: IncomingMessage): Promise<Record<string, unknown>
   return v as Record<string, unknown>;
 }
 
+/** The body of an order request: a list of ids. */
+async function readIdList(req: IncomingMessage): Promise<string[]> {
+  const v = await readJson(req);
+  if (!Array.isArray(v) || !v.every((x) => typeof x === 'string')) throw new HttpError(400, 'Body must be a list of ids');
+  return v as string[];
+}
+
 const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
 
 /** A folder named by a request: only a non-empty absolute path is taken. */
@@ -414,6 +421,12 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       throw new HttpError(405, 'Method not allowed');
     }
 
+    if (path === '/api/sessions/order') {
+      if (method !== 'PUT') throw new HttpError(405, 'Method not allowed');
+      manager.reorder(await readIdList(req));
+      return send(res, 200, manager.list());
+    }
+
     const sessionMatch = /^\/api\/sessions\/([^/]+)(\/ack|\/editor|\/worktree)?$/.exec(path);
     if (sessionMatch) {
       const id = decodeId(sessionMatch[1]!);
@@ -463,6 +476,21 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
         return send(res, 204);
       }
       throw new HttpError(405, 'Method not allowed');
+    }
+
+    if (path === '/api/stories/order') {
+      if (method !== 'PUT') throw new HttpError(405, 'Method not allowed');
+      return send(res, 200, deps.stories.reorder(await readIdList(req)));
+    }
+
+    if (path === '/api/profiles/order') {
+      if (method !== 'PUT') throw new HttpError(405, 'Method not allowed');
+      const ids = await readIdList(req);
+      assertConfigWritable();
+      const { config } = loadConfig();
+      config.profileOrder = ids;
+      saveConfig(config);
+      return send(res, 200, manager.profiles());
     }
 
     if (path === '/api/stories') {

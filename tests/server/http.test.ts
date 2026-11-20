@@ -268,6 +268,31 @@ describe('http api', () => {
     });
   });
 
+  describe('orders', () => {
+    for (const path of ['/api/stories/order', '/api/sessions/order', '/api/profiles/order']) {
+      it(`${path} needs the token and a list of strings`, async () => {
+        expect((await call('PUT', path, { auth: 'none', body: '[]' })).status).toBe(401);
+        expect((await call('PUT', path, { body: '{}' })).status).toBe(400);
+        expect((await call('PUT', path, { body: '["a", 1]' })).status).toBe(400);
+        expect((await call('PUT', path, { body: '[]' })).status).toBe(200);
+      });
+    }
+
+    it('reorders areas, sessions and launchers', async () => {
+      const a = (await call('POST', '/api/stories', { body: JSON.stringify({ name: 'A' }) })).json();
+      const b = (await call('POST', '/api/stories', { body: JSON.stringify({ name: 'B' }) })).json();
+      const r1 = await call('PUT', '/api/stories/order', { body: JSON.stringify([b.id, a.id]) });
+      expect(r1.json().map((s: { id: string }) => s.id)).toEqual([b.id, a.id]);
+      const s1 = await newSession();
+      const s2 = await newSession();
+      const r2 = await call('PUT', '/api/sessions/order', { body: JSON.stringify([s2.id, s1.id]) });
+      expect(r2.json().map((s: { id: string }) => s.id)).toEqual([s2.id, s1.id]);
+      const r3 = await call('PUT', '/api/profiles/order', { body: JSON.stringify(['builtin-node']) });
+      expect(r3.json().map((p: { id: string }) => p.id)).toEqual(['builtin-node']);
+      expect(loadConfig().config.profileOrder).toEqual(['builtin-node']);
+    });
+  });
+
   describe('hooks', () => {
     it('applies a hook event', async () => {
       const c = await newSession('claude');

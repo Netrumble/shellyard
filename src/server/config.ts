@@ -12,6 +12,8 @@ export interface Config {
   stories: Story[];
   /** Whether the sessions open at the last stop are started again at the next start. */
   restoreSessions: boolean;
+  /** Ids of launchers in the order the user wants them; launchers not listed follow. */
+  profileOrder: string[];
 }
 
 export interface ServerState {
@@ -28,7 +30,7 @@ const DEFAULT_MODELS = ['opus', 'sonnet', 'haiku'];
 const DEFAULT_SILENCE_MS = 5000;
 
 export function defaultConfig(): Config {
-  return { profiles: [], models: [...DEFAULT_MODELS], silenceMs: DEFAULT_SILENCE_MS, stories: [], restoreSessions: true };
+  return { profiles: [], models: [...DEFAULT_MODELS], silenceMs: DEFAULT_SILENCE_MS, stories: [], restoreSessions: true, profileOrder: [] };
 }
 
 /** SHELLYARD_HOME overrides the location, which is how tests avoid the real folder. */
@@ -121,6 +123,7 @@ function normalizeConfig(raw: unknown): Config {
     profiles: normalizeProfiles(raw.profiles),
     stories: normalizeStories(raw.stories),
     restoreSessions: raw.restoreSessions !== false,
+    profileOrder: Array.isArray(raw.profileOrder) ? raw.profileOrder.filter((x): x is string => typeof x === 'string') : [],
     models: isStringArray(raw.models) ? raw.models : d.models,
     silenceMs:
       typeof raw.silenceMs === 'number' && Number.isFinite(raw.silenceMs) && raw.silenceMs >= 1000

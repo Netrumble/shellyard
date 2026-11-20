@@ -20,6 +20,17 @@ const profile: Profile = { id: 'p1', name: 'Node', kind: 'shell', command: node,
 describe('StoryStore', () => {
   const home = useTempHome();
 
+  it('reorders, saves and emits', () => {
+    const store = new StoryStore();
+    const [a, b, c] = ['A', 'B', 'C'].map((name) => store.create({ name }));
+    const seen: string[][] = [];
+    store.onChange((s) => seen.push(s.map((x) => x.name)));
+    const out = store.reorder([c!.id, 'nope', a!.id, c!.id]);
+    expect(out.map((x) => x.name)).toEqual(['C', 'A', 'B']);
+    expect(new StoryStore().list().map((x) => x.id)).toEqual([c!.id, a!.id, b!.id]);
+    expect(seen).toEqual([['C', 'A', 'B']]);
+  });
+
   it('starts empty', () => {
     expect(new StoryStore().list()).toEqual([]);
   });
@@ -85,7 +96,7 @@ describe('StoryStore', () => {
   });
 
   it('does not disturb profiles or other settings when it saves', () => {
-    saveConfig({ profiles: [profile], models: ['opus'], silenceMs: 9000, stories: [], restoreSessions: true });
+    saveConfig({ profiles: [profile], models: ['opus'], silenceMs: 9000, stories: [], restoreSessions: true, profileOrder: [] });
     new StoryStore().create({ name: 'A' });
     const { config } = loadConfig();
     expect(config.profiles).toEqual([profile]);

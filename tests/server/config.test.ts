@@ -20,7 +20,7 @@ describe('config', () => {
 
   it('returns defaults when there is no file', () => {
     expect(loadConfig()).toEqual({
-      config: { profiles: [], models: ['opus', 'sonnet', 'haiku'], silenceMs: 5000, stories: [], restoreSessions: true },
+      config: { profiles: [], models: ['opus', 'sonnet', 'haiku'], silenceMs: 5000, stories: [], restoreSessions: true, profileOrder: [] },
       warning: null,
     });
   });
@@ -34,9 +34,17 @@ describe('config', () => {
       silenceMs: 8000,
       stories: [{ id: 's1', name: 'Story', ticket: 'T-1', cwd: '', color: '#00ff00' }],
       restoreSessions: false,
+      profileOrder: ['b', 'a'],
     };
     saveConfig(config);
     expect(loadConfig()).toEqual({ config, warning: null });
+  });
+
+  it('keeps a valid profileOrder and drops what is not a string', () => {
+    writeFileSync(join(home.dir(), 'config.json'), JSON.stringify({ profileOrder: ['b', 3, 'a', null] }));
+    expect(loadConfig().config.profileOrder).toEqual(['b', 'a']);
+    writeFileSync(join(home.dir(), 'config.json'), JSON.stringify({ profileOrder: 'nope' }));
+    expect(loadConfig().config.profileOrder).toEqual([]);
   });
 
   it('survives a corrupt file and keeps it aside', () => {
@@ -49,11 +57,11 @@ describe('config', () => {
   });
 
   it('while running, leaves a file being edited alone and keeps the last good settings', () => {
-    saveConfig({ profiles: [], models: ['opus'], silenceMs: 9000, stories: [], restoreSessions: true });
+    saveConfig({ profiles: [], models: ['opus'], silenceMs: 9000, stories: [], restoreSessions: true, profileOrder: [] });
     expect(loadConfig().config.silenceMs).toBe(9000);
     writeFileSync(join(home.dir(), 'config.json'), '{"silenceMs": 90');
     const { config, warning } = loadConfig();
-    expect(config).toEqual({ profiles: [], models: ['opus'], silenceMs: 9000, stories: [], restoreSessions: true });
+    expect(config).toEqual({ profiles: [], models: ['opus'], silenceMs: 9000, stories: [], restoreSessions: true, profileOrder: [] });
     expect(warning).toMatch(/not valid JSON/);
     expect(readFileSync(join(home.dir(), 'config.json'), 'utf8')).toBe('{"silenceMs": 90');
     expect(existsSync(join(home.dir(), 'config.json.bad'))).toBe(false);
@@ -70,7 +78,7 @@ describe('config', () => {
   it('ignores values of the wrong type instead of failing', () => {
     writeFileSync(join(home.dir(), 'config.json'), JSON.stringify({ profiles: 'x', models: 5, silenceMs: 'soon' }));
     const { config } = loadConfig();
-    expect(config).toEqual({ profiles: [], models: ['opus', 'sonnet', 'haiku'], silenceMs: 5000, stories: [], restoreSessions: true });
+    expect(config).toEqual({ profiles: [], models: ['opus', 'sonnet', 'haiku'], silenceMs: 5000, stories: [], restoreSessions: true, profileOrder: [] });
   });
 });
 

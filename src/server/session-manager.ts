@@ -12,6 +12,7 @@ import type { Config } from './config.js';
 import { headOf, isInside, samePath, worktreesOf } from './git.js';
 import { isTerminalReport } from './input.js';
 import { PtySession, type PtyFactory } from './pty-session.js';
+import { applyOrder } from './order.js';
 import { detectProfiles, resolveExecutable, toLaunch } from './shells.js';
 import { initialState, reduce, type StatusEvent } from './state.js';
 
@@ -160,6 +161,14 @@ export class SessionManager {
     return e ? { ...e.info } : null;
   }
 
+  /** Puts the sessions in the given order (see applyOrder). */
+  reorder(ids: string[]): void {
+    const next = applyOrder([...this.entries.values()], ids, (e) => e.info.id);
+    this.entries.clear();
+    for (const e of next) this.entries.set(e.info.id, e);
+    this.emitChange();
+  }
+
   /**
    * All profiles a session can be created from: the user's own first, then the built-in
    * ones. A built-in profile the user has changed keeps its place and shows the saved version.
@@ -169,7 +178,8 @@ export class SessionManager {
     const builtins = (this.deps.builtins ?? detectProfiles)();
     const builtinIds = new Set(builtins.map((p) => p.id));
     const own = saved.filter((p) => !builtinIds.has(p.id));
-    return [...own, ...builtins.map((b) => saved.find((p) => p.id === b.id) ?? b)];
+    const all = [...own, ...builtins.map((b) => saved.find((p) => p.id === b.id) ?? b)];
+    return applyOrder(all, this.deps.config().profileOrder ?? [], (p) => p.id);
   }
 
   /**

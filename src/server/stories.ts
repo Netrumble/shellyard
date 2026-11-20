@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Story } from '../shared/types.js';
+import { applyOrder } from './order.js';
 import { assertConfigWritable, loadConfig, saveConfig } from './config.js';
 
 export interface StoryInput {
@@ -99,6 +100,13 @@ export class StoryStore {
     if (!stories.some((s) => s.id === id)) return false;
     this.save(stories.filter((s) => s.id !== id));
     return true;
+  }
+
+  /** Puts the areas in the given order (see applyOrder); returns the new list. */
+  reorder(ids: string[]): Story[] {
+    const next = applyOrder(this.list(), ids, (s) => s.id);
+    this.save(next);
+    return next;
   }
 
   /** Gives a colour to areas that have none (those saved before colours were automatic). */

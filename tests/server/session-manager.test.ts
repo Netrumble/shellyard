@@ -39,6 +39,27 @@ describe('SessionManager', () => {
   const shell = (extra = {}): SessionInfo => mgr.create({ kind: 'shell', command: node, cwd: tmp, ...extra });
   const claude = (extra = {}): SessionInfo => mgr.create({ kind: 'claude', command: node, cwd: tmp, ...extra });
 
+describe('order', () => {
+    it('reorder changes list() and restorable(), and emits', () => {
+      const a = shell({ name: 'a' });
+      const b = shell({ name: 'b' });
+      const c = shell({ name: 'c' });
+      let changes = 0;
+      mgr.onChange(() => changes++);
+      mgr.reorder([c.id, 'nope', a.id, c.id]);
+      expect(mgr.list().map((s) => s.id)).toEqual([c.id, a.id, b.id]);
+      expect(mgr.restorable().map((r) => r.name)).toEqual(['c', 'a', 'b']);
+      expect(changes).toBe(1);
+    });
+
+    it('profiles() follows profileOrder', () => {
+      const mk = (id: string): Profile => ({ id, name: id, kind: 'shell', command: node, args: [], cwd: '', color: '#123456', env: {}, model: null, background: null, font: null });
+      config.profiles = [mk('x'), mk('y')];
+      config.profileOrder = ['y', 'ghost', 'x'];
+      expect(mgr.profiles().map((p) => p.id)).toEqual(['y', 'x']);
+    });
+  });
+
   describe('create', () => {
     it('starts a shell as running and a claude session as idle', () => {
       expect(shell()).toMatchObject({ kind: 'shell', status: 'running', reason: null, exitCode: null, error: null, cols: 120, rows: 30 });
@@ -934,4 +955,5 @@ describe('SessionManager hasLiveProcessIn', () => {
     clock.advance(11000);
     expect(mgr.hasLiveProcessIn(wt)).toBe(false);
   });
+
 });
