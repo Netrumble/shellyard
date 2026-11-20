@@ -3,11 +3,18 @@ import { createPortal } from 'react-dom';
 import type { SessionInfo } from '../../shared/types.js';
 import { api } from '../api.js';
 import { elapsedLabel } from '../attention.js';
-import { statusLabel, statusTone } from '../selectors.js';
+import { statusLabel } from '../selectors.js';
 import { useStore } from '../store.js';
+import { StatusGlyph } from './StatusGlyph.js';
 
+/** The state as a shape and in words; the words are in a colour readable on every surface. */
 export function StatusBadge({ session }: { session: SessionInfo }): React.JSX.Element {
-  return <span className={`status tone-${statusTone(session)}`}>{statusLabel(session)}</span>;
+  return (
+    <span className="status tone-muted">
+      <StatusGlyph session={session} size={12} />
+      {statusLabel(session)}
+    </span>
+  );
 }
 
 export function ColorDot({ color }: { color: string }): React.JSX.Element {

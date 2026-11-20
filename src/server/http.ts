@@ -1,16 +1,28 @@
 import { createReadStream, statSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { pipeline } from 'node:stream';
-import { extname, resolve, sep } from 'node:path';
+import { extname, isAbsolute, resolve, sep } from 'node:path';
 import type { ConversationItem, CreateSessionRequest, Meta } from '../shared/types.js';
 import { classifyHost, healthProof, isChallenge, originAllowed, requestAuthorized, safeEqual } from './auth.js';
 import { MAX_IMAGE_BYTES, readImage, saveImage } from './backgrounds.js';
-import { parseHookBody } from './claude-launch.js';
+import { MAX_SOUND_BYTES, SoundStore } from './sounds.js';
+import { parseHookBody, parseHookRequest, permissionCommand } from './claude-launch.js';
+import { RuleError, type RuleStore } from './area-rules.js';
+import { suggestPattern } from '../shared/rules.js';
+import { MAX_PROMPT } from '../shared/sessions.js';
+import { RecipeError, type RecipeStore } from './recipes.js';
+import { startFromTicket, TicketError } from './tickets.js';
+import type { StatusLog } from './status-log.js';
+
+/** The most sessions one prompt is sent to at once. */
+const MAX_PROMPT_TARGETS = 50;
 import type { ClosedStore } from './closed.js';
 import { findConversation } from './conversations.js';
 import { reopenEntry } from './restore.js';
 import { FolderError, listFolders } from './folders.js';
+import { branches, createWorktree, GitError, removeWorktree, retryWhileBusy, samePath, switchBranch, worktreesOf, worktreeStatus } from './git.js';
 import { assertConfigWritable, ConfigInvalidError, loadConfig, normalizeProfiles, saveConfig } from './config.js';
+import { parseTrim, TRIM_RULE } from '../shared/trim.js';
 import { listConversations } from './conversations.js';
 import { ScheduleError, type ScheduleStore } from './schedules.js';
 import type { SessionManager } from './session-manager.js';
@@ -20,9 +32,18 @@ import { parseStatusPayload, type UsageStore } from './usage.js';
 export interface HttpDeps {
   manager: SessionManager;
   stories: StoryStore;
+  sounds?: SoundStore;
   usage: UsageStore;
   closed: ClosedStore;
   schedules?: ScheduleStore;
+  /** The area rules; without them every permission is asked. */
+  rules?: RuleStore;
+  /** The recipes of "Start from ticket". */
+  recipes?: RecipeStore;
+  /** How the day went: time blocked on the user, answers, the last hour per session. */
+  flow?: StatusLog;
+  /** Types a prompt into a new Claude session once it is ready (see PromptDelivery). */
+  deliverPrompt?: (sessionId: string, prompt: string) => void;
   /** Opens the editor on a session's folder; returns why not, or null when it was started. */
   openEditor?: (session: { command: string; args: string[]; cwd: string }) => string | null;
   /** A hosted Claude session reported a status line: its main screen is up. */
@@ -41,6 +62,9 @@ export interface HttpDeps {
 }
 
 const MAX_BODY_BYTES = 1024 * 1024;
+
+/** What the hook prints for Claude Code when an area rule allows a request. */
+export const ALLOW_BY_RULE = { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } } as const;
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -147,7 +171,42 @@ async function readObject(req: IncomingMessage): Promise<Record<string, unknown>
   return v as Record<string, unknown>;
 }
 
+/** The body of an order request: a list of ids. */
+async function readIdList(req: IncomingMessage): Promise<string[]> {
+  const v = await readJson(req);
+  if (!Array.isArray(v) || !v.every((x) => typeof x === 'string')) throw new HttpError(400, 'Body must be a list of ids');
+  return v as string[];
+}
+
 const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+
+/** A folder named by a request: only a non-empty absolute path is taken. */
+function absolutePath(v: unknown, label = 'path'): string {
+  if (typeof v !== 'string' || v.length === 0 || !isAbsolute(v)) throw new HttpError(400, `${label} must be an absolute path`);
+  return v;
+}
+
+/** What git refuses is the client's to correct: it is answered with git's reason. */
+async function gitCall<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (e instanceof GitError) throw new HttpError(400, e.message);
+    throw e;
+  }
+}
+
+/** How long removing a worktree waits for the processes of closed sessions in it to end. */
+const FOLDER_RELEASE_MS = 3000;
+
+/** Resolves once `done` holds, checking every 100 ms, or after `timeoutMs` whatever it says. */
+async function waitFor(done: () => boolean, timeoutMs: number): Promise<void> {
+  const end = Date.now() + timeoutMs;
+  while (!done() && Date.now() < end) await new Promise((r) => setTimeout(r, 100));
+}
+
+/** The conversation a hook or status report names, if any. */
+const reportedConversation = (body: unknown): unknown => (body as { session_id?: unknown } | null)?.session_id;
 
 function decodeId(raw: string): string {
   try {
@@ -177,7 +236,7 @@ function toCreateRequest(b: Record<string, unknown>): CreateSessionRequest {
 }
 
 function toStoryInput(b: Record<string, unknown>): StoryInput {
-  return { name: str(b.name), ticket: str(b.ticket), cwd: str(b.cwd), color: str(b.color) };
+  return { name: str(b.name), ticket: str(b.ticket), cwd: str(b.cwd), color: str(b.color), sound: str(b.sound) };
 }
 
 /**
@@ -245,7 +304,8 @@ function serveStatic(webDir: string, pathname: string, method: string, res: Serv
     // 'self' does not cover the ws: scheme in every browser, so the WebSocket is named.
     headers['content-security-policy'] =
       // blob: is how the page shows a terminal background it fetched with its token.
-      "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; " +
+      // blob: is also how it plays a sound the user added (fetched the same way).
+      "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; " +
       `connect-src 'self' ws://${pageHost}:${port}; ` +
       "frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
   }
@@ -261,6 +321,7 @@ function serveStatic(webDir: string, pathname: string, method: string, res: Serv
 
 export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res: ServerResponse) => void {
   const { manager } = deps;
+  const sounds = deps.sounds ?? new SoundStore(deps.stories);
 
   /** Claude Code names the conversation in every report; that is how a restart can resume it. */
   function noteConversation(sessionId: string, body: unknown): void {
@@ -297,8 +358,28 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       const parsed = parseHookBody(raw);
       if (!parsed) throw new HttpError(400, 'Unknown hook event');
       const hookedId = decodeId(hookMatch[1]!);
-      if (!manager.hook(hookedId, parsed.name, parsed.idleReminder)) throw new HttpError(404, 'No such live session');
+      // A late report from the process a restart replaced: acknowledged, and nothing more.
+      if (manager.isRetiredConversation(hookedId, reportedConversation(raw))) {
+        const live = manager.get(hookedId);
+        if (!live || live.status === 'exited') throw new HttpError(404, 'No such live session');
+        send(res, 204);
+        return;
+      }
+      // A command an area rule allows is answered here, and the session never stops: the hook
+      // hands the decision to Claude Code, which then shows no question at all.
+      const command = permissionCommand(raw);
+      if (parsed.name === 'PermissionRequest' && deps.rules && command !== null) {
+        const live = manager.get(hookedId);
+        if (!live || live.status === 'exited') throw new HttpError(404, 'No such live session');
+        if (deps.rules.decide(live.storyId, 'Bash', command)) {
+          noteConversation(hookedId, raw);
+          manager.setLiveCwd(hookedId, (raw as { cwd?: unknown }).cwd);
+          return send(res, 200, ALLOW_BY_RULE);
+        }
+      }
+      if (!manager.hook(hookedId, parsed.name, parsed.idleReminder, parseHookRequest(raw), command)) throw new HttpError(404, 'No such live session');
       noteConversation(hookedId, raw);
+      manager.setLiveCwd(hookedId, (raw as { cwd?: unknown }).cwd);
       if (parsed.name === 'UserPromptSubmit') deps.onPromptSubmitted?.(hookedId);
       send(res, 204);
       return;
@@ -318,6 +399,11 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       // An exited session may still deliver its last figures; an unknown one is refused.
       const session = manager.get(id);
       if (!session) throw new HttpError(404, 'No such session');
+      // A late report from the process a restart replaced: its figures and folder are not this one's.
+      if (manager.isRetiredConversation(id, reportedConversation(rawStatus))) {
+        send(res, 204);
+        return;
+      }
       const story = session.storyId ? deps.stories.list().find((s) => s.id === session.storyId) : undefined;
       // The conversation is named first, so that what is counted here is set against it:
       // the same spending turns up again in the transcript when the session ends.
@@ -331,6 +417,9 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       deps.usage.learnModelName(payload.modelId, payload.modelName);
       noteConversation(id, rawStatus);
       if (payload.modelName) manager.setModel(id, payload.modelName);
+      const reported = rawStatus as { cwd?: unknown; workspace?: { current_dir?: unknown } | null };
+      manager.setLiveCwd(id, reported.workspace?.current_dir ?? reported.cwd);
+      manager.noteStatusLine(id);
       deps.onClaudeStatus?.(id);
       send(res, 204);
       return;
@@ -370,9 +459,78 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       throw new HttpError(405, 'Method not allowed');
     }
 
-    const sessionMatch = /^\/api\/sessions\/([^/]+)(\/ack|\/editor)?$/.exec(path);
+    if (path === '/api/sessions/order') {
+      if (method !== 'PUT') throw new HttpError(405, 'Method not allowed');
+      manager.reorder(await readIdList(req));
+      return send(res, 200, manager.list());
+    }
+
+    // The same prompt typed into several sessions; each says whether it took it.
+    if (path === '/api/sessions/prompt') {
+      if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
+      const b = await readObject(req);
+      const ids = Array.isArray(b.ids) ? [...new Set(b.ids.filter((x): x is string => typeof x === 'string'))] : [];
+      const prompt = typeof b.prompt === 'string' ? b.prompt : '';
+      if (ids.length === 0 || ids.length > MAX_PROMPT_TARGETS) throw new HttpError(400, `Pick between 1 and ${MAX_PROMPT_TARGETS} sessions.`);
+      if (!prompt.trim()) throw new HttpError(400, 'Write the prompt to send.');
+      if (prompt.length > MAX_PROMPT) throw new HttpError(400, `A prompt is at most ${MAX_PROMPT} characters.`);
+      return send(res, 200, { results: ids.map((id) => ({ id, outcome: manager.typePrompt(id, prompt) })) });
+    }
+
+    const sessionMatch = /^\/api\/sessions\/([^/]+)(\/ack|\/editor|\/worktree|\/answer)?$/.exec(path);
     if (sessionMatch) {
       const id = decodeId(sessionMatch[1]!);
+      if (sessionMatch[2] === '/answer') {
+        if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
+        const b = await readObject(req);
+        const choice = b.choice === 'once' || b.choice === 'deny' || b.choice === 'area' ? b.choice : null;
+        if (typeof b.requestId !== 'string' || !choice) throw new HttpError(400, 'Give the request id and a choice: once, area or deny');
+        const STALE = 'That request is no longer waiting: it was answered in the terminal, or another one came.';
+        // For "always in this area", everything the rule needs is checked before any key is pressed.
+        let rule: { storyId: string; pattern: string } | null = null;
+        if (choice === 'area') {
+          const s = manager.get(id);
+          if (!s) throw new HttpError(404, 'No such session');
+          if (s.pending?.id !== b.requestId || s.pending.kind !== 'permission') throw new HttpError(409, STALE);
+          if (!deps.rules) throw new HttpError(409, 'Area rules are not available here.');
+          if (!s.storyId || !deps.stories.list().some((x) => x.id === s.storyId)) throw new HttpError(409, 'This session is in no area. Put it in one first, or allow this once.');
+          if (s.pending.tool !== 'Bash') throw new HttpError(409, 'Only Bash commands can be allowed for a whole area. Allow this once.');
+          const command = manager.pendingCommand(id, b.requestId);
+          if (command === null) throw new HttpError(409, 'Claude Code did not say which command this is, so it cannot become a rule. Allow it once.');
+          const pattern = suggestPattern(command);
+          if (!pattern) throw new HttpError(409, 'This command chains, pipes, redirects or substitutes, so it cannot become a rule. Allow it once.');
+          rule = { storyId: s.storyId, pattern };
+        }
+        const outcome = manager.answer(id, b.requestId, choice);
+        if (outcome === 'missing') throw new HttpError(404, 'No such session');
+        if (outcome === 'stale') throw new HttpError(409, STALE);
+        // The rule follows the answer: a request settled meanwhile in the terminal adds none.
+        if (rule && deps.rules) {
+          try {
+            deps.rules.create(rule.storyId, rule.pattern);
+          } catch (e) {
+            if (e instanceof RuleError) throw new HttpError(409, `Allowed once, but the rule was not added: ${e.message}`);
+            throw e;
+          }
+        }
+        return send(res, 200, manager.get(id));
+      }
+      if (sessionMatch[2] === '/worktree') {
+        if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
+        const s = manager.get(id);
+        if (!s) throw new HttpError(404, 'No such session');
+        const target = absolutePath((await readObject(req)).path);
+        // A WSL session names its folder itself (--cd): restarting it elsewhere would not move it.
+        if (s.args.includes('--cd')) throw new HttpError(422, 'This session sets its own folder (--cd), so it cannot be moved to another worktree');
+        // Only a worktree of the session's own repository, as git lists it.
+        const listing = await worktreesOf(s.git?.worktree ?? s.liveCwd ?? s.cwd);
+        const worktree = listing?.worktrees.find((w) => samePath(w.path, target));
+        if (!worktree) throw new HttpError(422, "Not a worktree of this session's repository");
+        if (worktree.prunable) throw new HttpError(422, 'The folder of that worktree is missing');
+        const restarted = manager.restartIn(id, worktree.path);
+        if (!restarted) throw new HttpError(404, 'No such session');
+        return send(res, 200, restarted);
+      }
       if (sessionMatch[2] === '/editor') {
         if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
         const s = manager.get(id);
@@ -405,6 +563,21 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       throw new HttpError(405, 'Method not allowed');
     }
 
+    if (path === '/api/stories/order') {
+      if (method !== 'PUT') throw new HttpError(405, 'Method not allowed');
+      return send(res, 200, deps.stories.reorder(await readIdList(req)));
+    }
+
+    if (path === '/api/profiles/order') {
+      if (method !== 'PUT') throw new HttpError(405, 'Method not allowed');
+      const ids = await readIdList(req);
+      assertConfigWritable();
+      const { config } = loadConfig();
+      config.profileOrder = ids;
+      saveConfig(config);
+      return send(res, 200, manager.profiles());
+    }
+
     if (path === '/api/stories') {
       if (method === 'GET') return send(res, 200, deps.stories.list());
       if (method === 'POST') {
@@ -415,9 +588,32 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       throw new HttpError(405, 'Method not allowed');
     }
 
-    const storyMatch = /^\/api\/stories\/([^/]+)$/.exec(path);
+    const storyMatch = /^\/api\/stories\/([^/]+)(\/editor|\/rules)?$/.exec(path);
     if (storyMatch) {
       const id = decodeId(storyMatch[1]!);
+      if (storyMatch[2] === '/rules') {
+        if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
+        if (!deps.rules) throw new HttpError(409, 'Area rules are not available here.');
+        if (!deps.stories.list().some((s) => s.id === id)) throw new HttpError(404, 'No such story');
+        const pattern = (await readObject(req)).pattern;
+        if (typeof pattern !== 'string') throw new HttpError(400, 'Give the command the rule allows, such as "dotnet test *".');
+        try {
+          return send(res, 201, deps.rules.create(id, pattern));
+        } catch (e) {
+          if (e instanceof RuleError) throw new HttpError(400, e.message);
+          throw e;
+        }
+      }
+      if (storyMatch[2]) {
+        if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
+        const story = deps.stories.list().find((s) => s.id === id);
+        if (!story) throw new HttpError(404, 'No such story');
+        if (!story.cwd) throw new HttpError(409, 'This area has no folder. Set one by editing the area.');
+        // The folder is the area's own, never one the request names.
+        const problem = deps.openEditor ? deps.openEditor({ command: '', args: [], cwd: story.cwd }) : 'Opening an editor is not available here.';
+        if (problem) throw new HttpError(409, problem);
+        return send(res, 204);
+      }
       if (method === 'PATCH') {
         const story = deps.stories.update(id, toStoryInput(await readObject(req)));
         if (!story) throw new HttpError(404, 'No such story');
@@ -428,6 +624,30 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
         // Its sessions are not stopped: they simply no longer belong to a story.
         manager.clearStory(id);
         deps.schedules?.clearStory(id);
+        deps.rules?.removeStory(id);
+        return send(res, 204);
+      }
+      throw new HttpError(405, 'Method not allowed');
+    }
+
+    const ruleMatch = /^\/api\/rules\/([^/]+)$/.exec(path);
+    if (ruleMatch) {
+      if (!deps.rules) throw new HttpError(409, 'Area rules are not available here.');
+      const id = decodeId(ruleMatch[1]!);
+      if (method === 'PATCH') {
+        const b = await readObject(req);
+        const patch = { enabled: typeof b.enabled === 'boolean' ? b.enabled : undefined, pattern: typeof b.pattern === 'string' ? b.pattern : undefined };
+        try {
+          const rule = deps.rules.update(id, patch);
+          if (!rule) throw new HttpError(404, 'No such rule');
+          return send(res, 200, rule);
+        } catch (e) {
+          if (e instanceof RuleError) throw new HttpError(400, e.message);
+          throw e;
+        }
+      }
+      if (method === 'DELETE') {
+        if (!deps.rules.remove(id)) throw new HttpError(404, 'No such rule');
         return send(res, 204);
       }
       throw new HttpError(405, 'Method not allowed');
@@ -448,6 +668,46 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       res.writeHead(200, { 'content-type': image.type, 'content-length': String(image.bytes.length), 'x-content-type-options': 'nosniff', 'cache-control': 'private, max-age=86400' });
       res.end(image.bytes);
       return;
+    }
+
+    if (path === '/api/sounds') {
+      if (method === 'GET') return send(res, 200, { sounds: sounds.list(), settings: sounds.settings() });
+      if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
+      const bytes = await readBytes(req, MAX_SOUND_BYTES);
+      const file = sounds.add(bytes, url.searchParams.get('name') ?? '');
+      if (!file) throw new HttpError(400, 'Not a sound ShellYard can use. Use an MP3, WAV or OGG file.');
+      return send(res, 201, file);
+    }
+
+    if (path === '/api/sounds/settings') {
+      if (method !== 'PUT') throw new HttpError(405, 'Method not allowed');
+      return send(res, 200, sounds.setSettings(await readObject(req)));
+    }
+
+    const soundMatch = /^\/api\/sounds\/([^/]+)$/.exec(path);
+    if (soundMatch) {
+      const id = decodeId(soundMatch[1]!);
+      if (method === 'GET') {
+        const sound = sounds.read(id);
+        if (!sound) throw new HttpError(404, 'No such sound');
+        res.writeHead(200, { 'content-type': sound.type, 'content-length': String(sound.bytes.length), 'x-content-type-options': 'nosniff', 'cache-control': 'private, max-age=86400' });
+        res.end(sound.bytes);
+        return;
+      }
+      if (method === 'DELETE') {
+        if (!sounds.remove(id)) throw new HttpError(404, 'No such sound');
+        return send(res, 204);
+      }
+      if (method === 'PATCH') {
+        const body = await readObject(req);
+        if (!sounds.list().some((s) => s.id === id)) throw new HttpError(404, 'No such sound');
+        const trim = parseTrim(body.start, body.end);
+        if (!trim) throw new HttpError(400, TRIM_RULE);
+        const file = sounds.setTrim(id, trim);
+        if (!file) throw new HttpError(404, 'No such sound');
+        return send(res, 200, file);
+      }
+      throw new HttpError(405, 'Method not allowed');
     }
 
     if (deps.schedules && (path === '/api/schedules' || path.startsWith('/api/schedules/'))) {
@@ -537,6 +797,125 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
         if (e instanceof FolderError) throw new HttpError(400, e.message);
         throw e;
       }
+    }
+
+    if (path === '/api/flow') {
+      if (method !== 'GET') throw new HttpError(405, 'Method not allowed');
+      if (!deps.flow) throw new HttpError(409, 'The flow is not recorded here.');
+      return send(res, 200, deps.flow.summary());
+    }
+
+    // The recipes of "Start from ticket".
+    if (path === '/api/recipes' || /^\/api\/recipes\/[^/]+$/.test(path)) {
+      const recipes = deps.recipes;
+      if (!recipes) throw new HttpError(409, 'Recipes are not available here.');
+      const id = path === '/api/recipes' ? null : decodeId(path.slice('/api/recipes/'.length));
+      const guarded = <T,>(fn: () => T): T => {
+        try {
+          return fn();
+        } catch (e) {
+          if (e instanceof RecipeError) throw new HttpError(400, e.message);
+          throw e;
+        }
+      };
+      if (id === null && method === 'GET') return send(res, 200, recipes.list());
+      if (id === null && method === 'POST') {
+        const body = await readObject(req);
+        return send(res, 201, guarded(() => recipes.create(body)));
+      }
+      if (id !== null && method === 'PUT') {
+        const body = await readObject(req);
+        const recipe = guarded(() => recipes.update(id, body));
+        if (!recipe) throw new HttpError(404, 'No such recipe');
+        return send(res, 200, recipe);
+      }
+      if (id !== null && method === 'DELETE') {
+        if (!guarded(() => recipes.remove(id))) throw new HttpError(404, 'No such recipe');
+        return send(res, 204);
+      }
+      throw new HttpError(405, 'Method not allowed');
+    }
+
+    // Start from ticket: worktree, area and sessions in one step.
+    if (path === '/api/tickets') {
+      if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
+      const recipes = deps.recipes;
+      if (!recipes) throw new HttpError(409, 'Recipes are not available here.');
+      const b = await readObject(req);
+      if (typeof b.recipeId !== 'string' || typeof b.ticket !== 'string') throw new HttpError(400, 'Give a recipe and a ticket code.');
+      try {
+        const started = await startFromTicket(
+          {
+            recipe: (rid) => recipes.get(rid),
+            stories: deps.stories,
+            profiles: () => manager.profiles(),
+            createSession: (r) => manager.create(r),
+            deliverPrompt: (sid, prompt) => deps.deliverPrompt?.(sid, prompt),
+            git: { branches, createWorktree, removeWorktree },
+            gitMessage: (e) => {
+              if (e instanceof GitError) return e.message;
+              throw e;
+            },
+            refreshGit: (repo) => manager.refreshGitIn(repo),
+          },
+          b.recipeId,
+          b.ticket,
+        );
+        return send(res, 201, started);
+      } catch (e) {
+        if (e instanceof TicketError) throw new HttpError(e.status, e.message);
+        throw e;
+      }
+    }
+
+    if (path === '/api/git/worktrees' || path === '/api/git/branches' || path === '/api/git/status') {
+      if (method === 'GET') {
+        const folder = absolutePath(url.searchParams.get('path'));
+        if (path === '/api/git/worktrees') return send(res, 200, await worktreesOf(folder));
+        if (path === '/api/git/branches') return send(res, 200, await branches(folder));
+        return send(res, 200, await gitCall(() => worktreeStatus(folder)));
+      }
+      if (path === '/api/git/worktrees' && method === 'POST') {
+        const b = await readObject(req);
+        const repo = absolutePath(b.repo, 'repo');
+        const target = absolutePath(b.path);
+        if (typeof b.branch !== 'string') throw new HttpError(400, 'branch must be a string');
+        if (b.base !== undefined && typeof b.base !== 'string') throw new HttpError(400, 'base must be a string');
+        const branch = b.branch;
+        const base = b.base as string | undefined;
+        const listing = await gitCall(() => createWorktree(repo, { path: target, branch, newBranch: b.newBranch === true, base }));
+        await manager.refreshGitIn(repo);
+        return send(res, 201, listing);
+      }
+      if (path === '/api/git/worktrees' && method === 'DELETE') {
+        const b = await readObject(req);
+        const repo = absolutePath(b.repo, 'repo');
+        const target = absolutePath(b.path);
+        // A session closed just before (as the worktrees dialog does) may still hold the folder for a
+        // moment on Windows: wait (a little) for its process to end, and should git still find the
+        // folder busy, try again a few times.
+        await waitFor(() => !manager.hasLiveProcessIn(target), FOLDER_RELEASE_MS);
+        const result = await gitCall(() => retryWhileBusy(() => removeWorktree(repo, target, { force: b.force === true, deleteBranch: b.deleteBranch === true })));
+        // The sessions that were in the removed worktree are no longer in the listing.
+        const inRemoved = manager.list().filter((s) => s.git && samePath(s.git.worktree, target));
+        await Promise.all([manager.refreshGitIn(repo), ...inRemoved.map((s) => manager.refreshGit(s.id))]);
+        return send(res, 200, result);
+      }
+      throw new HttpError(405, 'Method not allowed');
+    }
+
+    if (path === '/api/git/switch') {
+      if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
+      const b = await readObject(req);
+      const target = absolutePath(b.path);
+      if (typeof b.branch !== 'string') throw new HttpError(400, 'branch must be a string');
+      const branch = b.branch;
+      // Only the top folder of a worktree, as its own repository lists it.
+      const listing = await worktreesOf(target);
+      if (!listing?.worktrees.some((w) => samePath(w.path, target))) throw new HttpError(422, 'Not a worktree');
+      await gitCall(() => switchBranch(target, { branch, create: b.create === true }));
+      await manager.refreshGitIn(target);
+      return send(res, 204);
     }
 
     if (path === '/api/usage') {

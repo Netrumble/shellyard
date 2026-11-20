@@ -1,0 +1,146 @@
+import type { SessionGit, SessionInfo, Worktree, WorktreeListing } from '../shared/types.js';
+
+/** The last segment of a folder path, whichever separator it uses. */
+export function worktreeName(path: string): string {
+  const parts = path.split(/[\\/]+/).filter(Boolean);
+  return parts[parts.length - 1] ?? path;
+}
+
+/** The chip on a session tile: branch (or short head when detached) and the worktree's folder name. */
+export function chipText(git: SessionGit): string {
+  return `⎇ ${git.branch ?? git.head} · ${worktreeName(git.worktree)}`;
+}
+
+/** The short label in the sidebar: just the branch (or short head when detached). */
+export function branchLabel(git: SessionGit): string {
+  return `⎇ ${git.branch ?? git.head}`;
+}
+
+function normalise(path: string): string {
+  const slashed = path.replaceAll('\\', '/');
+  return slashed.length > 1 ? slashed.replace(/\/+$/, '') : slashed;
+}
+
+/** Whether two folder paths are the same, ignoring separator style and trailing slash (and case for drive paths). */
+export function samePathWeb(a: string, b: string): boolean {
+  const x = normalise(a);
+  const y = normalise(b);
+  const drive = /^[a-zA-Z]:/;
+  return drive.test(x) || drive.test(y) ? x.toLowerCase() === y.toLowerCase() : x === y;
+}
+
+/** The sessions still running in a worktree, optionally leaving one out. */
+export function sessionsIn(sessions: SessionInfo[], worktree: string, exceptId?: string): SessionInfo[] {
+  return sessions.filter((s) => s.status !== 'exited' && s.id !== exceptId && s.git !== null && samePathWeb(s.git.worktree, worktree));
+}
+
+/**
+ * Where a new worktree goes by default: beside the main one, named `<folder>-<branch>`. Keeps the
+ * separator style given. For a bare repository the name leaves out `.git` (`app.git` → `app-<branch>`,
+ * `app/.git` → `app-<branch>`).
+ */
+export function suggestedFolder(mainWorktree: string, branch: string, bare = false): string {
+  let base = mainWorktree.replace(/[\\/]+$/, '');
+  if (bare) base = /[\\/]\.git$/i.test(base) ? base.slice(0, -'.git'.length - 1) : base.replace(/\.git$/i, '');
+  return `${base}-${branch.replaceAll('/', '-')}`;
+}
+
+/** "1 commit", "2 commits". */
+export function countOf(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+/** The worktrees a session can move to: every listed one but the one it is in, and none that git would prune or that is bare. */
+export function moveTargets(listing: WorktreeListing | null, current: string): Worktree[] {
+  return (listing?.worktrees ?? []).filter((w) => !w.prunable && !w.bare && !samePathWeb(w.path, current));
+}
+
+/** The worktrees a new session can start in: none that is bare, and none that git would prune unless it is the current one. */
+export function sessionChoices(listing: WorktreeListing | null): Worktree[] {
+  if (!listing) return [];
+  return listing.worktrees.filter((w) => !w.bare && (!w.prunable || samePathWeb(w.path, listing.current)));
+}
+
+/**
+ * The branch of the worktree a new session will start in: the chosen one, or the folder's own
+ * when none is chosen. Null when it is detached or not in the listing.
+ */
+export function branchNameFor(listing: WorktreeListing | null, chosen: string): string | null {
+  if (!listing) return null;
+  const target = chosen || listing.current;
+  return listing.worktrees.find((w) => samePathWeb(w.path, target))?.branch ?? null;
+}
+
+/** The question asked before switching a detached worktree away from commits no branch holds; null when there are none. */
+export function leaveDetachedPrompt(unreachable: number): string | null {
+  if (unreachable <= 0) return null;
+  return `${countOf(unreachable, 'commit', 'commits')} on no branch will be left behind (recoverable only from the reflog). Continue?`;
+}
+
+/** The branches no worktree has checked out, which git lets a new worktree use. */
+export function freeBranches(branches: string[], listing: WorktreeListing | null): string[] {
+  const taken = new Set((listing?.worktrees ?? []).map((w) => w.branch).filter((b): b is string => b !== null));
+  return branches.filter((b) => !taken.has(b));
+}
+
+/**
+ * The questions to ask, in order, before deleting a worktree, and whether git must force it.
+ * `status` null means unknown: ask about changes anyway before forcing. A prunable worktree's
+ * folder is gone already, so nothing in it can be lost.
+ */
+export function deleteConfirmations(c: {
+  sessionNames: string[];
+  path: string;
+  prunable: boolean;
+  /** No branch checked out: its commits may be held by nothing else. */
+  detached: boolean;
+  status: { dirty: boolean; unreachable: number } | null;
+}): { prompts: string[]; force: boolean } {
+  const prompts: string[] = [];
+  let force = false;
+  if (c.sessionNames.length > 0) prompts.push(`Close ${c.sessionNames.join(', ')} and delete?`);
+  if (!c.prunable && c.status === null) {
+    // Unknown: say so, and since removal also drops the worktree's HEAD history, warn about
+    // commits that only a detached HEAD holds.
+    prompts.push(`Could not read the status of ${c.path}; any uncommitted changes will be lost.`);
+    if (c.detached) prompts.push(`Commits on no branch (if any) in ${c.path} will be lost.`);
+    force = true;
+  } else if (!c.prunable && c.status) {
+    if (c.status.dirty) {
+      prompts.push(`Uncommitted changes in ${c.path} will be lost.`);
+      force = true;
+    }
+    if (c.status.unreachable > 0) {
+      prompts.push(`${countOf(c.status.unreachable, 'commit', 'commits')} on no branch will be lost.`);
+      force = true;
+    }
+  }
+  prompts.push(`Delete worktree ${c.path}? Files ignored by git (like .env) are deleted too.`);
+  return { prompts, force };
+}
+
+/** Whether a session runs in WSL (`--cd`), where moving it to another worktree is not offered. */
+export function isWslSession(args: string[] | undefined): boolean {
+  return (args ?? []).includes('--cd');
+}
+
+/** The part of `folder` below `root` ('' when they are the same), or null when the folder is not inside root. */
+export function relativeInside(folder: string, root: string): string | null {
+  const f = normalise(folder);
+  const r = normalise(root);
+  if (samePathWeb(f, r)) return '';
+  const prefix = r.endsWith('/') ? r : `${r}/`;
+  const drive = /^[a-zA-Z]:/;
+  const ci = drive.test(f) || drive.test(r);
+  const head = f.slice(0, prefix.length);
+  if (ci ? head.toLowerCase() !== prefix.toLowerCase() : head !== prefix) return null;
+  const rest = f.slice(prefix.length);
+  return folder.includes('\\') && !folder.includes('/') ? rest.replaceAll('/', '\\') : rest;
+}
+
+/** `rel` below `root`, with the separators of `root`. */
+export function joinPath(root: string, rel: string): string {
+  if (!rel) return root;
+  const sep = root.includes('\\') && !root.includes('/') ? '\\' : '/';
+  return `${root.replace(/[\\/]+$/, '')}${sep}${rel.split(/[\\/]+/).filter(Boolean).join(sep)}`;
+}

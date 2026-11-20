@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { groupByStory, inStory, selectAttention, selectCounts, statusLabel } from '../../src/web/selectors.js';
-import type { Reason, SessionInfo, Status, Story } from '../../src/shared/types.js';
-
-export function session(id: string, status: Status, reason: Reason = null, statusSince = 0, kind: 'claude' | 'shell' = 'claude'): SessionInfo {
-  return { id, kind, storyId: null, name: id, color: '#888888', cwd: '/', command: 'x', args: [], model: null, status, reason, statusSince, cols: 80, rows: 24, exitCode: null, error: null, resumed: false, background: null, font: null };
-}
+import { groupByStory, inStory, sidebarGroups, selectAttention, selectCounts, statusLabel } from '../../src/web/selectors.js';
+import type { SessionInfo, Story } from '../../src/shared/types.js';
+import { session } from './session-fixture.js';
 
 const all = [
   session('finished', 'attention', 'finished', 100),
@@ -59,7 +56,7 @@ describe('statusLabel', () => {
 });
 
 describe('stories', () => {
-  const story = (id: string): Story => ({ id, name: id.toUpperCase(), ticket: '', cwd: '', color: '' });
+  const story = (id: string): Story => ({ id, name: id.toUpperCase(), ticket: '', cwd: '', color: '', sound: '' });
   const inS = (s: SessionInfo, storyId: string | null): SessionInfo => ({ ...s, storyId });
   const a1 = inS(session('a1', 'attention', 'blocked'), 'a');
   const a2 = inS(session('a2', 'working'), 'a');
@@ -93,6 +90,19 @@ describe('stories', () => {
     });
     it('is empty with nothing at all', () => {
       expect(groupByStory([], [])).toEqual([]);
+    });
+  });
+
+  describe('sidebarGroups', () => {
+    it('adds an empty No area group when there are areas and every session is in one', () => {
+      const groups = sidebarGroups([a1], [story('a')]);
+      expect(groups.map((g) => [g.story?.id ?? null, g.sessions.length])).toEqual([['a', 1], [null, 0]]);
+    });
+    it('keeps the loose group it already has', () => {
+      expect(sidebarGroups([free], [story('a')]).map((g) => [g.story?.id ?? null, g.sessions.length])).toEqual([['a', 0], [null, 1]]);
+    });
+    it('has no No area group without areas', () => {
+      expect(sidebarGroups([], [])).toEqual([]);
     });
   });
 

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { areaSummary, boardAreas } from '../../src/web/board.js';
+import { areaBranch, areaSummary, boardAreas, byActivity, glyphCounts } from '../../src/web/board.js';
 import type { SessionInfo, Story } from '../../src/shared/types.js';
-import { session } from './store.test.js';
+import { session } from './session-fixture.js';
 
-const area = (id: string): Story => ({ id, name: id.toUpperCase(), ticket: '', cwd: '', color: '' });
+const area = (id: string): Story => ({ id, name: id.toUpperCase(), ticket: '', cwd: '', color: '', sound: '' });
 const inArea = (s: SessionInfo, storyId: string | null): SessionInfo => ({ ...s, storyId });
 
 describe('boardAreas', () => {
@@ -21,9 +21,9 @@ describe('boardAreas', () => {
     ]);
   });
 
-  it('puts the areas where someone is waiting first, without otherwise changing their order', () => {
+  it('keeps the story order even when a later area is waiting', () => {
     const sessions = [inArea(session('s1', 'working'), 'a'), inArea(session('s2', 'attention', 'blocked'), 'b'), inArea(session('s3', 'attention', 'finished'), 'c')];
-    expect(boardAreas(sessions, [a, b, c]).map((x) => x.story?.id ?? null)).toEqual(['b', 'c', 'a', null]);
+    expect(boardAreas(sessions, [a, b, c]).map((x) => x.story?.id ?? null)).toEqual(['a', 'b', 'c', null]);
   });
 
   it('keeps the area for sessions with no area last, even when one of them is waiting', () => {
@@ -74,5 +74,63 @@ describe('areaSummary', () => {
   });
   it('says so when an area is empty', () => {
     expect(areaSummary([])).toBe('No sessions');
+  });
+});
+
+describe('byActivity', () => {
+  const [a, b, c, d] = ['a', 'b', 'c', 'd'].map(area);
+  const ids = (sessions: SessionInfo[]) => byActivity(boardAreas(sessions, [a!, b!, c!, d!])).map((x) => x.story?.id ?? null);
+
+  it('floats areas up by what they need: waiting, then working, then finished, then quiet', () => {
+    const sessions = [
+      inArea(session('q', 'idle'), 'a'),
+      inArea(session('f', 'attention', 'finished'), 'b'),
+      inArea(session('w', 'working'), 'c'),
+      inArea(session('n', 'attention', 'blocked'), 'd'),
+    ];
+    expect(ids(sessions)).toEqual(['d', 'c', 'b', 'a', null]);
+  });
+
+  it('keeps the order the user gave within the same level', () => {
+    const sessions = [inArea(session('w1', 'working'), 'b'), inArea(session('w2', 'working'), 'd'), inArea(session('m', 'attention', 'maybe-waiting'), 'c')];
+    expect(ids(sessions)).toEqual(['c', 'b', 'd', 'a', null]);
+  });
+
+  it('does not count a shell that merely runs as activity', () => {
+    const sessions = [inArea(session('sh', 'running', null, 0, 'shell'), 'b'), inArea(session('i', 'idle'), 'a')];
+    expect(ids(sessions)).toEqual(['a', 'b', 'c', 'd', null]);
+  });
+
+  it('keeps the area for sessions with no area last', () => {
+    expect(ids([session('loose', 'attention', 'blocked')])).toEqual(['a', 'b', 'c', 'd', null]);
+  });
+});
+
+describe('glyphCounts', () => {
+  it('counts the sessions of an area by glyph, a quiet shell as idle and an ended one as exited', () => {
+    const sessions = [
+      session('n', 'attention', 'blocked'),
+      session('m', 'attention', 'maybe-waiting'),
+      session('w', 'working'),
+      session('f', 'attention', 'finished'),
+      session('i', 'idle'),
+      session('sh', 'running', null, 0, 'shell'),
+      session('x', 'exited'),
+    ];
+    expect(glyphCounts(sessions, {})).toEqual({ needs: 2, working: 1, finished: 1, idle: 2, exited: 1 });
+    expect(glyphCounts(sessions, { sh: 300 })).toEqual({ needs: 2, working: 2, finished: 1, idle: 1, exited: 1 });
+  });
+});
+
+describe('areaBranch', () => {
+  const onBranch = (id: string, branch: string | null): SessionInfo => ({ ...session(id, 'idle'), git: { worktree: '/r', branch, head: 'abc1234', isMain: false, worktreeCount: 2 } });
+
+  it('is the branch most of its sessions are on', () => {
+    expect(areaBranch([onBranch('1', 'feat/a'), onBranch('2', 'main'), onBranch('3', 'feat/a')])).toBe('feat/a');
+  });
+
+  it('is null when no session knows its branch', () => {
+    expect(areaBranch([session('1', 'idle'), onBranch('2', null)])).toBeNull();
+    expect(areaBranch([])).toBeNull();
   });
 });

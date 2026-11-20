@@ -23,7 +23,7 @@ export function useTempHome(): { dir: () => string } {
     else process.env.SHELLYARD_HOME = previous;
     if (previousClaude === undefined) delete process.env.CLAUDE_CONFIG_DIR;
     else process.env.CLAUDE_CONFIG_DIR = previousClaude;
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   return { dir: () => dir };
 }

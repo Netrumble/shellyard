@@ -25,3 +25,15 @@ export function notify(s: SessionInfo, onClick: () => void, sound: boolean): voi
     n.close();
   };
 }
+
+/** The digest at the end of a focus: one notification, if the page is not in view. */
+export function notifyDigest(text: string, onClick: () => void, sound: boolean): void {
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  if (document.hasFocus()) return;
+  const n = new Notification('Focus ended', { body: text, tag: 'shellyard-focus-digest', silent: !sound });
+  n.onclick = () => {
+    window.focus();
+    onClick();
+    n.close();
+  };
+}

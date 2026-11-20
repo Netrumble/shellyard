@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
-import type { CreateSessionRequest, Profile, SessionKind } from '../../shared/types.js';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { CreateSessionRequest, Profile, SessionKind, WorktreeListing } from '../../shared/types.js';
 import { api } from '../api.js';
 import { requestPermissionOnce } from '../notify.js';
 import { FolderPicker } from './FolderPicker.js';
+import { WorktreesDialog } from './WorktreesDialog.js';
+import { branchNameFor, isWslSession, joinPath, relativeInside, samePathWeb, sessionChoices, worktreeName } from '../worktrees.js';
+import { useEscape } from '../escape.js';
 import { refreshMeta, setView, useStore } from '../store.js';
 
 const CUSTOM = '__custom__';
@@ -24,6 +27,10 @@ export function NewSessionDialog({ onClose, initialStoryId }: { onClose: () => v
   const [saveAsProfile, setSaveAsProfile] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [listing, setListing] = useState<WorktreeListing | null>(null);
+  const [chosen, setChosen] = useState('');
+  const [managing, setManaging] = useState(false);
+  const latest = useRef(0);
 
   useEffect(() => {
     void refreshMeta();
@@ -40,13 +47,36 @@ export function NewSessionDialog({ onClose, initialStoryId }: { onClose: () => v
   const effectiveKind: SessionKind = profile ? profile.kind : kind;
   const isClaude = effectiveKind === 'claude';
 
+  const folder = cwd.trim() || story?.cwd || profile?.cwd || '';
+
+  // Load the worktrees of the folder, ignoring the answer of any folder asked about earlier.
+  const loadWorktrees = useCallback(async (path: string, select?: string): Promise<void> => {
+    const ticket = ++latest.current;
+    let result: WorktreeListing | null = null;
+    try {
+      result = path ? await api.worktrees(path) : null;
+    } catch {
+      result = null;
+    }
+    if (ticket !== latest.current) return;
+    setListing(result);
+    const wanted = select ? result?.worktrees.find((w) => samePathWeb(w.path, select)) : undefined;
+    setChosen(wanted ? wanted.path : (result?.current ?? ''));
+  }, []);
+
   useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+    const timer = setTimeout(() => void loadWorktrees(folder), 300);
+    return () => clearTimeout(timer);
+  }, [folder, loadWorktrees]);
+
+  // A launcher that names its folder itself (WSL, --cd) would not start in the chosen worktree.
+  const setsOwnFolder = isWslSession(profile?.args);
+  const offered = useMemo(() => (setsOwnFolder ? [] : sessionChoices(listing)), [listing, setsOwnFolder]);
+
+  // A Claude session left unnamed is named after the branch it will work on.
+  const branchName = isClaude && !setsOwnFolder ? branchNameFor(listing, offered.length > 1 ? chosen : '') : null;
+
+  useEscape(onClose);
 
   const model = (): string | null | undefined => {
     if (!isClaude) return undefined;
@@ -64,7 +94,23 @@ export function NewSessionDialog({ onClose, initialStoryId }: { onClose: () => v
     }
     const req: CreateSessionRequest = profile ? { profileId: profile.id } : { kind, command: command.trim() };
     if (name.trim()) req.name = name.trim();
+    else if (branchName) req.name = branchName;
     if (cwd.trim()) req.cwd = cwd.trim();
+    if (listing && offered.length > 1 && chosen && !samePathWeb(chosen, listing.current)) {
+      // Same place in the chosen worktree when the folder is a sub-folder of the current one and it exists there.
+      const rel = relativeInside(folder, listing.current);
+      let target = chosen;
+      if (rel) {
+        const inside = joinPath(chosen, rel);
+        try {
+          await api.folders(inside);
+          target = inside;
+        } catch {
+          target = chosen;
+        }
+      }
+      req.cwd = target;
+    }
     if (color) req.color = color;
     if (story) req.storyId = story.id;
     const m = model();
@@ -148,13 +194,31 @@ export function NewSessionDialog({ onClose, initialStoryId }: { onClose: () => v
 
         <label>
           <span>Name</span>
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder={profile?.name ?? 'Optional'} />
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder={branchName ?? profile?.name ?? 'Optional'} />
         </label>
 
         <div className="field">
           <span id="session-folder-label">Folder</span>
           <FolderPicker value={cwd} onChange={setCwd} placeholder={story?.cwd || profile?.cwd || 'Your home folder'} labelledBy="session-folder-label" />
         </div>
+
+        {listing && offered.length > 1 && (
+          <div className="field">
+            <span id="session-worktree-label">Worktree</span>
+            <span className="worktree-row">
+              <select value={chosen} onChange={(e) => setChosen(e.target.value)} aria-labelledby="session-worktree-label">
+                {offered.map((w) => (
+                  <option key={w.path} value={w.path}>
+                    {`${worktreeName(w.path)} (${w.branch ?? 'detached'})`}
+                  </option>
+                ))}
+              </select>
+              <button type="button" onClick={() => setManaging(true)}>
+                Manage…
+              </button>
+            </span>
+          </div>
+        )}
 
         {isClaude && (
           <label>
@@ -209,6 +273,13 @@ export function NewSessionDialog({ onClose, initialStoryId }: { onClose: () => v
           </button>
         </div>
       </form>
+      {managing && (
+        <WorktreesDialog
+          folder={folder}
+          onClose={() => setManaging(false)}
+          onCreated={(path) => void loadWorktrees(folder, path)}
+        />
+      )}
     </div>
   );
 }

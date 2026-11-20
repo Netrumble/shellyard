@@ -79,7 +79,7 @@ describe('areas and their colours', () => {
   });
 
   it('gives a colour to areas saved before colours were automatic, once, and announces it', () => {
-    saveConfig({ ...defaultConfig(), stories: [{ id: 's1', name: 'Old', ticket: '', cwd: '', color: '' }, { id: 's2', name: 'Has one', ticket: '', cwd: '', color: '#123456' }] });
+    saveConfig({ ...defaultConfig(), stories: [{ id: 's1', name: 'Old', ticket: '', cwd: '', color: '', sound: '' }, { id: 's2', name: 'Has one', ticket: '', cwd: '', color: '#123456', sound: '' }] });
     const store = new StoryStore();
     let changes = 0;
     store.onChange(() => changes++);

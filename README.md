@@ -136,6 +136,29 @@ starts waiting while you are looking elsewhere.
 
 When you start a Claude Code session you can choose its model.
 
+### Reordering and the sidebar
+
+Areas, sessions and launchers can be dragged to put them in the order you like: drop one before
+or after another, and a line shows where it will go. On the board, drag an area by its header to
+move it left or right; in the sidebar, drag an area, a session or a launcher up or down. Dropping
+a session on another session in a different area also moves it to that area. The order is kept
+by the server, so every tab and the next start show it. The line is not shown over the item you are
+holding.
+
+The sidebar can be folded away to leave more room, and its Sessions and Launchers sections, like
+each area in it, fold too; the board keeps the order of the areas.
+
+### Sounds
+
+**Sounds…** in the header opens the sound settings. Three events can each have their own sound:
+a session that needs permission, one that finished, and one that may be waiting. Each plays the
+chime unless you choose a sound you added: add an mp3, wav or ogg file with **Add sound…**, play
+it to hear it, and delete it when you no longer want it (settings and areas using it go back to
+the defaults). An area can also have a sound of its own, chosen when you create or edit it; it
+is played instead of the sound of the event when one of its sessions starts waiting. When several
+sessions start waiting together, one sound plays: that of the most urgent one. The page stays
+silent while you are looking at it, and the **Sound** checkbox switches all of this off.
+
 ### Conversations, and what comes back after a restart
 
 ShellYard can only show terminals it started itself: a session running in another window belongs to
@@ -234,6 +257,36 @@ is opened inside its distribution, through VS Code's WSL extension, also when it
 folder (seen there as `/mnt/c/...`) or the Linux home. VS Code is found through its `code` command
 on the PATH. The folder is the one the session started in: where its shell has moved to since is
 not known to ShellYard.
+
+### Git worktrees
+
+A session in a git repository shows a chip in its title bar, `⎇ branch · worktree`: the branch
+checked out in the folder it works in (a short commit id when no branch is), and the name of that
+worktree's folder. A Claude Code session follows the folder Claude reports, so the chip changes
+when Claude moves to another worktree; for other sessions it shows the folder the session started
+in.
+
+The chip's menu lets you move the session to another worktree of the repository, or switch the
+branch of its worktree. Moving a session restarts it. For Claude Code that means a new
+conversation in the new folder: the old one stays in Conversations, where you can resume it.
+Moving is not offered for WSL sessions. Switching away from a commit that is on no branch asks
+first, as that commit is then left behind.
+
+**Manage worktrees…** (in the chip's menu) lists the worktrees of the repository. There you
+create one, choosing an existing branch or a new one and the folder (by default beside the main
+worktree), and delete one. Before deleting, ShellYard asks about what would be lost: sessions
+still open in it, uncommitted changes, commits that are on no branch, and the files git ignores
+(like `.env`), which are deleted too. Commits on no branch are never lost without that
+confirmation: the server refuses to delete such a worktree otherwise. You can also delete the
+worktree's branch; if that branch is not merged, the branch is kept and a warning says so.
+
+When other sessions are working in a worktree, moving a session there or switching the branch of
+that worktree asks first: they all share the same files, and the branch changes under all of them.
+
+In the new-session dialog, when the folder is in a repository with more than one worktree, a
+**Worktree** choice appears under Folder. Pick one to start the session there, in the same
+sub-folder if it exists in that worktree. **Manage…** opens the same dialog to create one first.
+The choice is not offered for launchers that set their own folder (WSL, `--cd`).
 
 ### Terminal background
 

@@ -48,6 +48,13 @@ export function groupByStory(sessions: SessionInfo[], stories: Story[]): StoryGr
   return groups;
 }
 
+/** The groups of the sidebar: with areas, "No area" is always there so that a session can be dropped on it. */
+export function sidebarGroups(sessions: SessionInfo[], stories: Story[]): StoryGroup[] {
+  const groups = groupByStory(sessions, stories);
+  if (stories.length > 0 && !groups.some((g) => g.story === null)) groups.push({ story: null, sessions: [], attention: 0 });
+  return groups;
+}
+
 /** Narrows a list to one story (its id), to the ungrouped sessions (null), or not at all (undefined). */
 export function inStory(sessions: SessionInfo[], storyFilter: string | null | undefined, stories: Story[]): SessionInfo[] {
   if (storyFilter === undefined) return sessions;
@@ -63,12 +70,4 @@ export function statusLabel(s: SessionInfo): string {
     return 'needs you';
   }
   return s.status;
-}
-
-/** A class name for colouring a status; the colours themselves live in theme.css. */
-export function statusTone(s: SessionInfo): 'warn' | 'done' | 'ok' | 'muted' | 'dead' {
-  if (s.status === 'attention') return s.reason === 'finished' ? 'done' : 'warn';
-  if (s.status === 'working' || s.status === 'running') return 'ok';
-  if (s.status === 'exited') return 'dead';
-  return 'muted';
 }

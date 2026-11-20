@@ -1,39 +1,26 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ClosedSession, SessionInfo, Story } from '../../shared/types.js';
+import type { ClosedSession, FlowSummary, Story } from '../../shared/types.js';
 import { api } from '../api.js';
-import { areaSummary, boardAreas, type BoardArea } from '../board.js';
+import { areaBranch, areaSummary, boardAreas, byActivity, glyphCounts, type BoardArea, type GlyphCounts } from '../board.js';
 import { loadAreaSizes, NO_AREA_KEY, saveAreaSizes, withAreaSize, type AreaSize } from '../board-sizes.js';
-import { lampState } from '../effects.js';
+import { AREA_DRAG, SESSION_DRAG } from '../drag.js';
+import { dropArea, dropSessionOnArea, sessionInArea } from '../drag-actions.js';
 import { durationLabel } from '../gauges.js';
-import { statusLabel } from '../selectors.js';
 import { setView, useStore } from '../store.js';
+import { dragSource, useDropTarget } from './drag-target.js';
+import { MoreIcon } from './icons.js';
+import { NeedsYouLane } from './NeedsYouLane.js';
+import { Popover } from './Popover.js';
+import { RulesDialog } from './RulesDialog.js';
+import { SelectionBar } from './SelectionBar.js';
+import { SessionRow } from './SessionRow.js';
 import { StoryDialog } from './StoryDialog.js';
+import { TicketDialog } from './TicketDialog.js';
+import { TimelineView } from './TimelineView.js';
+import { answerTime, blockedTime } from '../flow-text.js';
+import { useFlow } from '../use-flow.js';
 
-const DRAG_TYPE = 'application/x-shellyard-session';
 const report = (e: unknown): void => window.alert((e as Error).message);
-
-/** One terminal on the board: a light for its state and its name. Not the terminal itself. */
-function Dot({ session }: { session: SessionInfo }): React.JSX.Element {
-  const label = `${session.name}: ${statusLabel(session)}`;
-  return (
-    <button
-      type="button"
-      className="board-dot"
-      draggable
-      title={`${label}. Click to open, drag to another area.`}
-      aria-label={label}
-      onDragStart={(e) => {
-        e.dataTransfer.setData(DRAG_TYPE, session.id);
-        e.dataTransfer.effectAllowed = 'move';
-      }}
-      onClick={() => setView({ kind: 'single', id: session.id })}
-    >
-      <span className={`lamp lamp-${lampState(session)}`} aria-hidden="true" />
-      <span className="board-dot-name">{session.name}</span>
-      <span className="board-dot-status">{statusLabel(session)}</span>
-    </button>
-  );
-}
 
 /**
  * The sessions that can be opened again in an area: those closed in it first, then those
@@ -103,6 +90,18 @@ function ClosedList({ story, onDone }: { story: Story | null; onDone: () => void
   );
 }
 
+/** A thin bar split by state: how much of the area waits, works, has finished or rests. */
+function StateBar({ counts, label }: { counts: GlyphCounts; label: string }): React.JSX.Element {
+  const parts = (['needs', 'working', 'finished'] as const).filter((g) => counts[g] > 0);
+  const total = counts.needs + counts.working + counts.finished + counts.idle + counts.exited;
+  return (
+    <div className="state-bar" role="img" aria-label={label}>
+      {total > 0 && parts.map((g) => <span key={g} className={`state-bar-${g}`} style={{ flexGrow: counts[g] }} />)}
+      {total > 0 && <span className="state-bar-rest" style={{ flexGrow: counts.idle + counts.exited }} />}
+    </div>
+  );
+}
+
 function Area(props: {
   area: BoardArea;
   size: AreaSize | undefined;
@@ -112,10 +111,21 @@ function Area(props: {
 }): React.JSX.Element {
   const { area, size, onNewSession, onEdit } = props;
   const { story, sessions } = area;
-  const [over, setOver] = useState(false);
+  const { activity, closed, rules } = useStore();
+  const ruleCount = story ? rules.filter((r) => r.storyId === story.id).length : 0;
+  const [rulesOpen, setRulesOpen] = useState(false);
+  // A session dropped on the area moves into it; an area dropped on it goes to its left or right.
+  const { dropClass, dropProps } = useDropTarget(
+    {
+      [AREA_DRAG]: story ? { placed: true, targetId: story.id, onDrop: (id, place) => dropArea(id, story.id, place) } : undefined,
+      [SESSION_DRAG]: { skip: (id) => sessionInArea(id, story ? story.id : null), onDrop: (id) => dropSessionOnArea(id, story ? story.id : null) },
+    },
+    'x',
+  );
   const [reopening, setReopening] = useState(false);
-  const closedCount = useStore().closed.length;
   const name = story ? story.name : 'No area';
+  const summary = areaSummary(sessions);
+  const branch = areaBranch(sessions);
   const box = useRef<HTMLElement>(null);
   const onResize = useRef(props.onResize);
   onResize.current = props.onResize;
@@ -159,91 +169,170 @@ function Area(props: {
   return (
     <section
       ref={box}
-      className={`board-area area-${area.state}${over ? ' drop-over' : ''}${story ? '' : ' area-none'}`}
-      aria-label={`${name}: ${areaSummary(sessions)}`}
+      className={`board-area area-${area.state}${dropClass ? ` ${dropClass}` : ''}${story ? '' : ' area-none'}`}
+      aria-label={`${name}: ${summary}`}
       style={{ ...(story?.color ? { '--area-color': story.color } : {}), ...(size ? { width: size.width, height: size.height } : {}) } as React.CSSProperties}
-      onDragOver={(e) => {
-        if (!e.dataTransfer.types.includes(DRAG_TYPE)) return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        setOver(true);
-      }}
-      onDragLeave={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(false);
-      }}
-      onDrop={(e) => {
-        const id = e.dataTransfer.getData(DRAG_TYPE);
-        setOver(false);
-        if (!id) return;
-        e.preventDefault();
-        const target = story ? story.id : null;
-        if (sessions.some((s) => s.id === id)) return;
-        api.moveSession(id, target).catch(report);
-      }}
+      {...dropProps}
     >
-      <header className="board-area-head">
+      <header className="area-head">
         <button
           type="button"
-          className="board-area-title"
-          title="Open all the terminals of this area"
+          className="area-title"
+          title={story ? 'Open all the terminals of this area; drag to reorder the areas' : 'Open all the terminals of this area'}
+          {...(story ? dragSource(AREA_DRAG, story.id) : {})}
           onClick={() => setView({ kind: 'grid', storyFilter: story ? story.id : null })}
         >
-          <span className="board-area-name">{name}</span>
-          {story?.ticket && <span className="model">{story.ticket}</span>}
+          <span className="area-swatch" aria-hidden="true" />
+          <span className="area-name">{name}</span>
         </button>
-        <span className="actions">
-          <button type="button" className="icon" title="New session in this area" aria-label={`New session in ${name}`} onClick={() => onNewSession(story?.id)}>
-            +
-          </button>
-          <button
-            type="button"
-            className="icon"
-            title="Reopen a closed session in this area"
-            aria-label={`Reopen a closed session in ${name}`}
-            aria-expanded={reopening}
-            disabled={closedCount === 0 && !reopening}
-            onClick={() => setReopening((v) => !v)}
-          >
-            ↺
-          </button>
-          {size && (
-            <button type="button" className="icon" title="Back to the default size" aria-label={`Reset the size of ${name}`} onClick={() => props.onResize(null)}>
-              ⤡
-            </button>
-          )}
-          {story && (
-            <>
-              <button type="button" className="icon" title="Rename or edit this area" aria-label={`Rename or edit ${name}`} onClick={() => onEdit(story)}>
-                ✎
+        {story?.ticket && <span className="area-ticket">{story.ticket}</span>}
+        <Popover label={`More actions for ${name}`} button={<MoreIcon size={18} />}>
+          {(close) => (
+            <div className="menu-panel">
+              <button
+                type="button"
+                disabled={closed.length === 0}
+                onClick={() => {
+                  close();
+                  setReopening(true);
+                }}
+              >
+                Reopen a closed session
               </button>
-              <button type="button" className="icon" title="Delete area" aria-label={`Delete ${name}`} onClick={remove}>
-                ✕
-              </button>
-            </>
+              {story && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    close();
+                    onEdit(story);
+                  }}
+                >
+                  Rename or edit the area
+                </button>
+              )}
+              {story && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    close();
+                    setRulesOpen(true);
+                  }}
+                >
+                  Area rules{ruleCount > 0 ? ` (${ruleCount})` : ''}
+                </button>
+              )}
+              {size && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    close();
+                    props.onResize(null);
+                  }}
+                >
+                  Back to the default size
+                </button>
+              )}
+              {story && (
+                <button
+                  type="button"
+                  className="danger"
+                  onClick={() => {
+                    close();
+                    remove();
+                  }}
+                >
+                  Delete the area
+                </button>
+              )}
+            </div>
           )}
-        </span>
+        </Popover>
       </header>
-      {reopening && <ClosedList story={story} onDone={() => setReopening(false)} />}
-      <div className="board-dots">
-        {sessions.map((s) => (
-          <Dot key={s.id} session={s} />
-        ))}
-        {sessions.length === 0 && <p className="hint">{story ? 'No sessions yet. Start one with +, or drag one here.' : 'Drag a session here to take it out of its area.'}</p>}
-      </div>
-      <footer className="board-area-foot">{areaSummary(sessions)}</footer>
+      {(story?.cwd || branch) && (
+        <p className="area-where">
+          {story?.cwd && <span className="area-path">{story.cwd}</span>}
+          {story?.cwd && branch && <span aria-hidden="true"> · </span>}
+          {branch && <span className="area-branch">{branch}</span>}
+        </p>
+      )}
+      <StateBar counts={glyphCounts(sessions, activity)} label={summary} />
+      {reopening && (
+        <div className="area-reopen">
+          <ClosedList story={story} onDone={() => setReopening(false)} />
+          <button type="button" className="ny-link" onClick={() => setReopening(false)}>
+            Close the list
+          </button>
+        </div>
+      )}
+      {sessions.length > 0 ? (
+        <ul className="srows">
+          {sessions.map((s) => (
+            <SessionRow key={s.id} session={s} />
+          ))}
+        </ul>
+      ) : (
+        <p className="hint area-empty">{story ? 'No sessions yet. Start one, or drag one here.' : 'Drag a session here to take it out of its area.'}</p>
+      )}
+      <footer className="area-foot">
+        <button type="button" className="area-action" onClick={() => onNewSession(story?.id)}>
+          + Session
+        </button>
+        {story?.cwd && (
+          <button type="button" className="area-action quiet" onClick={() => api.openAreaEditor(story.id).catch(report)}>
+            Open in VS Code
+          </button>
+        )}
+      </footer>
+      {story && rulesOpen && <RulesDialog story={story} onClose={() => setRulesOpen(false)} />}
     </section>
   );
 }
 
+/** "11 sessions in 3 areas · 2 are waiting for you · median answer 2m 10s · 27 min blocked today" */
+function boardSummary(sessions: number, areas: number, waiting: number, flow: FlowSummary | null): string {
+  const parts = [`${sessions} session${sessions === 1 ? '' : 's'} in ${areas} area${areas === 1 ? '' : 's'}`];
+  if (waiting > 0) parts.push(`${waiting} ${waiting === 1 ? 'is' : 'are'} waiting for you`);
+  if (flow && flow.today.medianAnswerMs !== null) parts.push(`median answer ${answerTime(flow.today.medianAnswerMs)}`);
+  if (flow && flow.today.blockedMs >= 60_000) parts.push(`${blockedTime(flow.today.blockedMs)} blocked today`);
+  return parts.join(' · ');
+}
+
+type BoardMode = 'areas' | 'timeline';
+const MODE_KEY = 'shellyard-board-mode';
+
+function loadMode(): BoardMode {
+  try {
+    return localStorage.getItem(MODE_KEY) === 'timeline' ? 'timeline' : 'areas';
+  } catch {
+    return 'areas';
+  }
+}
+
+function saveMode(mode: BoardMode): void {
+  try {
+    localStorage.setItem(MODE_KEY, mode);
+  } catch {
+    // Not remembered next time; it still applies now.
+  }
+}
+
 /**
- * The work seen from above: one box per area, one light per terminal. An area lights up when
- * one of its terminals is waiting, so a glance tells who needs attention and where.
+ * The work seen from above: first what waits for the user, then one box per area, the busiest
+ * first, each listing its sessions with their state and recent activity.
  */
 export function BoardView({ onNewSession }: { onNewSession: (storyId?: string) => void }): React.JSX.Element {
   const { sessions, stories, loaded } = useStore();
   const [dialog, setDialog] = useState<{ story?: Story } | null>(null);
+  const [ticketOpen, setTicketOpen] = useState(false);
+  const [mode, setMode] = useState(loadMode);
+  const flow = useFlow(mode === 'timeline' ? 10_000 : 30_000);
   const [sizes, setSizes] = useState(loadAreaSizes);
-  const areas = boardAreas(sessions, stories);
+  const pick = (m: BoardMode): void => {
+    setMode(m);
+    saveMode(m);
+  };
+  const areas = byActivity(boardAreas(sessions, stories));
+  const waiting = sessions.filter((s) => s.status === 'attention' && s.reason !== 'finished').length;
   const resize = (key: string, size: AreaSize | null): void => {
     setSizes((current) => {
       const next = withAreaSize(current, key, size);
@@ -254,28 +343,62 @@ export function BoardView({ onNewSession }: { onNewSession: (storyId?: string) =
 
   return (
     <div className="board">
-      <div className="view-tools">
-        <button type="button" onClick={() => setDialog({})}>
+      <div className="board-head">
+        <p className="board-summary">{boardSummary(sessions.length, stories.length, waiting, flow)}</p>
+        <div className="segmented board-modes" role="group" aria-label="Board view">
+          <button type="button" className={mode === 'areas' ? 'active' : undefined} aria-pressed={mode === 'areas'} onClick={() => pick('areas')}>
+            Areas
+          </button>
+          <button type="button" className={mode === 'timeline' ? 'active' : undefined} aria-pressed={mode === 'timeline'} onClick={() => pick('timeline')}>
+            Timeline
+          </button>
+          <button type="button" title="Every terminal, side by side" onClick={() => setView({ kind: 'grid' })}>
+            Wall
+          </button>
+        </div>
+        <button type="button" onClick={() => setTicketOpen(true)}>
+          Start from ticket
+        </button>
+        <button type="button" className="board-head-quiet" onClick={() => setDialog({})}>
           New area
         </button>
-        <span className="hint">Drag the corner of an area to resize it.</span>
       </div>
-      {loaded && areas.length === 0 && (
-        <p className="empty">Nothing here yet. Create an area for a piece of work, then start sessions in it.</p>
+      <NeedsYouLane />
+      {mode === 'timeline' ? (
+        <TimelineView flow={flow} />
+      ) : (
+        <section className="board-section" aria-labelledby="areas-title">
+          <header className="section-head">
+            <h2 id="areas-title" className="section-name">
+              Areas
+            </h2>
+            <span className="hint">Shift-click sessions to act on several · drag a session between areas · areas with activity float up</span>
+          </header>
+          {loaded && areas.length === 0 && <p className="empty">Nothing here yet. Create an area for a piece of work, then start sessions in it.</p>}
+          <div className="board-areas">
+            {areas.map((a) => (
+              <Area
+                key={a.story?.id ?? ''}
+                area={a}
+                size={sizes[a.story?.id ?? NO_AREA_KEY]}
+                onResize={(size) => resize(a.story?.id ?? NO_AREA_KEY, size)}
+                onNewSession={onNewSession}
+                onEdit={(story) => setDialog({ story })}
+              />
+            ))}
+            <section className="ticket-card" aria-labelledby="ticket-card-title">
+              <h3 id="ticket-card-title">New area for a ticket</h3>
+              <p className="hint">Give a ticket code: ShellYard makes the worktree on its branch and the area, then starts the sessions of a recipe there.</p>
+              <button type="button" onClick={() => setTicketOpen(true)}>
+                Create from ticket
+              </button>
+            </section>
+          </div>
+        </section>
       )}
-      <div className="board-areas">
-        {areas.map((a) => (
-          <Area
-            key={a.story?.id ?? ''}
-            area={a}
-            size={sizes[a.story?.id ?? NO_AREA_KEY]}
-            onResize={(size) => resize(a.story?.id ?? NO_AREA_KEY, size)}
-            onNewSession={onNewSession}
-            onEdit={(story) => setDialog({ story })}
-          />
-        ))}
-      </div>
+      <SelectionBar />
       {dialog && <StoryDialog story={dialog.story} onClose={() => setDialog(null)} />}
+      {ticketOpen && <TicketDialog onClose={() => setTicketOpen(false)} />}
     </div>
   );
 }

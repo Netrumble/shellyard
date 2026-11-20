@@ -5,6 +5,7 @@ import type { ClientMessage, ServerMessage } from '../shared/types.js';
 import { classifyHost, originAllowed, safeEqual, tokenFromProtocols, WS_PROTOCOL } from './auth.js';
 import type { SessionManager } from './session-manager.js';
 import type { ActivityMeter } from './activity.js';
+import type { RuleStore } from './area-rules.js';
 import type { ClosedStore } from './closed.js';
 import type { ScheduleStore } from './schedules.js';
 import type { StoryStore } from './stories.js';
@@ -53,7 +54,7 @@ function parseMessage(raw: string): ClientMessage | null {
 
 export function attachWebSocket(
   server: Server,
-  deps: { manager: SessionManager; stories?: StoryStore; closed?: ClosedStore; schedules?: ScheduleStore; usage?: UsageStore; activity?: ActivityMeter; port: number; pageHost: string; token: string },
+  deps: { manager: SessionManager; stories?: StoryStore; rules?: RuleStore; closed?: ClosedStore; schedules?: ScheduleStore; usage?: UsageStore; activity?: ActivityMeter; port: number; pageHost: string; token: string },
 ): { close(): void } {
   const { manager } = deps;
   const wss = new WebSocketServer({
@@ -74,6 +75,10 @@ export function attachWebSocket(
 
   deps.stories?.onChange((stories) => {
     for (const c of clients) send(c, { t: 'stories', stories });
+  });
+
+  deps.rules?.onChange((rules) => {
+    for (const c of clients) send(c, { t: 'rules', rules });
   });
 
   deps.closed?.onChange((closed) => {
@@ -185,6 +190,7 @@ export function attachWebSocket(
       clients.add(client);
       send(client, { t: 'sessions', sessions: manager.list() });
       if (deps.stories) send(client, { t: 'stories', stories: deps.stories.list() });
+      if (deps.rules) send(client, { t: 'rules', rules: deps.rules.list() });
       if (deps.closed) send(client, { t: 'closed', closed: deps.closed.list() });
       if (deps.schedules) send(client, { t: 'schedules', schedules: deps.schedules.list() });
       if (deps.usage) send(client, { t: 'usage', usage: deps.usage.summary() });

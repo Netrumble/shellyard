@@ -1,20 +1,29 @@
 import { useEffect, useState } from 'react';
 import { titleFor } from './attention.js';
-import { AttentionPanel } from './components/AttentionPanel.js';
+import { AnswerQueue } from './components/AnswerQueue.js';
 import { BoardView } from './components/BoardView.js';
 import { Cluster } from './components/Cluster.js';
+import { CommandPalette } from './components/CommandPalette.js';
 import { ConversationsView } from './components/ConversationsView.js';
+import { DigestBanner, FocusSwitch } from './components/FocusSwitch.js';
 import { SchedulesView } from './components/SchedulesView.js';
+import { SettingsMenu } from './components/SettingsMenu.js';
+import { StoryDialog } from './components/StoryDialog.js';
+import { TicketDialog } from './components/TicketDialog.js';
 import { UsageView } from './components/UsageView.js';
 import { NewSessionDialog } from './components/NewSessionDialog.js';
 import { Sidebar } from './components/Sidebar.js';
 import { SingleTerminal, TerminalsGrid } from './components/TerminalsGrid.js';
+import { paletteKey } from './palette.js';
 import { selectCounts } from './selectors.js';
 import { useStore } from './store.js';
 
 export function App(): React.JSX.Element {
   const { sessions, stories, view, connection } = useStore();
   const [dialog, setDialog] = useState<{ storyId?: string } | null>(null);
+  const [palette, setPalette] = useState(false);
+  const [areaDialog, setAreaDialog] = useState(false);
+  const [ticketDialog, setTicketDialog] = useState(false);
   const filter = view.kind === 'attention' || view.kind === 'grid' ? view.storyFilter : undefined;
   const filterName = filter === undefined ? '' : filter === null ? 'No area' : (stories.find((s) => s.id === filter)?.name ?? '');
   const heading = view.kind === 'board' ? 'Board' : view.kind === 'attention' ? 'Needs attention' : view.kind === 'usage' ? 'Usage' : view.kind === 'conversations' ? 'Conversations' : view.kind === 'schedules' ? 'Schedules' : 'Terminals';
@@ -23,6 +32,20 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     document.title = titleFor(counts.attention);
   }, [counts.attention]);
+
+  // Ctrl K opens the palette, except in a terminal (where it cuts the line); Ctrl Shift K from
+  // anywhere. Caught on the way down, before a terminal sees the key.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      const inTerminal = document.activeElement?.closest('.xterm') != null;
+      if (!paletteKey(e, inTerminal)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setPalette(true);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, []);
 
   if (connection === 'unauthorized') {
     return (
@@ -55,30 +78,23 @@ export function App(): React.JSX.Element {
             {heading}
             {filterName && <span className="heading-filter">, {filterName}</span>}
           </h1>
+          <button type="button" className="palette-open" aria-keyshortcuts="Control+K" onClick={() => setPalette(true)}>
+            <span>Jump to a session, area, ticket or run a command</span>
+            <kbd className="key">Ctrl K</kbd>
+          </button>
           <Cluster />
-          <dl className="counts">
-            <div className={counts.attention > 0 ? 'count-item warn' : 'count-item'}>
-              <dt>Needs attention</dt>
-              <dd>{counts.attention}</dd>
-            </div>
-            <div className="count-item">
-              <dt>Working</dt>
-              <dd>{counts.working}</dd>
-            </div>
-            <div className="count-item">
-              <dt>Idle</dt>
-              <dd>{counts.idle}</dd>
-            </div>
-          </dl>
+          <FocusSwitch />
+          <SettingsMenu />
         </header>
         {connection !== 'open' && (
           <div className="banner" role="status">
             {connection === 'connecting' ? 'Connecting…' : 'Connection lost — reconnecting…'}
           </div>
         )}
+        <DigestBanner />
         <div className="content">
           {view.kind === 'board' && <BoardView onNewSession={(storyId) => setDialog({ storyId })} />}
-          {view.kind === 'attention' && <AttentionPanel storyFilter={view.storyFilter} />}
+          {view.kind === 'attention' && <AnswerQueue storyFilter={view.storyFilter} />}
           {view.kind === 'grid' && <TerminalsGrid storyFilter={view.storyFilter} />}
           {view.kind === 'usage' && <UsageView />}
           {view.kind === 'conversations' && <ConversationsView />}
@@ -87,6 +103,16 @@ export function App(): React.JSX.Element {
         </div>
       </main>
       {dialog && <NewSessionDialog initialStoryId={dialog.storyId} onClose={() => setDialog(null)} />}
+      {areaDialog && <StoryDialog onClose={() => setAreaDialog(false)} />}
+      {ticketDialog && <TicketDialog onClose={() => setTicketDialog(false)} />}
+      {palette && (
+        <CommandPalette
+          onClose={() => setPalette(false)}
+          onNewSession={() => setDialog({})}
+          onNewArea={() => setAreaDialog(true)}
+          onTicket={() => setTicketDialog(true)}
+        />
+      )}
     </div>
   );
 }

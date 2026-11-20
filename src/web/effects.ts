@@ -1,5 +1,3 @@
-import type { SessionInfo } from '../shared/types.js';
-
 /**
  * How much the interface moves. "reduced" keeps colours and values but drops sweeps, pulses
  * and rolling digits; "off" also drops the decorative instruments.
@@ -14,16 +12,6 @@ const SOUND_KEY = 'shellyard-sound';
 export function resolveEffects(saved: string | null, prefersReducedMotion: boolean): EffectsLevel {
   if (saved !== null && LEVELS.includes(saved)) return saved as EffectsLevel;
   return prefersReducedMotion ? 'reduced' : 'full';
-}
-
-export type LampState = 'off' | 'working' | 'blocked' | 'finished' | 'exited';
-
-/** The warning lamp of a session in the header cluster. */
-export function lampState(s: SessionInfo): LampState {
-  if (s.status === 'attention') return s.reason === 'finished' ? 'finished' : 'blocked';
-  if (s.status === 'working' || s.status === 'running') return 'working';
-  if (s.status === 'exited') return 'exited';
-  return 'off';
 }
 
 // These preferences belong to this browser only, so they live in its storage.

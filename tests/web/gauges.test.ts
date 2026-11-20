@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { lampState, resolveEffects } from '../../src/web/effects.js';
-import { durationLabel, formatTokens, formatUsd, limitDisplay, needleAngle, odometerDigits, revLevel, shiftLights, zoneOf } from '../../src/web/gauges.js';
-import { session } from './store.test.js';
+import { resolveEffects } from '../../src/web/effects.js';
+import { durationLabel, formatTokens, formatUsd, limitDisplay, needleAngle, odometerDigits, revLevel, zoneOf } from '../../src/web/gauges.js';
 
 describe('needleAngle', () => {
   it('sweeps 240 degrees, from -120 at zero to +120 at full scale', () => {
@@ -30,24 +29,6 @@ describe('zoneOf', () => {
     expect(zoneOf(89.9)).toBe('warn');
     expect(zoneOf(90)).toBe('danger');
     expect(zoneOf(140)).toBe('danger');
-  });
-});
-
-describe('shiftLights', () => {
-  const lit = (pct: number): string => shiftLights(pct).map((l) => l[0]).join('');
-  it('has ten lights: five green, three amber, two red', () => {
-    expect(shiftLights(100)).toEqual(['green', 'green', 'green', 'green', 'green', 'amber', 'amber', 'amber', 'red', 'red']);
-  });
-  it('lights them in proportion to the percentage', () => {
-    expect(lit(0)).toBe('oooooooooo');
-    expect(lit(9)).toBe('oooooooooo');
-    expect(lit(10)).toBe('gooooooooo');
-    expect(lit(58)).toBe('gggggooooo');
-    expect(lit(75)).toBe('gggggaaooo');
-    expect(lit(95)).toBe('gggggaaaro');
-    expect(lit(100)).toBe('gggggaaarr');
-    expect(lit(400)).toBe('gggggaaarr');
-    expect(lit(Number.NaN)).toBe('oooooooooo');
   });
 });
 
@@ -129,14 +110,5 @@ describe('effects', () => {
     expect(resolveEffects(null, false)).toBe('full');
     expect(resolveEffects(null, true)).toBe('reduced');
     expect(resolveEffects('nonsense', true)).toBe('reduced');
-  });
-  it('maps each session state to a lamp', () => {
-    expect(lampState(session('a', 'idle'))).toBe('off');
-    expect(lampState(session('a', 'running', null, 0, 'shell'))).toBe('working');
-    expect(lampState(session('a', 'working'))).toBe('working');
-    expect(lampState(session('a', 'attention', 'blocked'))).toBe('blocked');
-    expect(lampState(session('a', 'attention', 'maybe-waiting'))).toBe('blocked');
-    expect(lampState(session('a', 'attention', 'finished'))).toBe('finished');
-    expect(lampState(session('a', 'exited'))).toBe('exited');
   });
 });

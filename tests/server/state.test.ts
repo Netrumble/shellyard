@@ -43,6 +43,8 @@ describe('reduce (claude)', () => {
     ['silence', { type: 'silence' }, [idle, blocked, finished, maybe]],
     ['ack', { type: 'ack' }, [idle, working, blocked, maybe]],
     ['idle reminder', { type: 'hook', name: 'Notification', idleReminder: true }, [idle, blocked, finished, maybe]],
+    // The menu may never show (another hook or the permission mode answers): only the notification blocks.
+    ['PermissionRequest', { type: 'hook', name: 'PermissionRequest' }, live],
   ];
   for (const [label, event, froms] of unchanged) {
     for (const from of froms) {

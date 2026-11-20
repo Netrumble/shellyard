@@ -5,6 +5,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { newPageHost, newToken } from './auth.js';
 import { ActivityMeter } from './activity.js';
+import { RuleStore } from './area-rules.js';
+import { RecipeStore } from './recipes.js';
+import { StatusLog } from './status-log.js';
 import { ClosedStore } from './closed.js';
 import { clearServerState, dataDir, loadConfig, readServerState, writeServerState } from './config.js';
 import { openInEditor } from './editor.js';
@@ -16,6 +19,7 @@ import { PromptDelivery } from './prompt-delivery.js';
 import { loadRestorable, restoreSessions, saveRestorable } from './restore.js';
 import { launcherFingerprint, ScheduleStore, type LaunchResult } from './schedules.js';
 import { SessionManager } from './session-manager.js';
+import { SoundStore } from './sounds.js';
 import { StoryStore } from './stories.js';
 import { UsageStore } from './usage.js';
 import type { Schedule } from '../shared/types.js';
@@ -99,6 +103,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
 
   const stories = new StoryStore();
   stories.ensureColors();
+  const sounds = new SoundStore(stories);
   const manager = new SessionManager({
     stories: () => stories.list(),
     ptyFactory: opts.ptyFactory ?? realPtyFactory,
@@ -115,6 +120,10 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   manager.onOutput((id, data) => activity.add(id, data.length));
   // Sessions that end or are closed are remembered, to be opened again from their area.
   const closed = new ClosedStore({ file: join(dataDir(), 'closed.json'), now: Date.now });
+  const rules = new RuleStore({ file: join(dataDir(), 'rules.json'), now: Date.now });
+  const recipes = new RecipeStore({ file: join(dataDir(), 'recipes.json') });
+  const flow = new StatusLog({ now: Date.now, file: join(dataDir(), 'flow.json') });
+  manager.onChange((sessions) => flow.observe(sessions));
   manager.onClosed((entry, sessionId) => closed.add(entry, sessionId));
 
   // Schedules: at its time, a schedule opens a Claude Code session like any other, and its
@@ -226,15 +235,22 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   const stopped = new Promise<void>((r) => (resolveStopped = r));
   let stopping: Promise<void> | null = null;
 
-  const ws = attachWebSocket(server, { manager, stories, closed, schedules, usage, activity, port, pageHost, token });
+  const ws = attachWebSocket(server, { manager, stories, rules, closed, schedules, usage, activity, port, pageHost, token });
   const ticker = setInterval(() => {
     manager.tick();
     schedules.tick();
   }, 1000);
+  // A branch switched or a commit made inside a terminal shows up without a git process.
+  const headTicker = setInterval(() => manager.refreshHeads(), 10_000);
+  // The day totals of the flow are written now and then, and on stopping.
+  const flowTicker = setInterval(() => flow.persist(), 60_000);
+  flowTicker.unref?.();
 
   const stop = (): Promise<void> => {
     stopping ??= (async () => {
       clearInterval(ticker);
+      clearInterval(headTicker);
+      clearInterval(flowTicker);
       clearInterval(deliveryTicker);
       scanning = false;
       clearTimeout(scanTimer);
@@ -242,6 +258,8 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
       saving = false;
       manager.shutdown();
       usage.flush();
+      flow.observe([]);
+      flow.persist();
       ws.close();
       server.closeAllConnections();
       await new Promise<void>((r) => server.close(() => r()));
@@ -259,9 +277,15 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
     createRequestHandler({
       manager,
       stories,
+      sounds,
       usage,
       closed,
       schedules,
+      rules,
+      recipes,
+      flow,
+      // The outcome is visible in the session itself; nothing waits on it here.
+      deliverPrompt: (id, prompt) => delivery.expect(id, prompt, () => undefined),
       openEditor: opts.openEditor ?? openInEditor,
       onClaudeStatus: (id) => delivery.ready(id),
       onPromptSubmitted: (id) => delivery.submitted(id),

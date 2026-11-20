@@ -1,7 +1,7 @@
 export type SessionKind = 'claude' | 'shell';
 export type Status = 'idle' | 'working' | 'attention' | 'running' | 'exited';
 export type Reason = 'blocked' | 'finished' | 'maybe-waiting' | null;
-export type HookName = 'UserPromptSubmit' | 'PreToolUse' | 'PostToolUse' | 'Notification' | 'Stop';
+export type HookName = 'UserPromptSubmit' | 'PreToolUse' | 'PostToolUse' | 'Notification' | 'Stop' | 'PermissionRequest';
 
 export const HOOK_NAMES: readonly HookName[] = [
   'UserPromptSubmit',
@@ -9,7 +9,70 @@ export const HOOK_NAMES: readonly HookName[] = [
   'PostToolUse',
   'Notification',
   'Stop',
+  'PermissionRequest',
 ];
+
+/**
+ * What a blocked session is asking. A permission names the tool and what it would act on
+ * (the command, the file); a question carries Claude Code's message or the question itself.
+ * Any part may be missing: older Claude Code versions say only that they wait.
+ */
+export interface PendingRequest {
+  /** New for every request, so that an answer meant for an earlier one is refused. */
+  id: string;
+  kind: 'permission' | 'question';
+  tool: string | null;
+  detail: string | null;
+  message: string | null;
+  since: number;
+}
+
+/**
+ * How the user answers a permission from outside the terminal. "area" allows it once and adds
+ * a rule, so that the sessions of the same area run such commands without asking again.
+ */
+export type PermissionChoice = 'once' | 'deny' | 'area';
+
+/** A state on the timeline: "needs" blocked on the user, "maybe" possibly waiting. */
+export type FlowState = 'needs' | 'maybe' | 'working' | 'finished' | 'idle';
+
+export interface FlowSegment {
+  state: FlowState;
+  from: number;
+  /** Null while it lasts. */
+  to: number | null;
+}
+
+/** How the day went for the user: what waited on them, and how fast they answered. */
+export interface FlowDay {
+  /** Time Claude sessions spent blocked on the user (permission or question). */
+  blockedMs: number;
+  /** How long the user took to answer each block that ended in an answer. */
+  medianAnswerMs: number | null;
+  answers: number;
+  /** How many sessions worked at once, on average, while any did. */
+  parallel: number | null;
+}
+
+export interface FlowSummary {
+  today: FlowDay;
+  /** The average of the previous seven days that had any activity; null when there were none. */
+  previous: { blockedMs: number; medianAnswerMs: number | null } | null;
+  /** The last hour, per Claude session, oldest segment first. */
+  timeline: { from: number; to: number; sessions: Array<{ id: string; name: string; segments: FlowSegment[] }> };
+}
+
+/** A Bash command the sessions of an area may run without asking (see shared/rules.ts). */
+export interface AreaRule {
+  id: string;
+  storyId: string;
+  /** Words of a command, "*" last for any further arguments: "dotnet test *". */
+  pattern: string;
+  enabled: boolean;
+  createdAt: number;
+  /** How many requests it answered in the last 7 days: interruptions avoided. */
+  weekHits: number;
+}
 
 /**
  * What is behind the text of a terminal: a colour, or an uploaded image (by the name ShellYard
@@ -35,6 +98,29 @@ export interface Story {
   ticket: string;
   cwd: string;
   color: string;
+  /** Id of an uploaded sound played for this area; '' means none. */
+  sound: string;
+}
+
+/** An uploaded sound; id is '<uuid>.<ext>'. */
+export interface SoundFile {
+  id: string;
+  name: string;
+  /** The part of the file that plays, in seconds: from start, to end (null: the end of the file). */
+  start: number;
+  end: number | null;
+}
+
+/** Which sound plays for each event; null means the chime. */
+export interface SoundSettings {
+  blocked: string | null;
+  finished: string | null;
+  maybeWaiting: string | null;
+}
+
+export interface SoundLibrary {
+  sounds: SoundFile[];
+  settings: SoundSettings;
 }
 
 export interface SessionInfo {
@@ -60,6 +146,20 @@ export interface SessionInfo {
   background: TerminalBackground | null;
   /** The font and text size chosen for this terminal; null: the default. */
   font: TerminalFont | null;
+  /** The git worktree the session works in; null outside a repository or before git answered. */
+  git: SessionGit | null;
+  /** For a Claude session, the folder Claude reports it is working in now. */
+  liveCwd: string | null;
+  /** While the session is blocked: what it asks, as far as Claude Code said. */
+  pending: PendingRequest | null;
+}
+
+export interface SessionGit {
+  worktree: string;
+  branch: string | null;
+  head: string;
+  isMain: boolean;
+  worktreeCount: number;
 }
 
 /** A Claude Code conversation saved on disk, which can be continued in a new session. */
@@ -238,9 +338,29 @@ export type ServerMessage =
   | { t: 'sessions'; sessions: SessionInfo[] }
   | { t: 'schedules'; schedules: Schedule[] }
   | { t: 'stories'; stories: Story[] }
+  | { t: 'rules'; rules: AreaRule[] }
   | { t: 'closed'; closed: ClosedSession[] }
   | { t: 'usage'; usage: UsageSummary }
   /** Bytes printed in the last second, per session; sessions printing nothing are absent. */
   | { t: 'activity'; rates: Record<string, number> }
   | { t: 'snapshot'; id: string; data: string }
   | { t: 'output'; id: string; data: string };
+
+export interface Worktree {
+  path: string;
+  /** Null when the worktree is detached. */
+  branch: string | null;
+  /** The checked-out commit, shortened to 7 characters. */
+  head: string;
+  isMain: boolean;
+  locked: boolean;
+  prunable: boolean;
+  /** The entry of a bare repository: no files checked out, nothing to work in. */
+  bare: boolean;
+}
+
+export interface WorktreeListing {
+  /** The worktree the asked folder belongs to. */
+  current: string;
+  worktrees: Worktree[];
+}

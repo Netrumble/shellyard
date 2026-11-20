@@ -49,7 +49,7 @@ describe('websocket', () => {
     server = createServer();
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
     port = (server.address() as AddressInfo).port;
-    mgr = new SessionManager({ ptyFactory: ptys.factory, now: Date.now, config: defaultConfig, port, hookToken: 'h', hookScriptPath: '/h.js', statusScriptPath: '/s.js', builtins: () => [] });
+    mgr = new SessionManager({ ptyFactory: ptys.factory, now: Date.now, config: defaultConfig, port, hookToken: 'h', hookScriptPath: '/h.js', statusScriptPath: '/s.js', builtins: () => [], gitOf: async () => null, headOf: () => null });
     usage = new UsageStore({ now: Date.now, file: join(home.dir(), 'usage.json') });
     activity = new ActivityMeter(Date.now);
     mgr.onOutput((id, data) => activity.add(id, data.length));

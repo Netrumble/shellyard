@@ -1,6 +1,6 @@
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { HOOK_NAMES, type HookName } from '../shared/types.js';
+import { HOOK_NAMES, type HookName, type PendingRequest } from '../shared/types.js';
 import { runDir } from './config.js';
 
 export interface ClaudeLaunchInput {
@@ -13,6 +13,8 @@ export interface ClaudeLaunchInput {
   extraArgs: string[];
   /** A saved conversation to continue; without it a new one is started under sessionId. */
   resumeId?: string | null;
+  /** The id of a new conversation; defaults to sessionId. The settings file and hooks still use sessionId. */
+  conversationId?: string;
 }
 
 export interface ClaudeLaunchOutput {
@@ -46,7 +48,7 @@ export function prepareClaudeLaunch(i: ClaudeLaunchInput): ClaudeLaunchOutput {
     args: [
       '--settings',
       settingsPath,
-      ...(i.resumeId ? ['--resume', i.resumeId] : ['--session-id', i.sessionId]),
+      ...(i.resumeId ? ['--resume', i.resumeId] : ['--session-id', i.conversationId ?? i.sessionId]),
       ...(i.model ? ['--model', i.model] : []),
       ...i.extraArgs,
     ],
@@ -85,6 +87,110 @@ export function parseHookBody(body: unknown): { name: HookName; idleReminder: bo
     else idleReminder = typeof b.message === 'string' && /waiting for your input/i.test(b.message);
   }
   return { name: b.hook_event_name, idleReminder };
+}
+
+/** What a hook says the session is asking for; the id and the time are the manager's. */
+export type HookRequest = Omit<PendingRequest, 'id' | 'since'>;
+
+const DETAIL_MAX = 500;
+
+/** Text fit to show: one piece, no control characters, at most DETAIL_MAX characters. */
+function clean(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  // eslint-disable-next-line no-control-regex
+  const text = v.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '').trim();
+  if (!text) return null;
+  return text.length > DETAIL_MAX ? `${text.slice(0, DETAIL_MAX - 1)}…` : text;
+}
+
+/**
+ * The one thing a tool would act on (the command, the file, the address; else its input in
+ * short) as shown, and whether what is shown is all of it: nothing cut off, nothing removed.
+ */
+function detailWithCompleteness(tool: string | null, input: unknown): { text: string | null; complete: boolean } {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) return { text: null, complete: false };
+  const i = input as Record<string, unknown>;
+  let raw: unknown;
+  const key = ['command', 'file_path', 'notebook_path', 'url', 'query', 'pattern', 'path'].find((k) => k in i);
+  if (key) raw = i[key];
+  else if (tool !== 'Bash') {
+    try {
+      raw = JSON.stringify(i);
+    } catch {
+      raw = undefined;
+    }
+  }
+  const text = clean(raw);
+  return { text, complete: typeof raw === 'string' && text !== null && text === raw.trim() };
+}
+
+/** The first question of an AskUserQuestion input, fit to show. */
+function firstQuestion(input: unknown): string | null {
+  const questions = (input as { questions?: unknown } | null)?.questions;
+  return clean(Array.isArray(questions) ? (questions[0] as { question?: unknown } | undefined)?.question : undefined);
+}
+
+/** Tools whose permission menu opens on "Yes" (allow once) and is refused with Escape. */
+const PLAIN_YES_TOOLS = new Set(['Bash', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch']);
+
+/**
+ * Whether Enter on the menu of this tool means "allow once" and nothing more. MCP tools ask the
+ * same way. Anything else (plan approval, questions, tools ShellYard does not know) is not
+ * answered by pressing keys blind.
+ */
+export function plainYesMenu(tool: string | null): boolean {
+  if (!tool) return false;
+  return PLAIN_YES_TOOLS.has(tool) || /^mcp__[\w-]+__[\w-]+$/.test(tool);
+}
+
+/**
+ * The Bash command of a permission request exactly as Claude Code sent it: what an area rule is
+ * checked against and made from. Never shown as is (see parseHookRequest for that).
+ */
+export function permissionCommand(body: unknown): string | null {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return null;
+  const b = body as Record<string, unknown>;
+  if (b.hook_event_name !== 'PermissionRequest' || b.tool_name !== 'Bash') return null;
+  const command = (b.tool_input as { command?: unknown } | null)?.command;
+  return typeof command === 'string' ? command : null;
+}
+
+/**
+ * Reads what a blocked session asks, from the hooks that say it: a permission request (with
+ * the tool and its input), a notification (its message; the idle reminder asks nothing), or a
+ * question Claude is about to put (PreToolUse of AskUserQuestion). Null for anything else.
+ */
+export function parseHookRequest(body: unknown): HookRequest | null {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return null;
+  const b = body as Record<string, unknown>;
+  const tool = typeof b.tool_name === 'string' ? clean(b.tool_name) : null;
+  switch (b.hook_event_name) {
+    case 'PermissionRequest': {
+      // Only a menu that opens on a plain "Yes" can be answered from outside: anything else
+      // (ExitPlanMode, AskUserQuestion, a tool we do not know) is shown as a question.
+      if (tool === 'AskUserQuestion') return { kind: 'question', tool, detail: firstQuestion(b.tool_input), message: null };
+      const { text, complete } = detailWithCompleteness(tool, b.tool_input);
+      // Allowing from outside is offered only for what the user can read in full: a request cut
+      // short, or with characters that cannot be shown, is answered in the terminal.
+      if (plainYesMenu(tool) && !complete) return { kind: 'question', tool, detail: text, message: 'The full request does not fit here: answer it in the terminal.' };
+      return { kind: plainYesMenu(tool) ? 'permission' : 'question', tool, detail: text, message: null };
+    }
+    case 'Notification': {
+      if (parseHookBody(b)?.idleReminder) return null;
+      const message = clean(b.message);
+      if (b.notification_type === 'permission_prompt' || (message !== null && /permission/i.test(message))) {
+        const named = message ? /permission to use ([\w.-]+)/i.exec(message) : null;
+        const namedTool = named ? named[1]! : null;
+        return { kind: plainYesMenu(namedTool) ? 'permission' : 'question', tool: namedTool, detail: null, message };
+      }
+      return { kind: 'question', tool: null, detail: null, message };
+    }
+    case 'PreToolUse':
+      if (tool !== 'AskUserQuestion') return null;
+      return { kind: 'question', tool, detail: firstQuestion(b.tool_input), message: null };
+    default:
+      return null;
+  }
 }
 
 /**

@@ -20,6 +20,17 @@ const profile: Profile = { id: 'p1', name: 'Node', kind: 'shell', command: node,
 describe('StoryStore', () => {
   const home = useTempHome();
 
+  it('reorders, saves and emits', () => {
+    const store = new StoryStore();
+    const [a, b, c] = ['A', 'B', 'C'].map((name) => store.create({ name }));
+    const seen: string[][] = [];
+    store.onChange((s) => seen.push(s.map((x) => x.name)));
+    const out = store.reorder([c!.id, 'nope', a!.id, c!.id]);
+    expect(out.map((x) => x.name)).toEqual(['C', 'A', 'B']);
+    expect(new StoryStore().list().map((x) => x.id)).toEqual([c!.id, a!.id, b!.id]);
+    expect(seen).toEqual([['C', 'A', 'B']]);
+  });
+
   it('starts empty', () => {
     expect(new StoryStore().list()).toEqual([]);
   });
@@ -27,7 +38,7 @@ describe('StoryStore', () => {
   it('creates a story with an id and trimmed fields, and keeps it on disk', () => {
     const store = new StoryStore();
     const s = store.create({ name: '  Payroll export ', ticket: ' HCM-1234 ', cwd: home.dir(), color: '#ff0000' });
-    expect(s).toEqual({ id: s.id, name: 'Payroll export', ticket: 'HCM-1234', cwd: home.dir(), color: '#ff0000' });
+    expect(s).toEqual({ id: s.id, name: 'Payroll export', ticket: 'HCM-1234', cwd: home.dir(), color: '#ff0000', sound: '' });
     expect(s.id).toMatch(/^story-/);
     expect(new StoryStore().list()).toEqual([s]);
   });
@@ -85,7 +96,7 @@ describe('StoryStore', () => {
   });
 
   it('does not disturb profiles or other settings when it saves', () => {
-    saveConfig({ profiles: [profile], models: ['opus'], silenceMs: 9000, stories: [], restoreSessions: true });
+    saveConfig({ profiles: [profile], models: ['opus'], silenceMs: 9000, stories: [], restoreSessions: true, profileOrder: [], soundFiles: [], sounds: { blocked: null, finished: null, maybeWaiting: null } });
     new StoryStore().create({ name: 'A' });
     const { config } = loadConfig();
     expect(config.profiles).toEqual([profile]);
@@ -111,7 +122,7 @@ describe('stories in config.json', () => {
       join(home.dir(), 'config.json'),
       JSON.stringify({ stories: [{ id: 's1', name: 'Good', ticket: 5 }, { id: 's2' }, { name: 'No id' }, 'text', null, { id: 's3', name: '  ' }] }),
     );
-    expect(loadConfig().config.stories).toEqual([{ id: 's1', name: 'Good', ticket: '', cwd: '', color: '' }]);
+    expect(loadConfig().config.stories).toEqual([{ id: 's1', name: 'Good', ticket: '', cwd: '', color: '', sound: '' }]);
   });
 
   it('keeps only the first of two entries with the same id', () => {
@@ -146,6 +157,8 @@ describe('sessions and stories', () => {
       hookScriptPath: '/h.js', statusScriptPath: '/s.js',
       builtins: () => [profile],
       stories: () => store.list(),
+      gitOf: async () => null,
+      headOf: () => null,
     });
   });
 
@@ -231,7 +244,7 @@ describe('stories over http and websocket', () => {
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
     port = (server.address() as AddressInfo).port;
     base = `http://127.0.0.1:${port}`;
-    mgr = new SessionManager({ ptyFactory: ptys.factory, now: Date.now, config: () => loadConfig().config, port, hookToken: 'h', hookScriptPath: '/h.js', statusScriptPath: '/s.js', builtins: () => [profile], stories: () => store.list() });
+    mgr = new SessionManager({ ptyFactory: ptys.factory, now: Date.now, config: () => loadConfig().config, port, hookToken: 'h', hookScriptPath: '/h.js', statusScriptPath: '/s.js', builtins: () => [profile], stories: () => store.list(), gitOf: async () => null, headOf: () => null });
     server.on('request', createRequestHandler({ manager: mgr, stories: store, usage: new UsageStore({ now: Date.now, file: join(home.dir(), 'usage.json') }), closed: new ClosedStore({ now: Date.now, file: join(home.dir(), 'closed.json') }), port, pageHost: PAGE, token: TOKEN, hookToken: 'h'.repeat(64), webDir: home.dir(), onShutdown: () => undefined }));
     wsHandle = attachWebSocket(server, { manager: mgr, stories: store, port, pageHost: PAGE, token: TOKEN });
   });

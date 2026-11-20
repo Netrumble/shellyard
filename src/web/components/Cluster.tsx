@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react';
-import type { SessionInfo } from '../../shared/types.js';
-import { lampState, type EffectsLevel } from '../effects.js';
-import { limitDisplay, revLevel, shiftLights, zoneOf } from '../gauges.js';
-import { statusLabel } from '../selectors.js';
-import { setEffects, setSound, setTheme, setView, useStore } from '../store.js';
-import type { ThemeChoice } from '../theme.js';
+import { glyphCounts } from '../board.js';
+import { limitDisplay, revLevel, zoneOf } from '../gauges.js';
+import type { Glyph } from '../status-glyph.js';
+import { setView, useStore, type View } from '../store.js';
 import { Dial } from './Dial.js';
+import { GlyphMark } from './StatusGlyph.js';
 
 /** The current time, refreshed often enough for countdowns shown to the minute. */
 export function useNow(everyMs = 10_000): number {
@@ -32,30 +31,59 @@ export function Tachometer({ sessionId }: { sessionId: string }): React.JSX.Elem
   );
 }
 
-/** The row of lights that fills as the 5-hour limit is used up. */
-function ShiftLights({ pct, known }: { pct: number; known: boolean }): React.JSX.Element {
-  const { effects } = useStore();
-  const lights = shiftLights(known ? pct : 0);
-  const urgent = known && pct >= 90 && effects === 'full';
+/** The two plan limits, weekly first, then the 5-hour one on the yellow face. Opens usage. */
+function Limits(): React.JSX.Element {
+  const { usage, effects } = useStore();
+  const now = useNow();
+  const limits = usage?.limits ?? { fiveHour: null, sevenDay: null, readAt: null };
+  const five = limitDisplay(limits.fiveHour, limits.readAt, now);
+  const seven = limitDisplay(limits.sevenDay, limits.readAt, now);
+  const text = (d: typeof five): string => (d.state === 'ok' ? `${d.pct}%` : 'no data');
   return (
-    <div className={urgent ? 'shift-lights urgent' : 'shift-lights'} aria-hidden="true">
-      {lights.map((l, i) => (
-        <span key={i} className={`shift-light shift-${l}`} />
-      ))}
-    </div>
+    <button
+      type="button"
+      className={five.state === 'ok' || seven.state === 'ok' ? 'cluster-limits' : 'cluster-limits stale'}
+      title={five.age ? `Plan limits, read ${five.age}. Open usage` : 'Plan limits: no reading yet. Open usage'}
+      onClick={() => setView({ kind: 'usage' })}
+    >
+      <span className="cluster-dials">
+        {effects !== 'off' && <Dial compact size={30} pct={seven.pct} dead={seven.state !== 'ok'} zone={zoneOf(seven.pct)} label="Weekly limit" valueText={text(seven)} />}
+        <span className={`cluster-reading zone-text-${seven.state === 'ok' ? zoneOf(seven.pct) : 'none'}`}>
+          <span className="cluster-caption">Weekly</span>
+          <span className="cluster-figure">{text(seven)}</span>
+        </span>
+        {effects !== 'off' && <Dial compact hero size={30} pct={five.pct} dead={five.state !== 'ok'} zone={zoneOf(five.pct)} label="5-hour limit" valueText={text(five)} />}
+        <span className={`cluster-reading zone-text-${five.state === 'ok' ? zoneOf(five.pct) : 'none'}`}>
+          <span className="cluster-caption">5-hour</span>
+          <span className="cluster-figure">{text(five)}</span>
+        </span>
+      </span>
+    </button>
   );
 }
 
-/** One lamp per session, as on a dashboard: a glance tells which ones want something. */
-function Lamps({ sessions }: { sessions: SessionInfo[] }): React.JSX.Element | null {
-  if (sessions.length === 0) return null;
+const CHIPS: Array<{ glyph: Exclude<Glyph, 'maybe' | 'exited'>; one: string; many: string; view: View; always: boolean }> = [
+  { glyph: 'needs', one: 'needs you', many: 'need you', view: { kind: 'attention' }, always: true },
+  { glyph: 'finished', one: 'finished', many: 'finished', view: { kind: 'attention' }, always: false },
+  { glyph: 'working', one: 'working', many: 'working', view: { kind: 'grid' }, always: true },
+  { glyph: 'idle', one: 'idle', many: 'idle', view: { kind: 'grid' }, always: true },
+];
+
+/** How many sessions are in each state, as chips that lead to them. "Finished" only when there are some. */
+function StatusChips(): React.JSX.Element {
+  const { sessions, activity } = useStore();
+  const counts = glyphCounts(sessions, activity);
   return (
-    <ul className="lamps" aria-label="Sessions">
-      {sessions.map((s) => {
-        const text = `${s.name}: ${statusLabel(s)}`;
+    <ul className="chips" aria-label="Sessions by state">
+      {CHIPS.filter((c) => c.always || counts[c.glyph] > 0).map((c) => {
+        const n = counts[c.glyph];
+        const label = `${n} ${n === 1 ? c.one : c.many}`;
         return (
-          <li key={s.id}>
-            <button type="button" className={`lamp lamp-${lampState(s)}`} title={text} aria-label={text} onClick={() => setView({ kind: 'single', id: s.id })} />
+          <li key={c.glyph}>
+            <button type="button" className={`chip chip-${c.glyph}${n > 0 ? ' chip-lit' : ''}`} onClick={() => setView(c.view)}>
+              <GlyphMark glyph={c.glyph} size={12} />
+              {label}
+            </button>
           </li>
         );
       })}
@@ -63,70 +91,12 @@ function Lamps({ sessions }: { sessions: SessionInfo[] }): React.JSX.Element | n
   );
 }
 
-function EffectsMenu(): React.JSX.Element {
-  const { effects, sound, themeChoice } = useStore();
-  return (
-    <div className="effects-menu">
-      <label>
-        <span>Theme</span>
-        <select value={themeChoice} onChange={(e) => setTheme(e.target.value as ThemeChoice)}>
-          <option value="system">System</option>
-          <option value="light">Light</option>
-          <option value="dark">Dark</option>
-          <option value="talentia">Talentia</option>
-        </select>
-      </label>
-      <label>
-        <span>Effects</span>
-        <select value={effects} onChange={(e) => setEffects(e.target.value as EffectsLevel)}>
-          <option value="full">Full</option>
-          <option value="reduced">Reduced</option>
-          <option value="off">Off</option>
-        </select>
-      </label>
-      <label className="check" title="A soft chime when a session starts waiting for you">
-        <input type="checkbox" checked={sound} onChange={(e) => setSound(e.target.checked)} />
-        <span>Sound</span>
-      </label>
-    </div>
-  );
-}
-
-/** The instruments in the header, present on every view. */
+/** The instruments in the header, present on every view: plan limits and sessions by state. */
 export function Cluster(): React.JSX.Element {
-  const { usage, sessions, effects } = useStore();
-  const now = useNow();
-  const limits = usage?.limits ?? { fiveHour: null, sevenDay: null, readAt: null };
-  const five = limitDisplay(limits.fiveHour, limits.readAt, now);
-  const seven = limitDisplay(limits.sevenDay, limits.readAt, now);
-  const text = (d: typeof five): string => (d.state === 'ok' ? `${d.pct}%` : 'no data');
-
   return (
     <div className="cluster">
-      <button
-        type="button"
-        className={five.state === 'ok' || seven.state === 'ok' ? 'cluster-limits' : 'cluster-limits stale'}
-        title={five.age ? `Plan limits, read ${five.age}. Open usage` : 'Plan limits: no reading yet. Open usage'}
-        onClick={() => setView({ kind: 'usage' })}
-      >
-        {effects !== 'off' && <ShiftLights pct={five.pct} known={five.state === 'ok'} />}
-        {/* As on the usage page: weekly first, then the 5-hour limit on the yellow face. */}
-        <span className="cluster-dials">
-          {effects !== 'off' && <Dial compact size={34} pct={seven.pct} dead={seven.state !== 'ok'} zone={zoneOf(seven.pct)} label="Weekly limit" valueText={text(seven)} />}
-          <span className={`cluster-reading zone-text-${seven.state === 'ok' ? zoneOf(seven.pct) : 'none'}`}>
-            <span className="cluster-caption">Weekly</span>
-            <span className="cluster-figure">{text(seven)}</span>
-          </span>
-          {effects !== 'off' && <Dial compact hero size={34} pct={five.pct} dead={five.state !== 'ok'} zone={zoneOf(five.pct)} label="5-hour limit" valueText={text(five)} />}
-          <span className={`cluster-reading zone-text-${five.state === 'ok' ? zoneOf(five.pct) : 'none'}`}>
-            <span className="cluster-caption">5-hour</span>
-            <span className="cluster-figure">{text(five)}</span>
-          </span>
-        </span>
-        {five.age && <span className="cluster-age">read {five.age}</span>}
-      </button>
-      <Lamps sessions={sessions} />
-      <EffectsMenu />
+      <Limits />
+      <StatusChips />
     </div>
   );
 }

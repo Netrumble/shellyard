@@ -1,73 +1,90 @@
-import { useState } from 'react';
-import type { Profile, SessionInfo, Story } from '../../shared/types.js';
+import { useEffect, useRef, useState } from 'react';
+import type { Profile, Schedule, Story } from '../../shared/types.js';
 import { api } from '../api.js';
+import { LAUNCHER_DRAG } from '../drag.js';
+import { dropLauncher } from '../drag-actions.js';
 import { requestPermissionOnce } from '../notify.js';
-import { groupByStory, selectCounts } from '../selectors.js';
+import { selectCounts } from '../selectors.js';
+import { isTypingTarget, launcherIndex } from '../shortcuts.js';
 import { setView, useStore } from '../store.js';
-import { Tachometer } from './Cluster.js';
-import { ColorDot, SessionActions, StatusBadge } from './SessionBits.js';
+import { dragSource, useDropTarget } from './drag-target.js';
+import { LAUNCHERS_FOLDED_KEY, SESSIONS_FOLDED_KEY, SIDEBAR_FOLDED_KEY, readFlag, writeFlag } from '../sidebar-memory.js';
+import { SidebarSessions } from './SidebarSessions.js';
+import {
+  AttentionIcon,
+  BoardIcon,
+  ConversationsIcon,
+  LocalIcon,
+  NewAreaIcon,
+  NewSessionIcon,
+  SchedulesIcon,
+  SidebarIcon,
+  TerminalsIcon,
+  UsageIcon,
+} from './icons.js';
+import { ColorDot } from './SessionBits.js';
 import { ProfileDialog } from './ProfileDialog.js';
 import { StoryDialog } from './StoryDialog.js';
 
-const COLLAPSED_KEY = 'shellyard-collapsed-stories';
-
-/** Which stories are folded is a convenience of this browser, not shared state. */
-function readCollapsed(): Set<string> {
-  try {
-    const raw: unknown = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '[]');
-    return new Set(Array.isArray(raw) ? raw.filter((x): x is string => typeof x === 'string') : []);
-  } catch {
-    return new Set();
-  }
-}
-
-function writeCollapsed(ids: Set<string>): void {
-  try {
-    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...ids]));
-  } catch {
-    // Not remembered next time; nothing else depends on it.
-  }
-}
-
 const report = (e: unknown): void => window.alert((e as Error).message);
 
-function SessionRow({ session, selected }: { session: SessionInfo; selected: boolean }): React.JSX.Element {
+/** Joins the class names that are set. */
+const classes = (...names: Array<string | false | null | undefined>): string | undefined => names.filter(Boolean).join(' ') || undefined;
+
+/** Launchers past the ninth have no shortcut. */
+const SHORTCUTS = 9;
+
+/** A launcher: click (or Alt and its number) to start it, drag to reorder the launchers. */
+function LauncherRow({ profile: p, shortcut, onLaunch, onEdit }: { profile: Profile; shortcut: number | null; onLaunch: (p: Profile) => void; onEdit: (id: string) => void }): React.JSX.Element {
+  const { dropClass, dropProps } = useDropTarget({ [LAUNCHER_DRAG]: { placed: true, targetId: p.id, onDrop: (id, place) => dropLauncher(id, p.id, place) } });
   return (
-    <li className={selected ? 'selected' : undefined}>
-      <button type="button" className="session-link" onClick={() => setView({ kind: 'single', id: session.id })}>
-        <span className="row-top">
-          <ColorDot color={session.color} />
-          <span className="session-name">{session.name}</span>
-          {session.status !== 'exited' && <Tachometer sessionId={session.id} />}
-        </span>
-        <span className="row-sub">
-          <StatusBadge session={session} />
-          {session.model && <span className="model">{session.model}</span>}
-        </span>
+    <li className={classes('profile-row', dropClass)} {...dropProps}>
+      <button
+        type="button"
+        className="profile"
+        title={`Start ${p.name}${shortcut ? ` (Alt ${shortcut})` : ''}`}
+        aria-keyshortcuts={shortcut ? `Alt+${shortcut}` : undefined}
+        {...dragSource(LAUNCHER_DRAG, p.id)}
+        onClick={() => onLaunch(p)}
+      >
+        <ColorDot color={p.color} />
+        <span className="profile-name">{p.name}</span>
+        {shortcut && <kbd className="shortcut">Alt {shortcut}</kbd>}
       </button>
-      <SessionActions session={session} />
+      <button type="button" className="icon" title="Edit this launcher: name, start folder and terminal look" aria-label={`Edit the launcher ${p.name}`} onClick={() => onEdit(p.id)}>
+        ✎
+      </button>
     </li>
   );
 }
 
+/** "next 18:00" for a run within a day, else how many schedules are on; null when none is. */
+function scheduleNote(schedules: Schedule[], now: number): string | null {
+  const on = schedules.filter((s) => s.enabled);
+  if (on.length === 0) return null;
+  const next = Math.min(...on.map((s) => s.nextRunAt ?? Number.POSITIVE_INFINITY));
+  if (Number.isFinite(next) && next - now < 24 * 3_600_000) {
+    return `next ${new Date(next).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  }
+  return `${on.length} on`;
+}
+
+/** Where to go, the sessions under their areas, and what to start. */
 export function Sidebar({ onNewSession }: { onNewSession: (storyId?: string) => void }): React.JSX.Element {
-  const { sessions, stories, schedules, view, meta } = useStore();
+  const { sessions, schedules, view, meta } = useStore();
   const counts = selectCounts(sessions);
-  const [collapsed, setCollapsed] = useState(readCollapsed);
+  const [railFolded, setRailFolded] = useState(() => readFlag(SIDEBAR_FOLDED_KEY));
+  const [sessionsFolded, setSessionsFolded] = useState(() => readFlag(SESSIONS_FOLDED_KEY));
+  const [launchersFolded, setLaunchersFolded] = useState(() => readFlag(LAUNCHERS_FOLDED_KEY));
   const [storyDialog, setStoryDialog] = useState<{ story?: Story } | null>(null);
   const [profileDialog, setProfileDialog] = useState<string | null>(null);
   const editedProfile = meta.profiles.find((p) => p.id === profileDialog);
   const [creatingProfile, setCreatingProfile] = useState(false);
-  const groups = groupByStory(sessions, stories);
-  const selectedId = view.kind === 'single' ? view.id : null;
   const storyFilter = view.kind === 'grid' ? view.storyFilter : undefined;
 
-  const toggle = (id: string): void => {
-    const next = new Set(collapsed);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setCollapsed(next);
-    writeCollapsed(next);
+  const flip = (current: boolean, set: (v: boolean) => void, key: string): void => {
+    set(!current);
+    writeFlag(key, !current);
   };
 
   const launch = (p: Profile): void => {
@@ -78,136 +95,118 @@ export function Sidebar({ onNewSession }: { onNewSession: (storyId?: string) => 
       .catch(report);
   };
 
-  const removeStory = (story: Story, own: SessionInfo[]): void => {
-    const running = own.filter((s) => s.status !== 'exited').length;
-    const question =
-      running > 0
-        ? `Delete the area "${story.name}"? Its ${running} running session${running === 1 ? '' : 's'} will keep running, with no area.`
-        : `Delete the area "${story.name}"?`;
-    if (window.confirm(question)) api.deleteStory(story.id).catch(report);
-  };
+  // Alt+1 to Alt+9 start the launchers, unless the keys are being typed somewhere.
+  const latest = useRef({ profiles: meta.profiles, launch });
+  latest.current = { profiles: meta.profiles, launch };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      const { profiles, launch: start } = latest.current;
+      const i = launcherIndex(e, Math.min(profiles.length, SHORTCUTS), isTypingTarget(document.activeElement));
+      if (i === null) return;
+      e.preventDefault();
+      start(profiles[i]!);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
-  const activeSchedules = schedules.filter((s) => s.enabled).length;
+  const schedulesNote = scheduleNote(schedules, Date.now());
+  const nav = (active: boolean): string => (active ? 'nav active' : 'nav');
 
   return (
-    <aside className="sidebar">
-      <div className="brand">ShellYard</div>
+    <aside className={railFolded ? 'sidebar folded' : 'sidebar'}>
+      <div className="sidebar-top">
+        <button
+          type="button"
+          className="icon sidebar-toggle"
+          aria-expanded={!railFolded}
+          title={railFolded ? 'Unfold the sidebar' : 'Fold the sidebar'}
+          aria-label={railFolded ? 'Unfold the sidebar' : 'Fold the sidebar'}
+          onClick={() => flip(railFolded, setRailFolded, SIDEBAR_FOLDED_KEY)}
+        >
+          <SidebarIcon size={18} />
+        </button>
+        <div className="brand">ShellYard</div>
+      </div>
 
       <nav>
-        <button type="button" className={view.kind === 'board' ? 'nav active' : 'nav'} onClick={() => setView({ kind: 'board' })}>
-          <span>Board</span>
+        <button type="button" title="Board" aria-label="Board" aria-current={view.kind === 'board' ? 'page' : undefined} className={nav(view.kind === 'board')} onClick={() => setView({ kind: 'board' })}>
+          <BoardIcon />
+          <span className="nav-label">Board</span>
         </button>
-        <button type="button" className={view.kind === 'attention' ? 'nav active' : 'nav'} onClick={() => setView({ kind: 'attention' })}>
-          <span>Needs attention</span>
+        <button type="button" title="Needs attention" aria-label={counts.attention > 0 ? `Needs attention, ${counts.attention}` : 'Needs attention'} aria-current={view.kind === 'attention' ? 'page' : undefined} className={nav(view.kind === 'attention')} onClick={() => setView({ kind: 'attention' })}>
+          <AttentionIcon />
+          <span className="nav-label">Needs attention</span>
           {counts.attention > 0 && <span className="count">{counts.attention}</span>}
         </button>
-        <button type="button" className={view.kind === 'grid' && storyFilter === undefined ? 'nav active' : 'nav'} onClick={() => setView({ kind: 'grid' })}>
-          <span>Terminals</span>
+        <button type="button" title="Terminals" aria-label={`Terminals, ${sessions.length}`} aria-current={view.kind === 'grid' && storyFilter === undefined ? 'page' : undefined} className={nav(view.kind === 'grid' && storyFilter === undefined)} onClick={() => setView({ kind: 'grid' })}>
+          <TerminalsIcon />
+          <span className="nav-label">Terminals</span>
           <span className="count quiet">{sessions.length}</span>
         </button>
-        <button type="button" className={view.kind === 'conversations' ? 'nav active' : 'nav'} onClick={() => setView({ kind: 'conversations' })}>
-          <span>Conversations</span>
+        <button type="button" title="Conversations" aria-label="Conversations" aria-current={view.kind === 'conversations' ? 'page' : undefined} className={nav(view.kind === 'conversations')} onClick={() => setView({ kind: 'conversations' })}>
+          <ConversationsIcon />
+          <span className="nav-label">Conversations</span>
         </button>
-        <button type="button" className={view.kind === 'schedules' ? 'nav active' : 'nav'} onClick={() => setView({ kind: 'schedules' })}>
-          <span>Schedules</span>
-          {activeSchedules > 0 && <span className="count quiet">{activeSchedules}</span>}
+        <button type="button" title="Schedules" aria-label={schedulesNote ? `Schedules, ${schedulesNote}` : 'Schedules'} aria-current={view.kind === 'schedules' ? 'page' : undefined} className={nav(view.kind === 'schedules')} onClick={() => setView({ kind: 'schedules' })}>
+          <SchedulesIcon />
+          <span className="nav-label">Schedules</span>
+          {schedulesNote && <span className="count quiet note">{schedulesNote}</span>}
         </button>
-        <button type="button" className={view.kind === 'usage' ? 'nav active' : 'nav'} onClick={() => setView({ kind: 'usage' })}>
-          <span>Usage</span>
+        <button type="button" title="Usage" aria-label="Usage" aria-current={view.kind === 'usage' ? 'page' : undefined} className={nav(view.kind === 'usage')} onClick={() => setView({ kind: 'usage' })}>
+          <UsageIcon />
+          <span className="nav-label">Usage</span>
         </button>
       </nav>
 
       <div className="new-buttons">
-        <button type="button" className="start" onClick={() => onNewSession()}>
-          <span className="start-ring" aria-hidden="true">
+        <button type="button" className="start" title="New session" aria-label="New session" onClick={() => onNewSession()}>
+          <span className="start-ring start-full" aria-hidden="true">
             <span className="start-core" />
           </span>
-          <span>New session</span>
+          <span className="start-compact">
+            <NewSessionIcon />
+          </span>
+          <span className="start-label">New session</span>
         </button>
         <button type="button" className="new-story" onClick={() => setStoryDialog({})}>
-          New area
+          <NewAreaIcon />
+          <span>New area</span>
         </button>
       </div>
 
-      <h2>Sessions</h2>
-      {groups.length === 0 && <p className="hint">No sessions yet.</p>}
-      {groups.map((g) => {
-        const key = g.story?.id ?? '';
-        const folded = g.story !== null && collapsed.has(g.story.id);
-        const active = view.kind === 'grid' && storyFilter === (g.story ? g.story.id : null);
-        return (
-          <section key={key} className="story">
-            {g.story ? (
-              <header className={active ? 'story-header active' : 'story-header'}>
-                <button type="button" className="icon fold" aria-expanded={!folded} aria-label={`${folded ? 'Expand' : 'Collapse'} ${g.story.name}`} onClick={() => toggle(g.story!.id)}>
-                  {folded ? '▸' : '▾'}
-                </button>
-                <button type="button" className="story-name" title="Show this area's terminals" onClick={() => setView({ kind: 'grid', storyFilter: g.story!.id })}>
-                  {g.story.color && <ColorDot color={g.story.color} />}
-                  <span className="session-name">{g.story.name}</span>
-                  {g.story.ticket && <span className="model">{g.story.ticket}</span>}
-                </button>
-                {g.attention > 0 && (
-                  <span className="count" title={`${g.attention} waiting for you`}>
-                    {g.attention}
-                  </span>
-                )}
-                <span className="actions">
-                  <button type="button" className="icon" title="New session in this area" aria-label={`New session in ${g.story.name}`} onClick={() => onNewSession(g.story!.id)}>
-                    +
-                  </button>
-                  <button type="button" className="icon" title="Rename or edit this area" aria-label={`Edit ${g.story.name}`} onClick={() => setStoryDialog({ story: g.story! })}>
-                    ✎
-                  </button>
-                  <button type="button" className="icon" title="Delete area" aria-label={`Delete ${g.story.name}`} onClick={() => removeStory(g.story!, g.sessions)}>
-                    ✕
-                  </button>
-                </span>
-              </header>
-            ) : (
-              stories.length > 0 && (
-                <header className={active ? 'story-header active' : 'story-header'}>
-                  <button type="button" className="story-name loose" onClick={() => setView({ kind: 'grid', storyFilter: null })}>
-                    <span className="session-name">No area</span>
-                  </button>
-                  {g.attention > 0 && <span className="count">{g.attention}</span>}
-                </header>
-              )
-            )}
-            {!folded && (
-              <ul className={g.story ? 'session-list nested' : 'session-list'}>
-                {g.sessions.map((s) => (
-                  <SessionRow key={s.id} session={s} selected={selectedId === s.id} />
-                ))}
-                {g.story && g.sessions.length === 0 && <li className="hint empty-story">No sessions</li>}
-              </ul>
-            )}
-          </section>
-        );
-      })}
+      <h2 className="section-title">
+        <button type="button" className="section-toggle" aria-expanded={!sessionsFolded} onClick={() => flip(sessionsFolded, setSessionsFolded, SESSIONS_FOLDED_KEY)}>
+          <span aria-hidden="true">{sessionsFolded ? '▸' : '▾'}</span> Sessions
+        </button>
+      </h2>
+      {!sessionsFolded && <SidebarSessions onNewSession={onNewSession} onEditArea={(story) => setStoryDialog({ story })} />}
 
-      <h2>Launchers</h2>
-      {meta.profiles.length === 0 && <p className="hint">No launchers found.</p>}
-      <ul className="profile-list">
-        {meta.profiles.map((p) => (
-          <li key={p.id} className="profile-row">
-            <button type="button" className="profile" title={`Start ${p.name}`} onClick={() => launch(p)}>
-              <ColorDot color={p.color} />
-              <span>{p.name}</span>
-              <span className="go" aria-hidden="true">
-                ▸
-              </span>
-            </button>
-            <button type="button" className="icon" title="Edit this launcher: name, start folder and terminal look" aria-label={`Edit the launcher ${p.name}`} onClick={() => setProfileDialog(p.id)}>
-              ✎
-            </button>
-          </li>
-        ))}
-      </ul>
-      <button type="button" className="icon add-launcher" title="New launcher" aria-label="New launcher" onClick={() => setCreatingProfile(true)}>
-        +
-      </button>
+      <h2 className="section-title">
+        <button type="button" className="section-toggle" aria-expanded={!launchersFolded} onClick={() => flip(launchersFolded, setLaunchersFolded, LAUNCHERS_FOLDED_KEY)}>
+          <span aria-hidden="true">{launchersFolded ? '▸' : '▾'}</span> Launchers
+        </button>
+      </h2>
+      {!launchersFolded && (
+        <div className="launchers-section">
+          {meta.profiles.length === 0 && <p className="hint">No launchers found.</p>}
+          <ul className="profile-list">
+            {meta.profiles.map((p, i) => (
+              <LauncherRow key={p.id} profile={p} shortcut={i < SHORTCUTS ? i + 1 : null} onLaunch={launch} onEdit={setProfileDialog} />
+            ))}
+          </ul>
+          <button type="button" className="icon add-launcher" title="New launcher" aria-label="New launcher" onClick={() => setCreatingProfile(true)}>
+            +
+          </button>
+        </div>
+      )}
 
+      <div className="local-note">
+        <p className="local-title">
+          <LocalIcon size={14} /> Local only
+        </p>
+        <p className="hint">127.0.0.1 · a new token at every start · ShellYard sends nothing out</p>
+      </div>
       <p className="powered-by">Powered by Talentia Software</p>
 
       {storyDialog && <StoryDialog story={storyDialog.story} onClose={() => setStoryDialog(null)} />}

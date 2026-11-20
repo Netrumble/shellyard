@@ -43,6 +43,11 @@ export function reduce(kind: SessionKind, s: StatusState, e: StatusEvent): Statu
           return WORKING;
         case 'Stop':
           return { status: 'attention', reason: 'finished' };
+        case 'PermissionRequest':
+          // Asked before the menu shows, and before other hooks or the permission mode have had
+          // their say: it may never reach the user. The notification that the menu is open
+          // (Notification, permission_prompt) is what blocks the session.
+          return s;
         case 'Notification':
           // An idle reminder only matters if we still believed Claude was working.
           if (e.idleReminder && s.status !== 'working') return s;

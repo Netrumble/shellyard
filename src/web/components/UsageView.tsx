@@ -4,6 +4,7 @@ import { formatTokens, formatUsd, limitDisplay, zoneOf, type LimitDisplay } from
 import { useStore } from '../store.js';
 import { useNow } from './Cluster.js';
 import { Dial } from './Dial.js';
+import { FlowCards } from './FlowCards.js';
 import { Odometer } from './Odometer.js';
 
 type PeriodKey = 'today' | 'week' | 'month';
@@ -88,6 +89,8 @@ export function UsageView(): React.JSX.Element {
           </figcaption>
         </figure>
       </section>
+
+      <FlowCards />
 
       <section className="usage-breakdown" aria-label="Cost breakdown">
         <div className="usage-tools">

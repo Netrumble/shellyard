@@ -94,4 +94,47 @@ describe('hook forwarder', () => {
     const result = await runHook({ SHELLYARD_PORT: '1', SHELLYARD_SESSION_ID: 'abc', SHELLYARD_HOOK_TOKEN: 't' }, 'not json at all');
     expect(result).toMatchObject({ code: 0, stdout: '', stderr: '' });
   });
+
+  /** A server that answers every hook with this status and body. */
+  async function answering(status: number, body: string): Promise<{ port: number; close: () => void }> {
+    const server = createServer((_req, res) => {
+      res.writeHead(status, { 'content-type': 'application/json' }).end(body);
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    return { port: (server.address() as AddressInfo).port, close: () => server.close() };
+  }
+  const env = (port: number) => ({ SHELLYARD_PORT: String(port), SHELLYARD_SESSION_ID: 'abc', SHELLYARD_HOOK_TOKEN: 't' });
+  const allow = JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } });
+  const permission = '{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"dotnet test"}}';
+
+  it('prints the allow an area rule gave a permission request, for Claude Code to read', async () => {
+    const s = await answering(200, allow);
+    try {
+      const result = await runHook(env(s.port), permission);
+      expect(result).toMatchObject({ code: 0, stderr: '' });
+      expect(JSON.parse(result.stdout)).toEqual(JSON.parse(allow));
+    } finally {
+      s.close();
+    }
+  });
+
+  it('prints nothing for anything but an allow of a permission request', async () => {
+    const cases: Array<[number, string, string]> = [
+      [204, '', permission],
+      [200, allow, '{"hook_event_name":"PreToolUse"}'],
+      [200, JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny' } } }), permission],
+      [200, JSON.stringify({ decision: 'approve' }), permission],
+      [200, 'not json', permission],
+      [500, allow, permission],
+    ];
+    for (const [status, body, stdin] of cases) {
+      const s = await answering(status, body);
+      try {
+        const result = await runHook(env(s.port), stdin);
+        expect(result, `${status} ${body} for ${stdin}`).toMatchObject({ code: 0, stdout: '', stderr: '' });
+      } finally {
+        s.close();
+      }
+    }
+  });
 });
