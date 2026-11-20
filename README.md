@@ -235,6 +235,31 @@ folder (seen there as `/mnt/c/...`) or the Linux home. VS Code is found through 
 on the PATH. The folder is the one the session started in: where its shell has moved to since is
 not known to ShellYard.
 
+### Git worktrees
+
+A session in a git repository shows a chip in its title bar, `⎇ branch · worktree`: the branch
+checked out in the folder it works in (a short commit id when no branch is), and the name of that
+worktree's folder. A Claude Code session follows the folder Claude reports, so the chip changes
+when Claude moves to another worktree; for other sessions it shows the folder the session started in.
+
+The chip's menu lets you move the session to another worktree of the repository, or switch the
+branch of its worktree. Moving a session restarts it. For Claude Code that means a new conversation
+in the new folder: the old one stays in Conversations, where you can resume it. Moving is not
+offered for WSL sessions.
+
+**Manage worktrees…** (in the chip's menu) lists the worktrees of the repository. There you create one,
+choosing an existing branch or a new one and the folder (by default beside the main worktree), and
+delete one. Before deleting, ShellYard asks about what would be lost: sessions still open in it, uncommitted changes,
+commits that are on no branch, and the files git ignores (like `.env`), which are deleted too. You can
+delete the branch together with the worktree, which is kept, with a warning, if it is not merged.
+
+When other sessions are working in a worktree, moving a session there or switching the branch of that
+worktree asks first: they all share the same files, and the branch changes under all of them.
+
+In the new-session dialog, when the folder is in a repository with more than one worktree, a
+**Worktree** choice appears under Folder. Pick one to start the session there, in the same
+sub-folder if it exists in that worktree. **Manage…** opens the same dialog to create one first.
+
 ### Terminal background
 
 A terminal normally follows the theme. In a launcher's settings you can give its sessions another

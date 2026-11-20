@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chipText, deleteConfirmations, freeBranches, isWslSession, moveTargets, samePathWeb, sessionsIn, suggestedFolder, worktreeName } from '../../src/web/worktrees.js';
+import { chipText, deleteConfirmations, freeBranches, isWslSession, moveTargets, joinPath, relativeInside, samePathWeb, sessionsIn, suggestedFolder, worktreeName } from '../../src/web/worktrees.js';
 import type { SessionGit, SessionInfo } from '../../src/shared/types.js';
 
 const git = (over: Partial<SessionGit> = {}): SessionGit => ({ worktree: 'C:\\r\\app-feat', branch: 'feat', head: '1a2b3c4', isMain: false, worktreeCount: 2, ...over });
@@ -126,5 +126,31 @@ describe('freeBranches', () => {
   });
   it('keeps every branch without a listing', () => {
     expect(freeBranches(['main'], null)).toEqual(['main']);
+  });
+});
+
+describe('relativeInside', () => {
+  it('gives the part of a folder below the root, on Windows paths', () => {
+    expect(relativeInside('C:\\r\\app\\packages\\web', 'c:/r/app/')).toBe('packages\\web');
+  });
+  it('gives the part below the root on POSIX paths', () => {
+    expect(relativeInside('/r/app/src/web', '/r/app')).toBe('src/web');
+  });
+  it('is empty when the folder is the root', () => {
+    expect(relativeInside('/r/app/', '/r/app')).toBe('');
+  });
+  it('is null outside the root, also for a sibling with the same prefix', () => {
+    expect(relativeInside('/r/app-two/x', '/r/app')).toBeNull();
+    expect(relativeInside('/other', '/r/app')).toBeNull();
+  });
+});
+
+describe('joinPath', () => {
+  it('keeps the separator style of the root', () => {
+    expect(joinPath('C:\\r\\wt', 'packages/web')).toBe('C:\\r\\wt\\packages\\web');
+    expect(joinPath('/r/wt/', 'packages\\web')).toBe('/r/wt/packages/web');
+  });
+  it('is the root when there is nothing to add', () => {
+    expect(joinPath('/r/wt', '')).toBe('/r/wt');
   });
 });

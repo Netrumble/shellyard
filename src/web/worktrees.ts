@@ -85,3 +85,24 @@ export function deleteConfirmations(c: {
 export function isWslSession(args: string[] | undefined): boolean {
   return (args ?? []).includes('--cd');
 }
+
+/** The part of `folder` below `root` ('' when they are the same), or null when the folder is not inside root. */
+export function relativeInside(folder: string, root: string): string | null {
+  const f = normalise(folder);
+  const r = normalise(root);
+  if (samePathWeb(f, r)) return '';
+  const prefix = r.endsWith('/') ? r : `${r}/`;
+  const drive = /^[a-zA-Z]:/;
+  const ci = drive.test(f) || drive.test(r);
+  const head = f.slice(0, prefix.length);
+  if (ci ? head.toLowerCase() !== prefix.toLowerCase() : head !== prefix) return null;
+  const rest = f.slice(prefix.length);
+  return folder.includes('\\') && !folder.includes('/') ? rest.replaceAll('/', '\\') : rest;
+}
+
+/** `rel` below `root`, with the separators of `root`. */
+export function joinPath(root: string, rel: string): string {
+  if (!rel) return root;
+  const sep = root.includes('\\') && !root.includes('/') ? '\\' : '/';
+  return `${root.replace(/[\\/]+$/, '')}${sep}${rel.split(/[\\/]+/).filter(Boolean).join(sep)}`;
+}
