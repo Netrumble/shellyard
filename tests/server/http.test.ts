@@ -74,6 +74,8 @@ describe('http api', () => {
       hookToken: HOOK_TOKEN,
       hookScriptPath: '/h.js', statusScriptPath: '/s.js',
       builtins: () => [builtin],
+      gitOf: async () => null,
+      headOf: () => null,
     });
     server.on('request', createRequestHandler({ manager: mgr, stories, usage: new UsageStore({ now: Date.now, file: join(home.dir(), 'usage.json') }), closed: new ClosedStore({ now: Date.now, file: join(home.dir(), 'closed.json') }), port, pageHost: PAGE, token: TOKEN, hookToken: HOOK_TOKEN, webDir, onShutdown: () => shutdowns++ }));
   });

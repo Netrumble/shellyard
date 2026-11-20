@@ -13,6 +13,8 @@ export interface ClaudeLaunchInput {
   extraArgs: string[];
   /** A saved conversation to continue; without it a new one is started under sessionId. */
   resumeId?: string | null;
+  /** The id of a new conversation; defaults to sessionId. The settings file and hooks still use sessionId. */
+  conversationId?: string;
 }
 
 export interface ClaudeLaunchOutput {
@@ -46,7 +48,7 @@ export function prepareClaudeLaunch(i: ClaudeLaunchInput): ClaudeLaunchOutput {
     args: [
       '--settings',
       settingsPath,
-      ...(i.resumeId ? ['--resume', i.resumeId] : ['--session-id', i.sessionId]),
+      ...(i.resumeId ? ['--resume', i.resumeId] : ['--session-id', i.conversationId ?? i.sessionId]),
       ...(i.model ? ['--model', i.model] : []),
       ...i.extraArgs,
     ],

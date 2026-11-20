@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, isAbsolute } from 'node:path';
+import { basename, dirname, isAbsolute } from 'node:path';
 import type { Conversation, SessionGit, WorktreeListing, CreateSessionRequest, HookName, Profile, SessionInfo, SessionKind, Story, TerminalBackground, TerminalFont } from '../shared/types.js';
 import { normalizeBackground } from './backgrounds.js';
 import { normalizeFont } from './fonts.js';
@@ -63,6 +63,10 @@ interface Entry {
   conversationId: string | null;
   /** Counts git lookups, so that only the latest one started is applied. */
   gitSeq: number;
+  /** Counts the processes started, so that the callbacks of a replaced one are ignored. */
+  generation: number;
+  /** The environment the launcher adds to every start of this session. */
+  env: Record<string, string>;
 }
 
 function isDirectory(p: string): boolean {
@@ -71,6 +75,25 @@ function isDirectory(p: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Where a session working in `cwd` should start in another worktree: the same sub-folder of
+ * `to` when `cwd` is inside the worktree `from` and that sub-folder exists, else `to` itself.
+ */
+export function mapIntoWorktree(cwd: string, from: string, to: string, exists: (p: string) => boolean = isDirectory): string {
+  const parts: string[] = [];
+  let dir = cwd;
+  while (!samePath(dir, from)) {
+    const parent = dirname(dir);
+    if (parent === dir) return to;
+    parts.unshift(basename(dir));
+    dir = parent;
+  }
+  if (parts.length === 0) return to;
+  const sep = to.includes('\\') ? '\\' : '/';
+  const candidate = to.replace(/[\\/]+$/, '') + sep + parts.join(sep);
+  return exists(candidate) ? candidate : to;
 }
 
 function sameGit(a: SessionGit | null, b: SessionGit | null): boolean {
@@ -180,60 +203,117 @@ export class SessionManager {
       // A new Claude session is started under its own id, which is then its conversation's id.
       conversationId: kind === 'claude' ? (conversation?.id ?? id) : null,
       gitSeq: 0,
+      generation: 0,
+      env: { ...(profile?.env ?? {}) },
     };
     this.entries.set(id, entry);
 
-    if (!problem && !command) problem = 'No command was given.';
-    if (!problem && !isDirectory(cwd)) problem = `Folder does not exist: ${cwd}`;
-    const resolved = problem ? null : resolveExecutable(command);
-    if (!problem && !resolved) problem = `Command not found: ${command}`;
-
-    if (!problem && resolved) {
-      try {
-        let launchArgs = args;
-        const env: Record<string, string> = { ...withoutClaudeSessionMarkers(process.env), ...(profile?.env ?? {}) };
-        if (kind === 'claude') {
-          const launch = prepareClaudeLaunch({
-            sessionId: id,
-            port: this.deps.port,
-            hookToken: this.deps.hookToken,
-            model,
-            hookScriptPath: this.deps.hookScriptPath,
-            statusScriptPath: this.deps.statusScriptPath,
-            extraArgs: args,
-            resumeId: conversation?.id ?? null,
-          });
-          launchArgs = launch.args;
-          Object.assign(env, launch.env);
-        }
-        entry.pty = new PtySession(this.deps.ptyFactory, toLaunch(resolved, launchArgs), {
-          cwd,
-          env,
-          cols: DEFAULT_COLS,
-          rows: DEFAULT_ROWS,
-        });
-        this.wire(entry);
-        info.resumed = conversation !== null;
-      } catch (e) {
-        problem = `Could not start ${command}: ${(e as Error).message}`;
-      }
-    }
-
-    if (problem) {
-      info.status = 'exited';
-      info.reason = null;
-      info.error = problem;
-      cleanupClaudeLaunch(id);
-    }
+    problem ??= this.start(entry, cwd, conversation?.id ?? null);
+    if (!problem) info.resumed = conversation !== null;
+    else this.failStart(entry, problem);
     this.emitChange();
-    if (!problem) void this.refreshGit(id);
+    if (!problem) this.refreshGit(id).catch(() => undefined);
+    return { ...info };
+  }
+
+  /**
+   * Starts the process of a session in a folder. Returns why it could not, or null.
+   * A Claude session continues `resumeId` if given, else starts its `conversationId`.
+   */
+  private start(entry: Entry, cwd: string, resumeId: string | null): string | null {
+    const { info } = entry;
+    const { command, args } = info;
+    if (!command) return 'No command was given.';
+    if (!isDirectory(cwd)) return `Folder does not exist: ${cwd}`;
+    const resolved = resolveExecutable(command);
+    if (!resolved) return `Command not found: ${command}`;
+    try {
+      let launchArgs = args;
+      const env: Record<string, string> = { ...withoutClaudeSessionMarkers(process.env), ...entry.env };
+      if (info.kind === 'claude') {
+        const launch = prepareClaudeLaunch({
+          sessionId: info.id,
+          port: this.deps.port,
+          hookToken: this.deps.hookToken,
+          model: entry.launchModel,
+          hookScriptPath: this.deps.hookScriptPath,
+          statusScriptPath: this.deps.statusScriptPath,
+          extraArgs: args,
+          resumeId,
+          conversationId: entry.conversationId ?? undefined,
+        });
+        launchArgs = launch.args;
+        Object.assign(env, launch.env);
+      }
+      entry.pty = new PtySession(this.deps.ptyFactory, toLaunch(resolved, launchArgs), {
+        cwd,
+        env,
+        cols: info.cols,
+        rows: info.rows,
+      });
+      this.wire(entry);
+      return null;
+    } catch (e) {
+      return `Could not start ${command}: ${(e as Error).message}`;
+    }
+  }
+
+  private failStart(entry: Entry, problem: string): void {
+    entry.info.status = 'exited';
+    entry.info.reason = null;
+    entry.info.error = problem;
+    cleanupClaudeLaunch(entry.info.id);
+  }
+
+  /**
+   * Stops a session's process, without reporting it as closed, and starts the same command
+   * again in another worktree, keeping the session's id and properties. A Claude session
+   * starts a new conversation there. Works on exited sessions too. Null for an unknown id.
+   */
+  restartIn(id: string, worktree: string): SessionInfo | null {
+    const entry = this.entries.get(id);
+    if (!entry) return null;
+    const { info } = entry;
+    const now = this.deps.now();
+
+    // Callbacks of the old process are ignored from here on, its exit included: it must
+    // neither close the session nor remove the settings file of the new process.
+    entry.generation++;
+    const old = entry.pty;
+    entry.pty = null;
+    old?.kill();
+    old?.dispose();
+    cleanupClaudeLaunch(id);
+
+    const from = info.git?.worktree ?? info.cwd;
+    const cwd = mapIntoWorktree(info.liveCwd ?? info.cwd, from, worktree);
+    Object.assign(info, initialState(info.kind));
+    info.statusSince = now;
+    info.exitCode = null;
+    info.error = null;
+    info.resumed = false;
+    info.liveCwd = null;
+    info.cwd = cwd;
+    if (info.kind === 'claude') {
+      entry.conversationId = randomUUID();
+      info.model = entry.launchModel;
+    }
+    entry.lastOutputAt = now;
+    entry.lastInputAt = 0;
+    entry.lastResizeAt = 0;
+
+    const problem = this.start(entry, cwd, null);
+    if (problem) this.failStart(entry, problem);
+    this.emitChange();
+    if (!problem) this.refreshGit(id).catch(() => undefined);
     return { ...info };
   }
 
   /** Works out the git worktree and branch of a session from the folder it is in. */
   async refreshGit(id: string): Promise<void> {
     const e = this.entries.get(id);
-    if (!e) return;
+    // An exited session keeps the git it last had.
+    if (!e || e.info.status === 'exited') return;
     const seq = ++e.gitSeq;
     const folder = e.info.liveCwd ?? e.info.cwd;
     let git: SessionGit | null = null;
@@ -271,13 +351,13 @@ export class SessionManager {
   /** The folder Claude Code says it is working in. Only an existing absolute folder counts. */
   setLiveCwd(id: string, cwd: unknown): void {
     const e = this.entries.get(id);
-    if (!e || e.info.kind !== 'claude') return;
+    if (!e || e.info.kind !== 'claude' || e.info.status === 'exited') return;
     if (typeof cwd !== 'string' || !isAbsolute(cwd) || !isDirectory(cwd)) return;
     const previous = e.info.liveCwd;
     if (previous !== null && samePath(previous, cwd)) return;
     e.info.liveCwd = cwd;
     this.emitChange();
-    void this.refreshGit(id);
+    this.refreshGit(id).catch(() => undefined);
   }
 
   /** Re-reads the branch of the running sessions from their HEAD files; no git process. */
@@ -303,7 +383,9 @@ export class SessionManager {
   private wire(entry: Entry): void {
     const { pty, info } = entry;
     if (!pty) return;
+    const generation = entry.generation;
     pty.onOutput((data) => {
+      if (entry.generation !== generation) return;
       if (!this.entries.has(info.id)) return;
       const now = this.deps.now();
       for (const cb of this.outputCbs) cb(info.id, data);
@@ -315,6 +397,8 @@ export class SessionManager {
       this.dispatch(entry, { type: 'output' });
     });
     pty.onExit((code) => {
+      // A process replaced by restartIn: the session has moved on to another one.
+      if (entry.generation !== generation) return;
       info.exitCode = code;
       cleanupClaudeLaunch(info.id);
       // Removed by the user (reported then) or by the server stopping (not a closing at all).

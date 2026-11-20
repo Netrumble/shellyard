@@ -52,6 +52,8 @@ describe('sessions and conversations', () => {
       statusScriptPath: '/s.js',
       builtins: () => [{ id: 'builtin-claude', name: 'Claude Code', kind: 'claude', command: node, args: [], cwd: home.dir(), color: '#d97757', env: { FROM_PROFILE: '1' }, model: null }],
       findConversation: (id) => known.find((c) => c.id === id) ?? null,
+      gitOf: async () => null,
+      headOf: () => null,
     });
   });
 

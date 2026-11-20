@@ -146,6 +146,8 @@ describe('sessions and stories', () => {
       hookScriptPath: '/h.js', statusScriptPath: '/s.js',
       builtins: () => [profile],
       stories: () => store.list(),
+      gitOf: async () => null,
+      headOf: () => null,
     });
   });
 
@@ -231,7 +233,7 @@ describe('stories over http and websocket', () => {
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
     port = (server.address() as AddressInfo).port;
     base = `http://127.0.0.1:${port}`;
-    mgr = new SessionManager({ ptyFactory: ptys.factory, now: Date.now, config: () => loadConfig().config, port, hookToken: 'h', hookScriptPath: '/h.js', statusScriptPath: '/s.js', builtins: () => [profile], stories: () => store.list() });
+    mgr = new SessionManager({ ptyFactory: ptys.factory, now: Date.now, config: () => loadConfig().config, port, hookToken: 'h', hookScriptPath: '/h.js', statusScriptPath: '/s.js', builtins: () => [profile], stories: () => store.list(), gitOf: async () => null, headOf: () => null });
     server.on('request', createRequestHandler({ manager: mgr, stories: store, usage: new UsageStore({ now: Date.now, file: join(home.dir(), 'usage.json') }), closed: new ClosedStore({ now: Date.now, file: join(home.dir(), 'closed.json') }), port, pageHost: PAGE, token: TOKEN, hookToken: 'h'.repeat(64), webDir: home.dir(), onShutdown: () => undefined }));
     wsHandle = attachWebSocket(server, { manager: mgr, stories: store, port, pageHost: PAGE, token: TOKEN });
   });

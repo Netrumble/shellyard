@@ -19,6 +19,13 @@ describe('prepareClaudeLaunch', () => {
     expect(out.args).toEqual(['--settings', out.settingsPath, '--session-id', 'sess-1', '--model', 'opus', '--verbose']);
   });
 
+  it('uses the given conversation id for --session-id', () => {
+    const out = prepareClaudeLaunch({ ...base, model: null, conversationId: 'conv-2' });
+    expect(out.args).toEqual(['--settings', out.settingsPath, '--session-id', 'conv-2']);
+    expect(out.settingsPath).toBe(join(home.dir(), 'run', 'sess-1.settings.json'));
+    expect(out.env.SHELLYARD_SESSION_ID).toBe('sess-1');
+  });
+
   it('registers a status line that reports usage to ShellYard', () => {
     const out = prepareClaudeLaunch({ ...base, model: null });
     const settings = JSON.parse(readFileSync(out.settingsPath, 'utf8'));

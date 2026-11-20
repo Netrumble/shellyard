@@ -2,8 +2,8 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { defaultConfig, type Config } from '../../src/server/config.js';
-import { SessionManager } from '../../src/server/session-manager.js';
-import type { Profile, SessionInfo, WorktreeListing } from '../../src/shared/types.js';
+import { mapIntoWorktree, SessionManager } from '../../src/server/session-manager.js';
+import type { Profile, SessionInfo, Story, WorktreeListing } from '../../src/shared/types.js';
 import { FakeClock, fakePtyFactory, useTempHome } from '../helpers.js';
 
 const node = process.execPath;
@@ -31,6 +31,8 @@ describe('SessionManager', () => {
       hookScriptPath: '/pkg/dist/hook/hook.js',
       statusScriptPath: '/pkg/dist/hook/statusline.js',
       builtins: () => [],
+      gitOf: async () => null,
+      headOf: () => null,
     });
   });
 
@@ -75,6 +77,8 @@ describe('SessionManager', () => {
         hookToken: 't',
         hookScriptPath: '/h.js', statusScriptPath: '/s.js',
         builtins: () => [],
+        gitOf: async () => null,
+        headOf: () => null,
       });
       const s = failing.create({ kind: 'shell', command: node, cwd: tmp });
       expect(s.status).toBe('exited');
@@ -602,5 +606,215 @@ describe('SessionManager git', () => {
     await mgr.refreshGitIn(work);
     expect(mgr.get(a.id)!.git?.worktreeCount).toBe(3);
     expect(mgr.get(b.id)!.git?.worktreeCount).toBe(3);
+  });
+
+  it('refreshGit leaves the git of an exited session frozen', async () => {
+    listings.set(work, listing(work, [work]));
+    const s = shell();
+    await vi.waitFor(() => expect(mgr.get(s.id)!.git?.worktree).toBe(work));
+    ptys.last().exit(0);
+    listings.set(work, listing(work, [work, other]));
+    gitCalls.length = 0;
+    let changes = 0;
+    mgr.onChange(() => changes++);
+    await mgr.refreshGit(s.id);
+    expect(mgr.get(s.id)!.git?.worktreeCount).toBe(1);
+    expect(gitCalls).toEqual([]);
+    expect(changes).toBe(0);
+  });
+
+  it('setLiveCwd is ignored for an exited session', async () => {
+    const s = claude();
+    await vi.waitFor(() => expect(gitCalls).toEqual([work]));
+    ptys.last().exit(0);
+    gitCalls.length = 0;
+    let changes = 0;
+    mgr.onChange(() => changes++);
+    mgr.setLiveCwd(s.id, other);
+    expect(mgr.get(s.id)!.liveCwd).toBeNull();
+    expect(changes).toBe(0);
+    expect(gitCalls).toEqual([]);
+  });
+});
+
+describe('mapIntoWorktree', () => {
+  it('keeps the sub-folder when it exists in the target', () => {
+    expect(mapIntoWorktree('/r/a/src/web', '/r/a', '/r/b', (p) => p === '/r/b/src/web')).toBe('/r/b/src/web');
+  });
+
+  it('falls back to the target root when the sub-folder is missing', () => {
+    expect(mapIntoWorktree('/r/a/src/web', '/r/a', '/r/b', () => false)).toBe('/r/b');
+  });
+
+  it('falls back to the target root when the folder is outside the worktree', () => {
+    expect(mapIntoWorktree('/x/y', '/r/a', '/r/b', () => true)).toBe('/r/b');
+    expect(mapIntoWorktree('/r/ab/src', '/r/a', '/r/b', () => true)).toBe('/r/b');
+  });
+
+  it('gives the target root for the worktree root itself', () => {
+    expect(mapIntoWorktree('/r/a', '/r/a', '/r/b', () => true)).toBe('/r/b');
+  });
+});
+
+describe('SessionManager restartIn', () => {
+  const home = useTempHome();
+  let ptys: ReturnType<typeof fakePtyFactory>;
+  let mgr: SessionManager;
+  let work: string;
+  let other: string;
+  let listings: Map<string, WorktreeListing | null>;
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  const listing = (current: string, paths: string[]): WorktreeListing => ({
+    current,
+    worktrees: paths.map((p, i) => ({ path: p, branch: i === 0 ? 'main' : 'feature', head: 'abc1234', isMain: i === 0, locked: false, prunable: false })),
+  });
+
+  beforeEach(() => {
+    ptys = fakePtyFactory();
+    work = join(home.dir(), 'work');
+    other = join(home.dir(), 'other');
+    mkdirSync(work);
+    mkdirSync(other);
+    listings = new Map();
+    const stories: Story[] = [{ id: 'st1', name: 'Story', ticket: '', cwd: work, color: '#445566' }];
+    mgr = new SessionManager({
+      ptyFactory: ptys.factory,
+      now: new FakeClock().now,
+      config: () => defaultConfig(),
+      port: 7717,
+      hookToken: 't',
+      hookScriptPath: '/h.js',
+      statusScriptPath: '/s.js',
+      builtins: () => [],
+      stories: () => stories,
+      gitOf: async (folder) => listings.get(folder) ?? null,
+      headOf: () => null,
+    });
+  });
+
+  const argAfter = (args: string[] | string, flag: string): string | undefined => {
+    if (typeof args === 'string') throw new Error('expected a list of arguments');
+    const i = args.indexOf(flag);
+    return i < 0 ? undefined : args[i + 1];
+  };
+
+  it('returns null for an unknown session', () => {
+    expect(mgr.restartIn('nope', other)).toBeNull();
+  });
+
+  it('restartIn keeps id, name, colour, area, model, background and font and starts in the new folder', () => {
+    const s = mgr.create({
+      kind: 'claude',
+      command: node,
+      args: ['--verbose'],
+      cwd: work,
+      name: 'Mine',
+      color: '#123456',
+      storyId: 'st1',
+      model: 'opus',
+      background: { color: '#202020', image: null, veil: 0 },
+      font: { family: 'Consolas', size: 14 },
+    });
+    const old = ptys.last();
+    const r = mgr.restartIn(s.id, other)!;
+    expect(old.killed).toBe(true);
+    expect(ptys.ptys).toHaveLength(2);
+    expect(ptys.last().opts.cwd).toBe(other);
+    expect(ptys.last().launch.args).toContain('--verbose');
+    expect(r).toMatchObject({ id: s.id, name: 'Mine', color: '#123456', storyId: 'st1', model: 'opus', background: s.background, font: s.font, cwd: other, status: 'idle', exitCode: null, error: null });
+    expect(mgr.get(s.id)).toEqual(r);
+    expect(mgr.list()).toHaveLength(1);
+    expect(argAfter(ptys.last().launch.args, '--model')).toBe('opus');
+    expect(ptys.last().opts.env.SHELLYARD_SESSION_ID).toBe(s.id);
+  });
+
+  it('restartIn gives a Claude session a new conversation', () => {
+    const s = mgr.create({ kind: 'claude', command: node, cwd: work });
+    const before = mgr.conversationOf(s.id);
+    mgr.restartIn(s.id, other);
+    const after = mgr.conversationOf(s.id)!;
+    expect(after).not.toBe(before);
+    expect(after).toMatch(UUID);
+    const args = ptys.last().launch.args;
+    expect(argAfter(args, '--session-id')).toBe(after);
+    expect(args).not.toContain('--resume');
+    expect(mgr.restorable()[0]!.conversationId).toBe(after);
+  });
+
+  it('restartIn adds nothing to the closed list', () => {
+    const closed: string[] = [];
+    mgr.onClosed((_e, id) => closed.push(id));
+    const s = mgr.create({ kind: 'claude', command: node, cwd: work });
+    mgr.restartIn(s.id, other);
+    expect(closed).toEqual([]);
+  });
+
+  it('ignores the exit of the replaced process', () => {
+    const closed: string[] = [];
+    mgr.onClosed((_e, id) => closed.push(id));
+    const outputs: string[] = [];
+    mgr.onOutput((_id, d) => outputs.push(d));
+    const s = mgr.create({ kind: 'claude', command: node, cwd: work });
+    const old = ptys.last();
+    // A real process ends some time after it is killed, not during the kill.
+    old.kill = () => {
+      old.killed = true;
+    };
+    mgr.restartIn(s.id, other);
+    const settings = argAfter(ptys.last().launch.args, '--settings')!;
+    expect(existsSync(settings)).toBe(true);
+    old.emit('stale output');
+    old.exit(1);
+    expect(mgr.get(s.id)!.status).not.toBe('exited');
+    expect(mgr.get(s.id)!.exitCode).toBeNull();
+    expect(existsSync(settings)).toBe(true);
+    expect(closed).toEqual([]);
+    expect(outputs).toEqual([]);
+    ptys.last().emit('fresh');
+    expect(outputs).toEqual(['fresh']);
+  });
+
+  it('restartIn revives an exited session', async () => {
+    listings.set(other, listing(other, [work, other]));
+    const s = mgr.create({ kind: 'shell', command: node, cwd: work });
+    ptys.last().exit(3);
+    expect(mgr.get(s.id)).toMatchObject({ status: 'exited', exitCode: 3 });
+    const r = mgr.restartIn(s.id, other)!;
+    expect(r).toMatchObject({ status: 'running', exitCode: null, error: null, cwd: other });
+    expect(mgr.restorable()).toHaveLength(1);
+    await vi.waitFor(() => expect(mgr.get(s.id)!.git?.worktree).toBe(other));
+  });
+
+  it('restartIn starts a session that never started', () => {
+    const s = mgr.create({ kind: 'shell', command: node, cwd: join(work, 'missing') });
+    expect(s.status).toBe('exited');
+    const r = mgr.restartIn(s.id, other)!;
+    expect(r).toMatchObject({ status: 'running', error: null, cwd: other });
+    expect(ptys.last().opts.cwd).toBe(other);
+  });
+
+  it('restartIn keeps the sub-folder when the target has it', async () => {
+    mkdirSync(join(work, 'src'));
+    mkdirSync(join(other, 'src'));
+    listings.set(join(work, 'src'), listing(work, [work, other]));
+    const s = mgr.create({ kind: 'shell', command: node, cwd: join(work, 'src') });
+    await vi.waitFor(() => expect(mgr.get(s.id)!.git?.worktree).toBe(work));
+    mgr.restartIn(s.id, other);
+    expect(ptys.last().opts.cwd).toBe(join(other, 'src'));
+  });
+
+  it('restartIn uses the live folder of a Claude session for the sub-folder rule', async () => {
+    mkdirSync(join(work, 'web'));
+    mkdirSync(join(other, 'web'));
+    listings.set(work, listing(work, [work, other]));
+    listings.set(join(work, 'web'), listing(work, [work, other]));
+    const s = mgr.create({ kind: 'claude', command: node, cwd: work });
+    await vi.waitFor(() => expect(mgr.get(s.id)!.git?.worktree).toBe(work));
+    mgr.setLiveCwd(s.id, join(work, 'web'));
+    const r = mgr.restartIn(s.id, other)!;
+    expect(ptys.last().opts.cwd).toBe(join(other, 'web'));
+    expect(r.cwd).toBe(join(other, 'web'));
+    expect(r.liveCwd).toBeNull();
   });
 });
