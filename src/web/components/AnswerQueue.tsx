@@ -3,7 +3,7 @@ import type { PermissionChoice, SessionInfo } from '../../shared/types.js';
 import { api } from '../api.js';
 import { nextSelection, queueAction, step, type QueueAction } from '../answer-queue.js';
 import { visibleCards } from '../attention.js';
-import { answerable, askLine, REQUEST_BADGE, requestKind, requestSummary } from '../requests.js';
+import { answerable, areaRuleFor, askLine, REQUEST_BADGE, requestKind, requestSummary } from '../requests.js';
 import { inStory, selectAttention } from '../selectors.js';
 import { shortAge, waitClock } from '../session-text.js';
 import { isTypingTarget } from '../shortcuts.js';
@@ -122,24 +122,26 @@ export function AnswerQueue({ storyFilter }: { storyFilter?: string | null }): R
     if (action === 'next' || action === 'prev') return select(step(ids, selectedId, action === 'next' ? 1 : -1));
     if (!selected) return;
     if (action === 'allow') void answer(selected, 'once');
+    else if (action === 'always') void answer(selected, 'area');
     else if (action === 'deny') void answer(selected, 'deny');
     else if (action === 'reply') reply();
     else if (action === 'open') setView({ kind: 'single', id: selected.id });
   };
 
-  const latest = useRef({ run, selected, busy });
-  latest.current = { run, selected, busy };
+  const areaIds = new Set(stories.map((x) => x.id));
+  const latest = useRef({ run, selected, busy, areaIds });
+  latest.current = { run, selected, busy, areaIds };
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.defaultPrevented) return;
-      const { run: act, selected: s, busy: working } = latest.current;
+      const { run: act, selected: s, busy: working, areaIds: areas } = latest.current;
       const active = document.activeElement;
       const action = queueAction(e, {
         typing: isTypingTarget(active),
         onButton: active instanceof HTMLButtonElement || active instanceof HTMLAnchorElement,
         hasItem: s !== null,
         answerable: s !== null && answerable(s) && !working,
-        canAlways: false,
+        canAlways: s !== null && areaRuleFor(s, areas) !== null,
         sinceAdvanceMs: Date.now() - advancedAt.current,
       });
       if (!action) return;
@@ -168,6 +170,8 @@ export function AnswerQueue({ storyFilter }: { storyFilter?: string | null }): R
   const stillWaiting = selected !== null && waitingIds.has(selected.id);
   const kind = selected && stillWaiting ? requestKind(selected) : null;
   const canAnswer = selected !== null && answerable(selected);
+  const rule = selected ? areaRuleFor(selected, areaIds) : null;
+  const areaName = stories.find((x) => x.id === selected?.storyId)?.name ?? '';
   const p = selected?.pending ?? null;
 
   return (
@@ -218,6 +222,11 @@ export function AnswerQueue({ storyFilter }: { storyFilter?: string | null }): R
                     <p className="ny-message">{p?.message ?? 'Claude Code is waiting for a permission or an answer.'}</p>
                   )}
                   {canAnswer && <p className="ny-ask">{askLine(selected)}</p>}
+                  {rule && (
+                    <p className="ny-ask">
+                      "Always in this area" adds the rule <code>{rule}</code> to {areaName}.
+                    </p>
+                  )}
                 </div>
               )
             ) : (
@@ -245,6 +254,17 @@ export function AnswerQueue({ storyFilter }: { storyFilter?: string | null }): R
                   <button type="button" className="ny-primary" disabled={busy} aria-keyshortcuts="A" onClick={() => run('allow')}>
                     <Kbd>A</Kbd> Allow once
                   </button>
+                  {rule && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      aria-keyshortcuts="S"
+                      title={`Allows it now, and adds the rule "${rule}" to ${areaName}: its sessions will run such commands without asking.`}
+                      onClick={() => run('always')}
+                    >
+                      <Kbd>S</Kbd> Always in this area
+                    </button>
+                  )}
                   <button type="button" disabled={busy} aria-keyshortcuts="D" onClick={() => run('deny')}>
                     <Kbd>D</Kbd> Deny
                   </button>

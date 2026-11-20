@@ -1,3 +1,4 @@
+import { suggestPattern } from '../shared/rules.js';
 import type { SessionInfo } from '../shared/types.js';
 
 /** What a waiting session wants, as the board and the answer queue show it. */
@@ -20,6 +21,19 @@ export const REQUEST_BADGE: Record<RequestKind, string> = {
 /** Whether the request on screen can be allowed or denied from outside the terminal. */
 export function answerable(s: SessionInfo): boolean {
   return s.status === 'attention' && s.reason === 'blocked' && s.pending?.kind === 'permission';
+}
+
+/**
+ * The rule "Always in this area" would add for the request on screen, to show it; null where
+ * the choice does not exist (not a Bash command, no area, a command that can never be a rule).
+ * The server makes the rule itself, from the command as Claude Code sent it.
+ */
+export function areaRuleFor(s: SessionInfo, areaIds: ReadonlySet<string>): string | null {
+  const p = s.pending;
+  if (!answerable(s) || p?.tool !== 'Bash' || !p.detail || !s.storyId || !areaIds.has(s.storyId)) return null;
+  // A command shortened for display cannot be judged here; the server still can.
+  if (p.detail.endsWith('…')) return null;
+  return suggestPattern(p.detail);
 }
 
 /** "Allow this command in C:\repos\hcm?": what the terminal asks, in a line. */

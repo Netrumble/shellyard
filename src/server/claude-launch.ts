@@ -119,6 +119,18 @@ function detailOf(tool: string | null, input: unknown): string | null {
 }
 
 /**
+ * The Bash command of a permission request exactly as Claude Code sent it: what an area rule is
+ * checked against and made from. Never shown as is (see parseHookRequest for that).
+ */
+export function permissionCommand(body: unknown): string | null {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return null;
+  const b = body as Record<string, unknown>;
+  if (b.hook_event_name !== 'PermissionRequest' || b.tool_name !== 'Bash') return null;
+  const command = (b.tool_input as { command?: unknown } | null)?.command;
+  return typeof command === 'string' ? command : null;
+}
+
+/**
  * Reads what a blocked session asks, from the hooks that say it: a permission request (with
  * the tool and its input), a notification (its message; the idle reminder asks nothing), or a
  * question Claude is about to put (PreToolUse of AskUserQuestion). Null for anything else.

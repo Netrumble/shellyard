@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PendingRequest, SessionInfo } from '../../src/shared/types.js';
-import { answerable, askLine, requestKind, requestSummary } from '../../src/web/requests.js';
+import { answerable, areaRuleFor, askLine, requestKind, requestSummary } from '../../src/web/requests.js';
 import { session } from './session-fixture.js';
 
 const pending = (over: Partial<PendingRequest> = {}): PendingRequest => ({ id: 'r1', kind: 'permission', tool: 'Bash', detail: 'dotnet test', message: null, since: 0, ...over });
@@ -39,5 +39,23 @@ describe('requestSummary', () => {
     expect(requestSummary(blocked(pending({ kind: 'question', tool: null, detail: null, message: 'Which version?' })))).toBe('Question · Which version?');
     expect(requestSummary(blocked(null))).toBe('Permission');
     expect(requestSummary(session('f', 'attention', 'finished'))).toBe('Finished');
+  });
+});
+
+describe('areaRuleFor', () => {
+  const areas = new Set(['story-a']);
+  const inArea = (p: PendingRequest | null): SessionInfo => ({ ...blocked(p), storyId: 'story-a' });
+
+  it('shows the rule a Bash command of a session in an area would add', () => {
+    expect(areaRuleFor(inArea(pending({ detail: 'dotnet test src/X --filter Slot' })), areas)).toBe('dotnet test *');
+  });
+
+  it('offers nothing outside an area, for another tool, or for a command that cannot be a rule', () => {
+    expect(areaRuleFor(blocked(pending()), areas)).toBeNull();
+    expect(areaRuleFor({ ...blocked(pending()), storyId: 'gone' }, areas)).toBeNull();
+    expect(areaRuleFor(inArea(pending({ tool: 'Edit', detail: 'a.cs' })), areas)).toBeNull();
+    expect(areaRuleFor(inArea(pending({ detail: 'dotnet test && rm -rf /' })), areas)).toBeNull();
+    expect(areaRuleFor(inArea(pending({ detail: `dotnet ${'x'.repeat(10)}…` })), areas)).toBeNull();
+    expect(areaRuleFor(inArea(null), areas)).toBeNull();
   });
 });

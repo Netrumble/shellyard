@@ -1,4 +1,4 @@
-import type { ConversationItem, CreateSessionRequest, FolderListing, Meta, PermissionChoice, Profile, Schedule, ScheduleRun, SessionInfo, SoundFile, SoundLibrary, SoundSettings, Story, TerminalBackground, TerminalFont, WorktreeListing } from '../shared/types.js';
+import type { AreaRule, ConversationItem, CreateSessionRequest, FolderListing, Meta, PermissionChoice, Profile, Schedule, ScheduleRun, SessionInfo, SoundFile, SoundLibrary, SoundSettings, Story, TerminalBackground, TerminalFont, WorktreeListing } from '../shared/types.js';
 
 /** What a schedule is made or changed with; a change sends only the fields it changes. */
 export type ScheduleFields = Partial<Pick<Schedule, 'name' | 'prompt' | 'profileId' | 'model' | 'cwd' | 'storyId' | 'when' | 'enabled' | 'catchUp' | 'permissionMode'>>;
@@ -121,6 +121,9 @@ export const api = {
   /** Answers the permission request `requestId`; refused (409) once it is no longer on screen. */
   answer: (id: string, requestId: string, choice: PermissionChoice): Promise<SessionInfo> =>
     call('POST', `/api/sessions/${encodeURIComponent(id)}/answer`, { requestId, choice }),
+  createRule: (storyId: string, pattern: string): Promise<AreaRule> => call('POST', `/api/stories/${encodeURIComponent(storyId)}/rules`, { pattern }),
+  updateRule: (id: string, patch: { enabled?: boolean; pattern?: string }): Promise<AreaRule> => call('PATCH', `/api/rules/${encodeURIComponent(id)}`, patch),
+  deleteRule: (id: string): Promise<void> => call('DELETE', `/api/rules/${encodeURIComponent(id)}`),
   /** Opens VS Code on the folder of an area. */
   openAreaEditor: (storyId: string): Promise<void> => call('POST', `/api/stories/${encodeURIComponent(storyId)}/editor`),
   deleteSession: (id: string): Promise<void> => call('DELETE', `/api/sessions/${encodeURIComponent(id)}`),

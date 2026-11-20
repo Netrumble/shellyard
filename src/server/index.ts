@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { newPageHost, newToken } from './auth.js';
 import { ActivityMeter } from './activity.js';
+import { RuleStore } from './area-rules.js';
 import { ClosedStore } from './closed.js';
 import { clearServerState, dataDir, loadConfig, readServerState, writeServerState } from './config.js';
 import { openInEditor } from './editor.js';
@@ -117,6 +118,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   manager.onOutput((id, data) => activity.add(id, data.length));
   // Sessions that end or are closed are remembered, to be opened again from their area.
   const closed = new ClosedStore({ file: join(dataDir(), 'closed.json'), now: Date.now });
+  const rules = new RuleStore({ file: join(dataDir(), 'rules.json'), now: Date.now });
   manager.onClosed((entry, sessionId) => closed.add(entry, sessionId));
 
   // Schedules: at its time, a schedule opens a Claude Code session like any other, and its
@@ -228,7 +230,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   const stopped = new Promise<void>((r) => (resolveStopped = r));
   let stopping: Promise<void> | null = null;
 
-  const ws = attachWebSocket(server, { manager, stories, closed, schedules, usage, activity, port, pageHost, token });
+  const ws = attachWebSocket(server, { manager, stories, rules, closed, schedules, usage, activity, port, pageHost, token });
   const ticker = setInterval(() => {
     manager.tick();
     schedules.tick();
@@ -268,6 +270,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
       usage,
       closed,
       schedules,
+      rules,
       openEditor: opts.openEditor ?? openInEditor,
       onClaudeStatus: (id) => delivery.ready(id),
       onPromptSubmitted: (id) => delivery.submitted(id),

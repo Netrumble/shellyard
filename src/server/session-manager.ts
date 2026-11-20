@@ -74,13 +74,16 @@ interface Entry {
   env: Record<string, string>;
   /** A question Claude announced (PreToolUse of AskUserQuestion), shown once it blocks on it. */
   asked: HookRequest | null;
+  /** The raw command of the permission request on screen, kept off the info the page gets. */
+  pendingCommand: { requestId: string; command: string | null } | null;
 }
 
 /**
  * The keys that answer Claude Code's permission menu: Enter takes "Yes", the first choice and
- * the one selected when the menu opens; Escape refuses.
+ * the one selected when the menu opens; Escape refuses. "area" is "Yes" here; the rule it adds
+ * is ShellYard's own.
  */
-const ANSWER_KEYS: Record<PermissionChoice, string> = { once: '\r', deny: '\x1b' };
+const ANSWER_KEYS: Record<PermissionChoice, string> = { once: '\r', area: '\r', deny: '\x1b' };
 
 export type AnswerOutcome = 'answered' | 'stale' | 'missing';
 
@@ -270,6 +273,7 @@ export class SessionManager {
       retired: new Set(),
       env: { ...(profile?.env ?? {}) },
       asked: null,
+      pendingCommand: null,
     };
     this.entries.set(id, entry);
 
@@ -614,15 +618,28 @@ export class SessionManager {
     return { ...e.info };
   }
 
-  /** `request`: what the hook says the session asks for, if it says (see parseHookRequest). */
-  hook(id: string, name: HookName, idleReminder: boolean, request: HookRequest | null = null): boolean {
+  /**
+   * `request`: what the hook says the session asks for, if it says (see parseHookRequest).
+   * `command`: for a Bash permission, the command exactly as sent (see permissionCommand).
+   */
+  hook(id: string, name: HookName, idleReminder: boolean, request: HookRequest | null = null, command: string | null = null): boolean {
     const e = this.entries.get(id);
     if (!e || e.info.status === 'exited') return false;
     if (name === 'PreToolUse' && request) e.asked = request;
     else if (name === 'PostToolUse' || name === 'UserPromptSubmit' || name === 'Stop') e.asked = null;
     this.dispatch(e, { type: 'hook', name, idleReminder });
-    if (this.notePending(e, name, request)) this.emitChange();
+    if (this.notePending(e, name, request)) {
+      if (name === 'PermissionRequest' && e.info.pending) e.pendingCommand = { requestId: e.info.pending.id, command };
+      this.emitChange();
+    }
     return true;
+  }
+
+  /** The Bash command of the request on screen, as Claude Code sent it; null once it is gone. */
+  pendingCommand(id: string, requestId: string): string | null {
+    const e = this.entries.get(id);
+    if (!e || e.info.pending?.id !== requestId || e.pendingCommand?.requestId !== requestId) return null;
+    return e.pendingCommand.command;
   }
 
   /**

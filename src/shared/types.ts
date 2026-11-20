@@ -27,8 +27,23 @@ export interface PendingRequest {
   since: number;
 }
 
-/** How the user answers a permission from outside the terminal. */
-export type PermissionChoice = 'once' | 'deny';
+/**
+ * How the user answers a permission from outside the terminal. "area" allows it once and adds
+ * a rule, so that the sessions of the same area run such commands without asking again.
+ */
+export type PermissionChoice = 'once' | 'deny' | 'area';
+
+/** A Bash command the sessions of an area may run without asking (see shared/rules.ts). */
+export interface AreaRule {
+  id: string;
+  storyId: string;
+  /** Words of a command, "*" last for any further arguments: "dotnet test *". */
+  pattern: string;
+  enabled: boolean;
+  createdAt: number;
+  /** How many requests it answered in the last 7 days: interruptions avoided. */
+  weekHits: number;
+}
 
 /**
  * What is behind the text of a terminal: a colour, or an uploaded image (by the name ShellYard
@@ -294,6 +309,7 @@ export type ServerMessage =
   | { t: 'sessions'; sessions: SessionInfo[] }
   | { t: 'schedules'; schedules: Schedule[] }
   | { t: 'stories'; stories: Story[] }
+  | { t: 'rules'; rules: AreaRule[] }
   | { t: 'closed'; closed: ClosedSession[] }
   | { t: 'usage'; usage: UsageSummary }
   /** Bytes printed in the last second, per session; sessions printing nothing are absent. */

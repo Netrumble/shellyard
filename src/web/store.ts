@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import type { ClosedSession, Meta, Schedule, SessionInfo, SoundFile, SoundLibrary, Story, UsageSummary } from '../shared/types.js';
+import type { AreaRule, ClosedSession, Meta, Schedule, SessionInfo, SoundFile, SoundLibrary, Story, UsageSummary } from '../shared/types.js';
 import { api, configureApi } from './api.js';
 import { loadEffects, loadSound, saveEffects, saveSound, type EffectsLevel } from './effects.js';
 import { connect, type ConnectionState, type Socket } from './socket.js';
@@ -20,6 +20,8 @@ export type View =
 interface State {
   sessions: SessionInfo[];
   stories: Story[];
+  /** The area rules: commands the sessions of an area run without asking. */
+  rules: AreaRule[];
   /** Sessions that ended or were closed, newest first. */
   closed: ClosedSession[];
   schedules: Schedule[];
@@ -46,6 +48,7 @@ interface State {
 let state: State = {
   sessions: [],
   stories: [],
+  rules: [],
   closed: [],
   schedules: [],
   usage: null,
@@ -247,6 +250,7 @@ export function startStore(): void {
     if (wasLoaded) for (const cb of sessionListeners) cb(prev, sessions);
   });
   socket.onStories((stories) => set({ stories, view: withoutDeadFilter(state.view, stories) }));
+  socket.onRules((rules) => set({ rules }));
   socket.onClosed((closed) => set({ closed }));
   socket.onSchedules((schedules) => set({ schedules }));
   socket.onUsage((usage) => set({ usage }));

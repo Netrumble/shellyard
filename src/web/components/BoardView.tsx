@@ -11,6 +11,7 @@ import { dragSource, useDropTarget } from './drag-target.js';
 import { MoreIcon } from './icons.js';
 import { NeedsYouLane } from './NeedsYouLane.js';
 import { Popover } from './Popover.js';
+import { RulesDialog } from './RulesDialog.js';
 import { SessionRow } from './SessionRow.js';
 import { StoryDialog } from './StoryDialog.js';
 
@@ -105,7 +106,9 @@ function Area(props: {
 }): React.JSX.Element {
   const { area, size, onNewSession, onEdit } = props;
   const { story, sessions } = area;
-  const { activity, closed } = useStore();
+  const { activity, closed, rules } = useStore();
+  const ruleCount = story ? rules.filter((r) => r.storyId === story.id).length : 0;
+  const [rulesOpen, setRulesOpen] = useState(false);
   // A session dropped on the area moves into it; an area dropped on it goes to its left or right.
   const { dropClass, dropProps } = useDropTarget(
     {
@@ -202,6 +205,17 @@ function Area(props: {
                   Rename or edit the area
                 </button>
               )}
+              {story && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    close();
+                    setRulesOpen(true);
+                  }}
+                >
+                  Area rules{ruleCount > 0 ? ` (${ruleCount})` : ''}
+                </button>
+              )}
               {size && (
                 <button
                   type="button"
@@ -264,6 +278,7 @@ function Area(props: {
           </button>
         )}
       </footer>
+      {story && rulesOpen && <RulesDialog story={story} onClose={() => setRulesOpen(false)} />}
     </section>
   );
 }

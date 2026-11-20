@@ -239,6 +239,17 @@ describe('order', () => {
       expect(mgr.answer('nope', old, 'once')).toBe('missing');
     });
 
+    it('keeps the raw command of the request on screen, off the info the page gets', () => {
+      const s = claude();
+      mgr.hook(s.id, 'PermissionRequest', false, bash, 'dotnet test  --filter "a b"');
+      const p = mgr.get(s.id)!.pending!;
+      expect(JSON.stringify(mgr.get(s.id))).not.toContain('--filter');
+      expect(mgr.pendingCommand(s.id, p.id)).toBe('dotnet test  --filter "a b"');
+      expect(mgr.pendingCommand(s.id, 'other')).toBeNull();
+      mgr.input(s.id, '1');
+      expect(mgr.pendingCommand(s.id, p.id)).toBeNull();
+    });
+
     it('does not answer a question with permission keys', () => {
       const s = claude();
       mgr.hook(s.id, 'Notification', false, { kind: 'question', tool: null, detail: null, message: 'Which?' });

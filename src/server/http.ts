@@ -6,7 +6,9 @@ import type { ConversationItem, CreateSessionRequest, Meta } from '../shared/typ
 import { classifyHost, healthProof, isChallenge, originAllowed, requestAuthorized, safeEqual } from './auth.js';
 import { MAX_IMAGE_BYTES, readImage, saveImage } from './backgrounds.js';
 import { MAX_SOUND_BYTES, SoundStore } from './sounds.js';
-import { parseHookBody, parseHookRequest } from './claude-launch.js';
+import { parseHookBody, parseHookRequest, permissionCommand } from './claude-launch.js';
+import { RuleError, type RuleStore } from './area-rules.js';
+import { suggestPattern } from '../shared/rules.js';
 import type { ClosedStore } from './closed.js';
 import { findConversation } from './conversations.js';
 import { reopenEntry } from './restore.js';
@@ -27,6 +29,8 @@ export interface HttpDeps {
   usage: UsageStore;
   closed: ClosedStore;
   schedules?: ScheduleStore;
+  /** The area rules; without them every permission is asked. */
+  rules?: RuleStore;
   /** Opens the editor on a session's folder; returns why not, or null when it was started. */
   openEditor?: (session: { command: string; args: string[]; cwd: string }) => string | null;
   /** A hosted Claude session reported a status line: its main screen is up. */
@@ -45,6 +49,9 @@ export interface HttpDeps {
 }
 
 const MAX_BODY_BYTES = 1024 * 1024;
+
+/** What the hook prints for Claude Code when an area rule allows a request. */
+export const ALLOW_BY_RULE = { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } } as const;
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -345,7 +352,19 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
         send(res, 204);
         return;
       }
-      if (!manager.hook(hookedId, parsed.name, parsed.idleReminder, parseHookRequest(raw))) throw new HttpError(404, 'No such live session');
+      // A command an area rule allows is answered here, and the session never stops: the hook
+      // hands the decision to Claude Code, which then shows no question at all.
+      const command = permissionCommand(raw);
+      if (parsed.name === 'PermissionRequest' && deps.rules && command !== null) {
+        const live = manager.get(hookedId);
+        if (!live || live.status === 'exited') throw new HttpError(404, 'No such live session');
+        if (deps.rules.decide(live.storyId, 'Bash', command)) {
+          noteConversation(hookedId, raw);
+          manager.setLiveCwd(hookedId, (raw as { cwd?: unknown }).cwd);
+          return send(res, 200, ALLOW_BY_RULE);
+        }
+      }
+      if (!manager.hook(hookedId, parsed.name, parsed.idleReminder, parseHookRequest(raw), command)) throw new HttpError(404, 'No such live session');
       noteConversation(hookedId, raw);
       manager.setLiveCwd(hookedId, (raw as { cwd?: unknown }).cwd);
       if (parsed.name === 'UserPromptSubmit') deps.onPromptSubmitted?.(hookedId);
@@ -438,11 +457,29 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       if (sessionMatch[2] === '/answer') {
         if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
         const b = await readObject(req);
-        const choice = b.choice === 'once' || b.choice === 'deny' ? b.choice : null;
-        if (typeof b.requestId !== 'string' || !choice) throw new HttpError(400, 'Give the request id and a choice: once or deny');
+        const choice = b.choice === 'once' || b.choice === 'deny' || b.choice === 'area' ? b.choice : null;
+        if (typeof b.requestId !== 'string' || !choice) throw new HttpError(400, 'Give the request id and a choice: once, area or deny');
+        const STALE = 'That request is no longer waiting: it was answered in the terminal, or another one came.';
+        if (choice === 'area') {
+          // The rule is made first, from the command as Claude Code sent it; the answer follows.
+          const s = manager.get(id);
+          if (!s) throw new HttpError(404, 'No such session');
+          if (s.pending?.id !== b.requestId || s.pending.kind !== 'permission') throw new HttpError(409, STALE);
+          if (!deps.rules) throw new HttpError(409, 'Area rules are not available here.');
+          if (!s.storyId || !deps.stories.list().some((x) => x.id === s.storyId)) throw new HttpError(409, 'This session is in no area. Put it in one first, or allow this once.');
+          if (s.pending.tool !== 'Bash') throw new HttpError(409, 'Only Bash commands can be allowed for a whole area. Allow this once.');
+          const pattern = suggestPattern(manager.pendingCommand(id, b.requestId) ?? '');
+          if (!pattern) throw new HttpError(409, 'This command chains, pipes, redirects or substitutes, so it cannot become a rule. Allow it once.');
+          try {
+            deps.rules.create(s.storyId, pattern);
+          } catch (e) {
+            if (e instanceof RuleError) throw new HttpError(409, e.message);
+            throw e;
+          }
+        }
         const outcome = manager.answer(id, b.requestId, choice);
         if (outcome === 'missing') throw new HttpError(404, 'No such session');
-        if (outcome === 'stale') throw new HttpError(409, 'That request is no longer waiting: it was answered in the terminal, or another one came.');
+        if (outcome === 'stale') throw new HttpError(409, STALE);
         return send(res, 200, manager.get(id));
       }
       if (sessionMatch[2] === '/worktree') {
@@ -518,9 +555,22 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       throw new HttpError(405, 'Method not allowed');
     }
 
-    const storyMatch = /^\/api\/stories\/([^/]+)(\/editor)?$/.exec(path);
+    const storyMatch = /^\/api\/stories\/([^/]+)(\/editor|\/rules)?$/.exec(path);
     if (storyMatch) {
       const id = decodeId(storyMatch[1]!);
+      if (storyMatch[2] === '/rules') {
+        if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
+        if (!deps.rules) throw new HttpError(409, 'Area rules are not available here.');
+        if (!deps.stories.list().some((s) => s.id === id)) throw new HttpError(404, 'No such story');
+        const pattern = (await readObject(req)).pattern;
+        if (typeof pattern !== 'string') throw new HttpError(400, 'Give the command the rule allows, such as "dotnet test *".');
+        try {
+          return send(res, 201, deps.rules.create(id, pattern));
+        } catch (e) {
+          if (e instanceof RuleError) throw new HttpError(400, e.message);
+          throw e;
+        }
+      }
       if (storyMatch[2]) {
         if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
         const story = deps.stories.list().find((s) => s.id === id);
@@ -541,6 +591,30 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
         // Its sessions are not stopped: they simply no longer belong to a story.
         manager.clearStory(id);
         deps.schedules?.clearStory(id);
+        deps.rules?.removeStory(id);
+        return send(res, 204);
+      }
+      throw new HttpError(405, 'Method not allowed');
+    }
+
+    const ruleMatch = /^\/api\/rules\/([^/]+)$/.exec(path);
+    if (ruleMatch) {
+      if (!deps.rules) throw new HttpError(409, 'Area rules are not available here.');
+      const id = decodeId(ruleMatch[1]!);
+      if (method === 'PATCH') {
+        const b = await readObject(req);
+        const patch = { enabled: typeof b.enabled === 'boolean' ? b.enabled : undefined, pattern: typeof b.pattern === 'string' ? b.pattern : undefined };
+        try {
+          const rule = deps.rules.update(id, patch);
+          if (!rule) throw new HttpError(404, 'No such rule');
+          return send(res, 200, rule);
+        } catch (e) {
+          if (e instanceof RuleError) throw new HttpError(400, e.message);
+          throw e;
+        }
+      }
+      if (method === 'DELETE') {
+        if (!deps.rules.remove(id)) throw new HttpError(404, 'No such rule');
         return send(res, 204);
       }
       throw new HttpError(405, 'Method not allowed');

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { PermissionChoice, SessionInfo } from '../../shared/types.js';
 import { api } from '../api.js';
-import { answerable, askLine, REQUEST_BADGE, requestKind, type RequestKind } from '../requests.js';
+import { answerable, areaRuleFor, askLine, REQUEST_BADGE, requestKind, type RequestKind } from '../requests.js';
 import { selectAttention } from '../selectors.js';
 import { modelLabel, waitClock } from '../session-text.js';
 import { setView, useStore } from '../store.js';
@@ -43,6 +43,9 @@ function PermissionCard({ session }: { session: SessionInfo }): React.JSX.Elemen
   const [error, setError] = useState<string | null>(null);
   const p = session.pending;
   const canAnswer = answerable(session);
+  const { stories } = useStore();
+  const rule = areaRuleFor(session, new Set(stories.map((s) => s.id)));
+  const areaName = stories.find((s) => s.id === session.storyId)?.name ?? '';
 
   const answer = async (choice: PermissionChoice): Promise<void> => {
     if (!p) return;
@@ -69,6 +72,11 @@ function PermissionCard({ session }: { session: SessionInfo }): React.JSX.Elemen
           <p className="ny-message">{p?.message ?? 'Claude Code is waiting for a permission or an answer.'}</p>
         )}
         {canAnswer && <p className="ny-ask">{askLine(session)}</p>}
+        {rule && (
+          <p className="ny-ask">
+            "Always in this area" adds the rule <code>{rule}</code> to {areaName}.
+          </p>
+        )}
       </div>
       {error && (
         <p className="error" role="alert">
@@ -81,6 +89,16 @@ function PermissionCard({ session }: { session: SessionInfo }): React.JSX.Elemen
             <button type="button" className="ny-primary" disabled={busy} onClick={() => void answer('once')}>
               Allow once
             </button>
+            {rule && (
+              <button
+                type="button"
+                disabled={busy}
+                title={`Allows it now, and adds the rule "${rule}" to ${areaName}: its sessions will run such commands without asking.`}
+                onClick={() => void answer('area')}
+              >
+                Always in this area
+              </button>
+            )}
             <button type="button" disabled={busy} onClick={() => void answer('deny')}>
               Deny
             </button>

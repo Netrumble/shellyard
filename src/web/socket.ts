@@ -1,4 +1,4 @@
-import type { ClientMessage, ClosedSession, Schedule, ServerMessage, SessionInfo, Story, UsageSummary } from '../shared/types.js';
+import type { AreaRule, ClientMessage, ClosedSession, Schedule, ServerMessage, SessionInfo, Story, UsageSummary } from '../shared/types.js';
 
 export type ConnectionState = 'connecting' | 'open' | 'reconnecting' | 'down' | 'unauthorized';
 export type TerminalMessage = { t: 'snapshot' | 'output'; data: string };
@@ -9,6 +9,7 @@ export interface Socket {
   subscribe(id: string, cb: (m: TerminalMessage) => void): () => void;
   onSessions(cb: (s: SessionInfo[]) => void): void;
   onStories(cb: (s: Story[]) => void): void;
+  onRules(cb: (r: AreaRule[]) => void): void;
   onClosed(cb: (c: ClosedSession[]) => void): void;
   onSchedules(cb: (s: Schedule[]) => void): void;
   onUsage(cb: (u: UsageSummary) => void): void;
@@ -35,6 +36,7 @@ export function connect(url: string, protocols: string[]): Socket {
   const terminalSubs = new Map<string, Set<(m: TerminalMessage) => void>>();
   const sessionCbs: Array<(s: SessionInfo[]) => void> = [];
   const storyCbs: Array<(s: Story[]) => void> = [];
+  const ruleCbs: Array<(r: AreaRule[]) => void> = [];
   const closedCbs: Array<(c: ClosedSession[]) => void> = [];
   const scheduleCbs: Array<(s: Schedule[]) => void> = [];
   const usageCbs: Array<(u: UsageSummary) => void> = [];
@@ -70,6 +72,8 @@ export function connect(url: string, protocols: string[]): Socket {
         for (const cb of sessionCbs) cb(m.sessions);
       } else if (m.t === 'stories') {
         for (const cb of storyCbs) cb(m.stories);
+      } else if (m.t === 'rules') {
+        for (const cb of ruleCbs) cb(m.rules);
       } else if (m.t === 'closed') {
         for (const cb of closedCbs) cb(m.closed);
       } else if (m.t === 'schedules') {
@@ -117,6 +121,9 @@ export function connect(url: string, protocols: string[]): Socket {
     },
     onStories(cb) {
       storyCbs.push(cb);
+    },
+    onRules(cb) {
+      ruleCbs.push(cb);
     },
     onSchedules(cb) {
       scheduleCbs.push(cb);

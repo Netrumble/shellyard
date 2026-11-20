@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { cleanupClaudeLaunch, parseHookBody, parseHookRequest, prepareClaudeLaunch, withoutClaudeSessionMarkers } from '../../src/server/claude-launch.js';
+import { cleanupClaudeLaunch, parseHookBody, parseHookRequest, permissionCommand, prepareClaudeLaunch, withoutClaudeSessionMarkers } from '../../src/server/claude-launch.js';
 import { useTempHome } from '../helpers.js';
 
 const base = { sessionId: 'sess-1', port: 7717, hookToken: 'hook-token', hookScriptPath: 'C:\\pkg\\dist\\hook\\hook.js', statusScriptPath: 'C:\\pkg\\dist\\hook\\statusline.js', extraArgs: [] };
@@ -160,5 +160,18 @@ describe('parseHookRequest', () => {
     expect(parseHookRequest({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'ls' } })).toBeNull();
     expect(parseHookRequest({ hook_event_name: 'Stop' })).toBeNull();
     expect(parseHookRequest(null)).toBeNull();
+  });
+});
+
+describe('permissionCommand', () => {
+  it('gives the Bash command of a permission request exactly as sent', () => {
+    expect(permissionCommand({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'dotnet test\nrm -rf /' } })).toBe('dotnet test\nrm -rf /');
+  });
+
+  it('gives nothing for other tools, other events or a missing command', () => {
+    expect(permissionCommand({ hook_event_name: 'PermissionRequest', tool_name: 'Edit', tool_input: { command: 'x' } })).toBeNull();
+    expect(permissionCommand({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'x' } })).toBeNull();
+    expect(permissionCommand({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: {} })).toBeNull();
+    expect(permissionCommand(null)).toBeNull();
   });
 });

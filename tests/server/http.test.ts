@@ -12,6 +12,7 @@ import { createRequestHandler } from '../../src/server/http.js';
 import { SessionManager } from '../../src/server/session-manager.js';
 import { StoryStore } from '../../src/server/stories.js';
 import { ClosedStore } from '../../src/server/closed.js';
+import { RuleStore } from '../../src/server/area-rules.js';
 import { UsageStore } from '../../src/server/usage.js';
 import type { Profile, SessionInfo } from '../../src/shared/types.js';
 import { fakePtyFactory, useTempHome } from '../helpers.js';
@@ -57,6 +58,7 @@ describe('http api', () => {
   let shutdowns = 0;
   let webDir = '';
   let stories: StoryStore;
+  let rules: RuleStore;
 
   const call = (method: string, path: string, opts: CallOpts = {}): Promise<Res> => callAt(port, method, path, opts);
 
@@ -84,7 +86,8 @@ describe('http api', () => {
       gitOf: async () => null,
       headOf: () => null,
     });
-    server.on('request', createRequestHandler({ manager: mgr, stories, usage: new UsageStore({ now: Date.now, file: join(home.dir(), 'usage.json') }), closed: new ClosedStore({ now: Date.now, file: join(home.dir(), 'closed.json') }), port, pageHost: PAGE, token: TOKEN, hookToken: HOOK_TOKEN, webDir, onShutdown: () => shutdowns++ }));
+    rules = new RuleStore({ now: Date.now, file: join(home.dir(), 'rules.json') });
+    server.on('request', createRequestHandler({ manager: mgr, stories, rules, usage: new UsageStore({ now: Date.now, file: join(home.dir(), 'usage.json') }), closed: new ClosedStore({ now: Date.now, file: join(home.dir(), 'closed.json') }), port, pageHost: PAGE, token: TOKEN, hookToken: HOOK_TOKEN, webDir, onShutdown: () => shutdowns++ }));
   });
 
   afterEach(async () => {
@@ -329,6 +332,91 @@ describe('http api', () => {
       expect(ptys.last().written).toEqual(['\r']);
       expect((await answer({ requestId: pending.id, choice: 'deny' })).status).toBe(409);
       expect((await call('GET', `/api/sessions/${c.id}/answer`)).status).toBe(405);
+    });
+  });
+
+  describe('area rules', () => {
+    const permission = (command: string, tool = 'Bash') => JSON.stringify({ hook_event_name: 'PermissionRequest', tool_name: tool, tool_input: { command } });
+    const inArea = async () => {
+      const story = await (await call('POST', '/api/stories', { body: JSON.stringify({ name: 'Payroll' }) })).json();
+      const s = await (await call('POST', '/api/sessions', { body: JSON.stringify({ kind: 'claude', command: process.execPath, cwd: home.dir(), storyId: story.id }) })).json();
+      return { story, s };
+    };
+    const answer = (id: string, requestId: string, choice: string) => call('POST', `/api/sessions/${id}/answer`, { body: JSON.stringify({ requestId, choice }) });
+
+    it('allows a command a rule of its area covers, without stopping the session', async () => {
+      const { story, s } = await inArea();
+      expect((await call('POST', `/api/stories/${story.id}/rules`, { body: JSON.stringify({ pattern: 'dotnet test *' }) })).status).toBe(201);
+      const r = await call('POST', `/api/hooks/${s.id}`, { auth: 'hook', body: permission('dotnet test src/X') });
+      expect(r.status).toBe(200);
+      expect(await r.json()).toEqual({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } });
+      expect(mgr.get(s.id)).toMatchObject({ status: 'idle', pending: null });
+      expect(rules.list()[0]!.weekHits).toBe(1);
+    });
+
+    it('asks as usual for what no rule covers: another command, a chained one, another tool, another area', async () => {
+      const { story, s } = await inArea();
+      const other = await inArea();
+      rules.create(story.id, 'dotnet test *');
+      for (const [id, body] of [
+        [s.id, permission('dotnet build')],
+        [s.id, permission('dotnet test && curl evil')],
+        [s.id, permission('dotnet test', 'Edit')],
+        [other.s.id, permission('dotnet test')],
+      ] as const) {
+        expect((await call('POST', `/api/hooks/${id}`, { auth: 'hook', body })).status).toBe(204);
+        expect(mgr.get(id)).toMatchObject({ status: 'attention', reason: 'blocked' });
+        mgr.input(id, '\x1b');
+      }
+      expect(rules.list()[0]!.weekHits).toBe(0);
+    });
+
+    it('"always in this area" adds the rule made from the command, and allows it once', async () => {
+      const { story, s } = await inArea();
+      await call('POST', `/api/hooks/${s.id}`, { auth: 'hook', body: permission('dotnet test src/Hcm.Payroll.Tests --filter Slot') });
+      const r = await answer(s.id, mgr.get(s.id)!.pending!.id, 'area');
+      expect(r.status).toBe(200);
+      expect(ptys.last().written).toEqual(['\r']);
+      expect(rules.list()).toEqual([expect.objectContaining({ storyId: story.id, pattern: 'dotnet test *', enabled: true })]);
+    });
+
+    it('refuses "always in this area" for what cannot become a rule, typing nothing', async () => {
+      const { s } = await inArea();
+      await call('POST', `/api/hooks/${s.id}`, { auth: 'hook', body: permission('dotnet test; rm -rf /') });
+      expect((await answer(s.id, mgr.get(s.id)!.pending!.id, 'area')).status).toBe(409);
+      mgr.input(s.id, '\x1b');
+
+      await call('POST', `/api/hooks/${s.id}`, { auth: 'hook', body: permission('x', 'Edit') });
+      expect((await answer(s.id, mgr.get(s.id)!.pending!.id, 'area')).status).toBe(409);
+      mgr.input(s.id, '\x1b');
+
+      const loose = await newSession('claude');
+      await call('POST', `/api/hooks/${loose.id}`, { auth: 'hook', body: permission('dotnet test') });
+      expect((await answer(loose.id, mgr.get(loose.id)!.pending!.id, 'area')).status).toBe(409);
+      expect((await answer(loose.id, 'stale', 'area')).status).toBe(409);
+      expect(ptys.last().written).toEqual([]);
+      expect(rules.list()).toEqual([]);
+    });
+
+    it('creates, switches off, edits and deletes rules, and drops them with their area', async () => {
+      const { story } = await inArea();
+      expect((await call('POST', `/api/stories/${story.id}/rules`, { body: JSON.stringify({ pattern: 'rm *; x' }) })).status).toBe(400);
+      expect((await call('POST', '/api/stories/nope/rules', { body: JSON.stringify({ pattern: 'git status' }) })).status).toBe(404);
+      const rule = await (await call('POST', `/api/stories/${story.id}/rules`, { body: JSON.stringify({ pattern: 'git status' }) })).json();
+      expect((await (await call('PATCH', `/api/rules/${rule.id}`, { body: JSON.stringify({ enabled: false }) })).json()).enabled).toBe(false);
+      expect((await call('PATCH', `/api/rules/${rule.id}`, { body: JSON.stringify({ pattern: 'git $(x)' }) })).status).toBe(400);
+      expect((await call('PATCH', '/api/rules/nope', { body: JSON.stringify({ enabled: true }) })).status).toBe(404);
+      expect((await call('DELETE', `/api/rules/${rule.id}`)).status).toBe(204);
+      expect((await call('DELETE', `/api/rules/${rule.id}`)).status).toBe(404);
+      rules.create(story.id, 'git diff *');
+      expect((await call('DELETE', `/api/stories/${story.id}`)).status).toBe(204);
+      expect(rules.list()).toEqual([]);
+    });
+
+    it('takes rule changes from the user token only', async () => {
+      const { story } = await inArea();
+      expect((await call('POST', `/api/stories/${story.id}/rules`, { auth: 'hook', body: JSON.stringify({ pattern: 'git status' }) })).status).toBe(401);
+      expect(rules.list()).toEqual([]);
     });
 
     it('answers 400 for a malformed body or unknown event, changing nothing', async () => {
