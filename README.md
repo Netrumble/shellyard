@@ -136,6 +136,29 @@ starts waiting while you are looking elsewhere.
 
 When you start a Claude Code session you can choose its model.
 
+### Reordering and the sidebar
+
+Areas, sessions and launchers can be dragged to put them in the order you like: drop one before
+or after another, and a line shows where it will go. On the board, drag an area by its header to
+move it left or right; in the sidebar, drag an area, a session or a launcher up or down. Dropping
+a session on another session in a different area also moves it to that area. The order is kept
+by the server, so every tab and the next start show it. The line does not show where a drop would
+change nothing, such as over the item you are holding.
+
+The sidebar can be folded away to leave more room, and its Sessions and Launchers sections, like
+each area in it, fold too; the board keeps the order of the areas.
+
+### Sounds
+
+**Sounds…** in the header opens the sound settings. Three events can each have their own sound:
+a session that needs permission, one that finished, and one that may be waiting. Each plays the
+chime unless you choose a sound you added: add an mp3, wav or ogg file with **Add sound…**, play
+it to hear it, and delete it when you no longer want it (settings and areas using it go back to
+the defaults). An area can also have a sound of its own, chosen when you create or edit it; it
+is played instead of the sound of the event when one of its sessions starts waiting. When several
+sessions start waiting together, one sound plays: that of the most urgent one. The page stays
+silent while you are looking at it, and the **Sound** checkbox switches all of this off.
+
 ### Conversations, and what comes back after a restart
 
 ShellYard can only show terminals it started itself: a session running in another window belongs to

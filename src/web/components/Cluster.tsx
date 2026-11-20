@@ -6,6 +6,7 @@ import { statusLabel } from '../selectors.js';
 import { setEffects, setSound, setTheme, setView, useStore } from '../store.js';
 import type { ThemeChoice } from '../theme.js';
 import { Dial } from './Dial.js';
+import { SoundsDialog } from './SoundsDialog.js';
 
 /** The current time, refreshed often enough for countdowns shown to the minute. */
 export function useNow(everyMs = 10_000): number {
@@ -65,6 +66,7 @@ function Lamps({ sessions }: { sessions: SessionInfo[] }): React.JSX.Element | n
 
 function EffectsMenu(): React.JSX.Element {
   const { effects, sound, themeChoice } = useStore();
+  const [sounds, setSounds] = useState(false);
   return (
     <div className="effects-menu">
       <label>
@@ -88,6 +90,10 @@ function EffectsMenu(): React.JSX.Element {
         <input type="checkbox" checked={sound} onChange={(e) => setSound(e.target.checked)} />
         <span>Sound</span>
       </label>
+      <button type="button" className="link" onClick={() => setSounds(true)}>
+        Sounds…
+      </button>
+      {sounds && <SoundsDialog onClose={() => setSounds(false)} />}
     </div>
   );
 }

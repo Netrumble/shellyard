@@ -8,6 +8,8 @@ export interface StoryFields {
   ticket: string;
   cwd: string;
   color: string;
+  /** '' plays the sounds of the events. */
+  sound: string;
 }
 
 let token = '';
@@ -122,7 +124,12 @@ export const api = {
   reorderProfiles: (ids: string[]): Promise<Profile[]> => call('PUT', '/api/profiles/order', ids),
   sounds: (): Promise<SoundLibrary> => call('GET', '/api/sounds'),
   addSound: (file: File): Promise<SoundFile> => uploadSound(file),
-  deleteSound: (id: string): Promise<void> => call('DELETE', `/api/sounds/${encodeURIComponent(id)}`),
+  deleteSound: async (id: string): Promise<void> => {
+    await call<void>('DELETE', `/api/sounds/${encodeURIComponent(id)}`);
+    const cached = soundUrls.get(id);
+    soundUrls.delete(id);
+    cached?.then((u) => URL.revokeObjectURL(u), () => {});
+  },
   saveSoundSettings: (settings: SoundSettings): Promise<SoundSettings> => call('PUT', '/api/sounds/settings', settings),
   saveProfiles: (profiles: Profile[]): Promise<Profile[]> => call('PUT', '/api/profiles', profiles),
   conversations: (): Promise<ConversationItem[]> => call('GET', '/api/conversations'),
