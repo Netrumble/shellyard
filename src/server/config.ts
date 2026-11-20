@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { Profile, Story } from '../shared/types.js';
+import type { Profile, SoundFile, SoundSettings, Story } from '../shared/types.js';
 import { normalizeBackground } from './backgrounds.js';
 import { normalizeFont } from './fonts.js';
 
@@ -14,6 +14,10 @@ export interface Config {
   restoreSessions: boolean;
   /** Ids of launchers in the order the user wants them; launchers not listed follow. */
   profileOrder: string[];
+  /** Labels of the uploaded sounds (the files are in the sounds folder). */
+  soundFiles: SoundFile[];
+  /** The sound chosen for each event. */
+  sounds: SoundSettings;
 }
 
 export interface ServerState {
@@ -29,8 +33,32 @@ export interface ServerState {
 const DEFAULT_MODELS = ['opus', 'sonnet', 'haiku'];
 const DEFAULT_SILENCE_MS = 5000;
 
+export const SOUND_ID = /^[0-9a-f-]{36}\.(mp3|wav|ogg)$/;
+
+export function noSounds(): SoundSettings {
+  return { blocked: null, finished: null, maybeWaiting: null };
+}
+
+export function normalizeSoundFiles(v: unknown): SoundFile[] {
+  if (!Array.isArray(v)) return [];
+  const out: SoundFile[] = [];
+  for (const item of v) {
+    if (!isRecord(item) || typeof item.id !== 'string' || !SOUND_ID.test(item.id)) continue;
+    if (out.some((s) => s.id === item.id)) continue;
+    out.push({ id: item.id, name: typeof item.name === 'string' && item.name.trim() ? item.name.trim().slice(0, 80) : 'sound' });
+  }
+  return out;
+}
+
+/** Settings as they may be stored: only ids of known sounds, anything else is silence. */
+export function normalizeSoundSettings(v: unknown, files: SoundFile[]): SoundSettings {
+  const o = isRecord(v) ? v : {};
+  const pick = (x: unknown): string | null => (typeof x === 'string' && files.some((f) => f.id === x) ? x : null);
+  return { blocked: pick(o.blocked), finished: pick(o.finished), maybeWaiting: pick(o.maybeWaiting) };
+}
+
 export function defaultConfig(): Config {
-  return { profiles: [], models: [...DEFAULT_MODELS], silenceMs: DEFAULT_SILENCE_MS, stories: [], restoreSessions: true, profileOrder: [] };
+  return { profiles: [], models: [...DEFAULT_MODELS], silenceMs: DEFAULT_SILENCE_MS, stories: [], restoreSessions: true, profileOrder: [], soundFiles: [], sounds: noSounds() };
 }
 
 /** SHELLYARD_HOME overrides the location, which is how tests avoid the real folder. */
@@ -94,7 +122,7 @@ export function normalizeProfiles(v: unknown): Profile[] {
   return v.map(toProfile).filter((p): p is Profile => p !== null);
 }
 
-export function normalizeStories(v: unknown): Story[] {
+export function normalizeStories(v: unknown, soundFiles: SoundFile[] = []): Story[] {
   if (!Array.isArray(v)) return [];
   const out: Story[] = [];
   const seen = new Set<string>();
@@ -111,6 +139,7 @@ export function normalizeStories(v: unknown): Story[] {
       ticket: typeof item.ticket === 'string' ? item.ticket : '',
       cwd: typeof item.cwd === 'string' ? item.cwd : '',
       color: typeof item.color === 'string' ? item.color : '',
+      sound: typeof item.sound === 'string' && soundFiles.some((f) => f.id === item.sound) ? item.sound : '',
     });
   }
   return out;
@@ -119,9 +148,12 @@ export function normalizeStories(v: unknown): Story[] {
 function normalizeConfig(raw: unknown): Config {
   const d = defaultConfig();
   if (!isRecord(raw)) return d;
+  const soundFiles = normalizeSoundFiles(raw.soundFiles);
   return {
     profiles: normalizeProfiles(raw.profiles),
-    stories: normalizeStories(raw.stories),
+    soundFiles,
+    sounds: normalizeSoundSettings(raw.sounds, soundFiles),
+    stories: normalizeStories(raw.stories, soundFiles),
     restoreSessions: raw.restoreSessions !== false,
     profileOrder: Array.isArray(raw.profileOrder) ? raw.profileOrder.filter((x): x is string => typeof x === 'string') : [],
     models: isStringArray(raw.models) ? raw.models : d.models,

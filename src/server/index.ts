@@ -16,6 +16,7 @@ import { PromptDelivery } from './prompt-delivery.js';
 import { loadRestorable, restoreSessions, saveRestorable } from './restore.js';
 import { launcherFingerprint, ScheduleStore, type LaunchResult } from './schedules.js';
 import { SessionManager } from './session-manager.js';
+import { SoundStore } from './sounds.js';
 import { StoryStore } from './stories.js';
 import { UsageStore } from './usage.js';
 import type { Schedule } from '../shared/types.js';
@@ -99,6 +100,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
 
   const stories = new StoryStore();
   stories.ensureColors();
+  const sounds = new SoundStore(stories);
   const manager = new SessionManager({
     stories: () => stories.list(),
     ptyFactory: opts.ptyFactory ?? realPtyFactory,
@@ -262,6 +264,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
     createRequestHandler({
       manager,
       stories,
+      sounds,
       usage,
       closed,
       schedules,

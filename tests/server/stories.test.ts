@@ -38,7 +38,7 @@ describe('StoryStore', () => {
   it('creates a story with an id and trimmed fields, and keeps it on disk', () => {
     const store = new StoryStore();
     const s = store.create({ name: '  Payroll export ', ticket: ' HCM-1234 ', cwd: home.dir(), color: '#ff0000' });
-    expect(s).toEqual({ id: s.id, name: 'Payroll export', ticket: 'HCM-1234', cwd: home.dir(), color: '#ff0000' });
+    expect(s).toEqual({ id: s.id, name: 'Payroll export', ticket: 'HCM-1234', cwd: home.dir(), color: '#ff0000', sound: '' });
     expect(s.id).toMatch(/^story-/);
     expect(new StoryStore().list()).toEqual([s]);
   });
@@ -96,7 +96,7 @@ describe('StoryStore', () => {
   });
 
   it('does not disturb profiles or other settings when it saves', () => {
-    saveConfig({ profiles: [profile], models: ['opus'], silenceMs: 9000, stories: [], restoreSessions: true, profileOrder: [] });
+    saveConfig({ profiles: [profile], models: ['opus'], silenceMs: 9000, stories: [], restoreSessions: true, profileOrder: [], soundFiles: [], sounds: { blocked: null, finished: null, maybeWaiting: null } });
     new StoryStore().create({ name: 'A' });
     const { config } = loadConfig();
     expect(config.profiles).toEqual([profile]);
@@ -122,7 +122,7 @@ describe('stories in config.json', () => {
       join(home.dir(), 'config.json'),
       JSON.stringify({ stories: [{ id: 's1', name: 'Good', ticket: 5 }, { id: 's2' }, { name: 'No id' }, 'text', null, { id: 's3', name: '  ' }] }),
     );
-    expect(loadConfig().config.stories).toEqual([{ id: 's1', name: 'Good', ticket: '', cwd: '', color: '' }]);
+    expect(loadConfig().config.stories).toEqual([{ id: 's1', name: 'Good', ticket: '', cwd: '', color: '', sound: '' }]);
   });
 
   it('keeps only the first of two entries with the same id', () => {

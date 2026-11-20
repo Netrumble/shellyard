@@ -698,7 +698,7 @@ describe('SessionManager restartIn', () => {
     mkdirSync(work);
     mkdirSync(other);
     listings = new Map();
-    const stories: Story[] = [{ id: 'st1', name: 'Story', ticket: '', cwd: work, color: '#445566' }];
+    const stories: Story[] = [{ id: 'st1', name: 'Story', ticket: '', cwd: work, color: '#445566', sound: '' }];
     mgr = new SessionManager({
       ptyFactory: ptys.factory,
       now: new FakeClock().now,

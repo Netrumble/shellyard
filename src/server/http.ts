@@ -5,6 +5,7 @@ import { extname, isAbsolute, resolve, sep } from 'node:path';
 import type { ConversationItem, CreateSessionRequest, Meta } from '../shared/types.js';
 import { classifyHost, healthProof, isChallenge, originAllowed, requestAuthorized, safeEqual } from './auth.js';
 import { MAX_IMAGE_BYTES, readImage, saveImage } from './backgrounds.js';
+import { MAX_SOUND_BYTES, SoundStore } from './sounds.js';
 import { parseHookBody } from './claude-launch.js';
 import type { ClosedStore } from './closed.js';
 import { findConversation } from './conversations.js';
@@ -21,6 +22,7 @@ import { parseStatusPayload, type UsageStore } from './usage.js';
 export interface HttpDeps {
   manager: SessionManager;
   stories: StoryStore;
+  sounds?: SoundStore;
   usage: UsageStore;
   closed: ClosedStore;
   schedules?: ScheduleStore;
@@ -213,7 +215,7 @@ function toCreateRequest(b: Record<string, unknown>): CreateSessionRequest {
 }
 
 function toStoryInput(b: Record<string, unknown>): StoryInput {
-  return { name: str(b.name), ticket: str(b.ticket), cwd: str(b.cwd), color: str(b.color) };
+  return { name: str(b.name), ticket: str(b.ticket), cwd: str(b.cwd), color: str(b.color), sound: str(b.sound) };
 }
 
 /**
@@ -297,6 +299,7 @@ function serveStatic(webDir: string, pathname: string, method: string, res: Serv
 
 export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res: ServerResponse) => void {
   const { manager } = deps;
+  const sounds = deps.sounds ?? new SoundStore(deps.stories);
 
   /** Claude Code names the conversation in every report; that is how a restart can resume it. */
   function noteConversation(sessionId: string, body: unknown): void {
@@ -536,6 +539,37 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       res.writeHead(200, { 'content-type': image.type, 'content-length': String(image.bytes.length), 'x-content-type-options': 'nosniff', 'cache-control': 'private, max-age=86400' });
       res.end(image.bytes);
       return;
+    }
+
+    if (path === '/api/sounds') {
+      if (method === 'GET') return send(res, 200, { sounds: sounds.list(), settings: sounds.settings() });
+      if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
+      const bytes = await readBytes(req, MAX_SOUND_BYTES);
+      const file = sounds.add(bytes, url.searchParams.get('name') ?? '');
+      if (!file) throw new HttpError(400, 'Not a sound ShellYard can use. Use an MP3, WAV or OGG file.');
+      return send(res, 201, file);
+    }
+
+    if (path === '/api/sounds/settings') {
+      if (method !== 'PUT') throw new HttpError(405, 'Method not allowed');
+      return send(res, 200, sounds.setSettings(await readObject(req)));
+    }
+
+    const soundMatch = /^\/api\/sounds\/([^/]+)$/.exec(path);
+    if (soundMatch) {
+      const id = decodeId(soundMatch[1]!);
+      if (method === 'GET') {
+        const sound = sounds.read(id);
+        if (!sound) throw new HttpError(404, 'No such sound');
+        res.writeHead(200, { 'content-type': sound.type, 'content-length': String(sound.bytes.length), 'x-content-type-options': 'nosniff', 'cache-control': 'private, max-age=86400' });
+        res.end(sound.bytes);
+        return;
+      }
+      if (method === 'DELETE') {
+        if (!sounds.remove(id)) throw new HttpError(404, 'No such sound');
+        return send(res, 204);
+      }
+      throw new HttpError(405, 'Method not allowed');
     }
 
     if (deps.schedules && (path === '/api/schedules' || path.startsWith('/api/schedules/'))) {

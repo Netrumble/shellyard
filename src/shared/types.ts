@@ -35,6 +35,26 @@ export interface Story {
   ticket: string;
   cwd: string;
   color: string;
+  /** Id of an uploaded sound played for this area; '' means none. */
+  sound: string;
+}
+
+/** An uploaded sound; id is '<uuid>.<ext>'. */
+export interface SoundFile {
+  id: string;
+  name: string;
+}
+
+/** Which sound plays for each event; null means silence. */
+export interface SoundSettings {
+  blocked: string | null;
+  finished: string | null;
+  maybeWaiting: string | null;
+}
+
+export interface SoundLibrary {
+  sounds: SoundFile[];
+  settings: SoundSettings;
 }
 
 export interface SessionInfo {

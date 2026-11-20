@@ -8,6 +8,8 @@ export interface StoryInput {
   ticket?: string;
   cwd?: string;
   color?: string;
+  /** '' or the id of an uploaded sound; anything else becomes ''. */
+  sound?: string;
 }
 
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -51,6 +53,10 @@ export function randomAreaColor(existing: string[], random: () => number): strin
 }
 
 const clean = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+const knownSound = (v: unknown): string => {
+  const id = clean(v);
+  return id && loadConfig().config.soundFiles.some((f) => f.id === id) ? id : '';
+};
 const cleanColor = (v: unknown): string => (/^#[0-9a-f]{6}$/i.test(clean(v)) ? clean(v) : '');
 
 /**
@@ -75,6 +81,7 @@ export class StoryStore {
       cwd: clean(input.cwd),
       // Every area has a colour; one that was not chosen is picked at random.
       color: cleanColor(input.color) || randomAreaColor(this.list().map((s) => s.color), Math.random),
+      sound: knownSound(input.sound),
     };
     this.save([...this.list(), story]);
     return story;
@@ -90,6 +97,7 @@ export class StoryStore {
       ticket: patch.ticket === undefined ? current.ticket : clean(patch.ticket),
       cwd: patch.cwd === undefined ? current.cwd : clean(patch.cwd),
       color: patch.color === undefined ? current.color : cleanColor(patch.color),
+      sound: patch.sound === undefined ? current.sound : knownSound(patch.sound),
     };
     this.save(stories.map((s) => (s.id === id ? next : s)));
     return next;
@@ -100,6 +108,13 @@ export class StoryStore {
     if (!stories.some((s) => s.id === id)) return false;
     this.save(stories.filter((s) => s.id !== id));
     return true;
+  }
+
+  /** Areas that played this sound no longer have one. */
+  clearSound(soundId: string): void {
+    const stories = this.list();
+    if (!stories.some((s) => s.sound === soundId)) return;
+    this.save(stories.map((s) => (s.sound === soundId ? { ...s, sound: '' } : s)));
   }
 
   /** Puts the areas in the given order (see applyOrder); returns the new list. */

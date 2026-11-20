@@ -59,7 +59,7 @@ describe('statusLabel', () => {
 });
 
 describe('stories', () => {
-  const story = (id: string): Story => ({ id, name: id.toUpperCase(), ticket: '', cwd: '', color: '' });
+  const story = (id: string): Story => ({ id, name: id.toUpperCase(), ticket: '', cwd: '', color: '', sound: '' });
   const inS = (s: SessionInfo, storyId: string | null): SessionInfo => ({ ...s, storyId });
   const a1 = inS(session('a1', 'attention', 'blocked'), 'a');
   const a2 = inS(session('a2', 'working'), 'a');

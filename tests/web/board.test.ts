@@ -3,7 +3,7 @@ import { areaSummary, boardAreas } from '../../src/web/board.js';
 import type { SessionInfo, Story } from '../../src/shared/types.js';
 import { session } from './store.test.js';
 
-const area = (id: string): Story => ({ id, name: id.toUpperCase(), ticket: '', cwd: '', color: '' });
+const area = (id: string): Story => ({ id, name: id.toUpperCase(), ticket: '', cwd: '', color: '', sound: '' });
 const inArea = (s: SessionInfo, storyId: string | null): SessionInfo => ({ ...s, storyId });
 
 describe('boardAreas', () => {
