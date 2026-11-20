@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { recipeError, type Recipe, type RecipeSession } from '../shared/recipes.js';
+import { cleanRepo, recipeError, type Recipe, type RecipeSession } from '../shared/recipes.js';
 
 // The recipes of "Start from ticket", in recipes.json. A file that cannot be read gives none.
 
@@ -25,7 +25,7 @@ export function toRecipeFields(v: unknown): Omit<Recipe, 'id'> {
   const o = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
   return {
     name: str(o.name),
-    repo: str(o.repo),
+    repo: cleanRepo(str(o.repo)),
     base: str(o.base),
     branch: str(o.branch),
     folder: str(o.folder),

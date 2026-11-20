@@ -187,7 +187,8 @@ export function NeedsYouLane(): React.JSX.Element | null {
       <div className="ny-grid">
         {waiting.map((s) => {
           const Card = CARDS[kindOf(s)];
-          return <Card key={s.id} session={s} />;
+          // Keyed by request too: a new request gets a fresh card, without the errors of the last one.
+          return <Card key={`${s.id}:${s.pending?.id ?? ''}`} session={s} />;
         })}
       </div>
     </section>

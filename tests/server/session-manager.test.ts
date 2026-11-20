@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { defaultConfig, type Config } from '../../src/server/config.js';
 import { mapIntoWorktree, SessionManager } from '../../src/server/session-manager.js';
+import type { HookRequest } from '../../src/server/claude-launch.js';
 import type { Profile, SessionInfo, Story, WorktreeListing } from '../../src/shared/types.js';
 import { FakeClock, fakePtyFactory, useTempHome } from '../helpers.js';
 
@@ -163,11 +164,35 @@ describe('order', () => {
 
   describe('pending requests', () => {
     const bash = { kind: 'permission' as const, tool: 'Bash', detail: 'dotnet test', message: null };
+    const shown = { kind: 'permission' as const, tool: 'Bash', detail: null, message: 'Claude needs your permission to use Bash' };
+    /** A permission request, then the notification that its menu is on screen. */
+    const ask = (id: string, req: HookRequest = bash, command: string | null = null): void => {
+      mgr.hook(id, 'PermissionRequest', false, req, command);
+      mgr.hook(id, 'Notification', false, shown);
+    };
+
+    it('blocks only once the menu is on screen, and forgets a request settled without the user', () => {
+      const s = claude();
+      mgr.hook(s.id, 'UserPromptSubmit', false);
+      mgr.hook(s.id, 'PermissionRequest', false, bash);
+      expect(mgr.get(s.id)).toMatchObject({ status: 'working', pending: { detail: 'dotnet test' } });
+      // Another hook, or the permission mode, allowed it: the tool ran.
+      mgr.hook(s.id, 'PostToolUse', false);
+      expect(mgr.get(s.id)).toMatchObject({ status: 'working', pending: null });
+    });
+
+    it('keeps the request on screen while subagents report their own tools', () => {
+      const s = claude();
+      ask(s.id);
+      mgr.hook(s.id, 'PreToolUse', false);
+      mgr.hook(s.id, 'PostToolUse', false);
+      expect(mgr.get(s.id)).toMatchObject({ status: 'attention', reason: 'blocked', pending: { detail: 'dotnet test' } });
+    });
 
     it('records what a permission request asks, and forgets it once the session moves on', () => {
       const s = claude();
       mgr.hook(s.id, 'UserPromptSubmit', false);
-      mgr.hook(s.id, 'PermissionRequest', false, bash);
+      ask(s.id);
       const p = mgr.get(s.id)!.pending!;
       expect(mgr.get(s.id)).toMatchObject({ status: 'attention', reason: 'blocked' });
       expect(p).toMatchObject({ kind: 'permission', tool: 'Bash', detail: 'dotnet test', since: clock.now() });
@@ -216,20 +241,20 @@ describe('order', () => {
 
     it('answers the request on screen with the key of the choice', () => {
       const s = claude();
-      mgr.hook(s.id, 'PermissionRequest', false, bash);
+      ask(s.id);
       const id = mgr.get(s.id)!.pending!.id;
       expect(mgr.answer(s.id, id, 'once')).toBe('answered');
       expect(ptys.last().written).toEqual(['\r']);
       expect(mgr.get(s.id)).toMatchObject({ status: 'working', pending: null });
 
-      mgr.hook(s.id, 'PermissionRequest', false, bash);
+      ask(s.id);
       expect(mgr.answer(s.id, mgr.get(s.id)!.pending!.id, 'deny')).toBe('answered');
       expect(ptys.last().written).toEqual(['\r', '\x1b']);
     });
 
     it('refuses an answer meant for a request no longer on screen, typing nothing', () => {
       const s = claude();
-      mgr.hook(s.id, 'PermissionRequest', false, bash);
+      ask(s.id);
       const old = mgr.get(s.id)!.pending!.id;
       mgr.hook(s.id, 'PermissionRequest', false, bash);
       expect(mgr.answer(s.id, old, 'once')).toBe('stale');
@@ -241,13 +266,20 @@ describe('order', () => {
 
     it('keeps the raw command of the request on screen, off the info the page gets', () => {
       const s = claude();
-      mgr.hook(s.id, 'PermissionRequest', false, bash, 'dotnet test  --filter "a b"');
+      ask(s.id, bash, 'dotnet test  --filter "a b"');
       const p = mgr.get(s.id)!.pending!;
       expect(JSON.stringify(mgr.get(s.id))).not.toContain('--filter');
       expect(mgr.pendingCommand(s.id, p.id)).toBe('dotnet test  --filter "a b"');
       expect(mgr.pendingCommand(s.id, 'other')).toBeNull();
       mgr.input(s.id, '1');
       expect(mgr.pendingCommand(s.id, p.id)).toBeNull();
+    });
+
+    it('never answers a plan approval or a question with permission keys', () => {
+      const s = claude();
+      ask(s.id, { kind: 'question', tool: 'ExitPlanMode', detail: 'the plan', message: null });
+      expect(mgr.answer(s.id, mgr.get(s.id)!.pending!.id, 'once')).toBe('stale');
+      expect(ptys.last().written).toEqual([]);
     });
 
     it('does not answer a question with permission keys', () => {
@@ -259,10 +291,25 @@ describe('order', () => {
   });
 
   describe('typePrompt', () => {
+    /** A Claude session whose main screen is up, as its first status line says. */
+    const ready = (): SessionInfo => {
+      const s = claude();
+      mgr.noteStatusLine(s.id);
+      return s;
+    };
+
+    it('types nothing into a session still starting', () => {
+      const s = claude();
+      expect(mgr.typePrompt(s.id, 'x')).toBe('starting');
+      expect(ptys.last().written).toEqual([]);
+      mgr.noteStatusLine(s.id);
+      expect(mgr.typePrompt(s.id, 'x')).toBe('sent');
+    });
+
     it('pastes the prompt into a session waiting at its prompt, then presses Enter', () => {
       vi.useFakeTimers();
       try {
-        const s = claude();
+        const s = ready();
         expect(mgr.typePrompt(s.id, 'Rebase on release/2026.12\nthen run the tests')).toBe('sent');
         expect(ptys.last().written).toEqual(['\x1b[200~Rebase on release/2026.12\nthen run the tests\x1b[201~']);
         vi.advanceTimersByTime(400);
@@ -273,15 +320,15 @@ describe('order', () => {
     });
 
     it('also takes a session that has finished its turn', () => {
-      const s = claude();
+      const s = ready();
       mgr.hook(s.id, 'Stop', false);
       expect(mgr.typePrompt(s.id, 'next')).toBe('sent');
     });
 
     it('types nothing into a session at work, blocked, a shell or an unknown one', () => {
-      const working = claude();
+      const working = ready();
       mgr.hook(working.id, 'UserPromptSubmit', false);
-      const blocked = claude();
+      const blocked = ready();
       mgr.hook(blocked.id, 'Notification', false);
       const sh = shell();
       expect(mgr.typePrompt(working.id, 'x')).toBe('busy');
@@ -294,7 +341,7 @@ describe('order', () => {
     it('does not press Enter once the session has moved on', () => {
       vi.useFakeTimers();
       try {
-        const s = claude();
+        const s = ready();
         mgr.typePrompt(s.id, 'x');
         mgr.hook(s.id, 'Notification', false);
         vi.advanceTimersByTime(400);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fillTemplate, newRecipe, normalizeTicket, planTicket, recipeError, type Recipe } from '../../src/shared/recipes.js';
+import { cleanRepo, fillTemplate, newRecipe, normalizeTicket, planTicket, recipeError, type Recipe } from '../../src/shared/recipes.js';
 
 const recipe = (over: Partial<Recipe> = {}): Recipe => ({
   ...newRecipe('C:\\repos\\hcm'),
@@ -28,6 +28,19 @@ describe('fillTemplate', () => {
     expect(fillTemplate('feat/{ticket-lower}', 'HCM-7912', '/r/hcm')).toBe('feat/hcm-7912');
     expect(fillTemplate('{repo}-{ticket-lower}', 'HCM-7912', '/r/hcm')).toBe('/r/hcm-hcm-7912');
     expect(fillTemplate('Read {ticket} and {ticket}', 'HCM-1', '/r')).toBe('Read HCM-1 and HCM-1');
+  });
+});
+
+describe('cleanRepo', () => {
+  it('drops a trailing separator, so the worktree goes next to the repository, not inside it', () => {
+    expect(cleanRepo(String.raw`C:\repos\hcm\ `)).toBe(String.raw`C:\repos\hcm`);
+    expect(cleanRepo('/r/hcm//')).toBe('/r/hcm');
+    expect(planTicket(recipe({ repo: String.raw`C:\repos\hcm\\` }), 'HCM-7912')).toMatchObject({ worktree: String.raw`C:\repos\hcm-hcm-7912` });
+  });
+
+  it('keeps a root as it is', () => {
+    expect(cleanRepo(String.raw`C:\ `)).toBe(String.raw`C:\ `.trim());
+    expect(cleanRepo('/')).toBe('/');
   });
 });
 

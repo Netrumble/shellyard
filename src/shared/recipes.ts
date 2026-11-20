@@ -51,6 +51,16 @@ function isAbsolutePath(p: string): boolean {
   return /^(?:[A-Za-z]:[\\/]|\\\\|\/)/.test(p);
 }
 
+/**
+ * The repository folder without a trailing separator, so that "{repo}-{ticket}" names a folder
+ * next to it, not one inside it. A root (C:\, /) keeps its separator.
+ */
+export function cleanRepo(repo: string): string {
+  const r = repo.trim();
+  if (/^(?:[A-Za-z]:[\\/]?|[\\/]+)$/.test(r)) return r;
+  return r.replace(/[\\/]+$/, '');
+}
+
 const NAMES_TICKET = /\{ticket(?:-lower)?\}/;
 
 /** A recipe with the usual choices, for the repository given. */
@@ -76,7 +86,7 @@ export function planTicket(r: Omit<Recipe, 'id'>, rawTicket: string): TicketPlan
   if (!ticket) return { error: 'Write a ticket code such as HCM-7912.' };
   const problem = recipeError(r);
   if (problem) return { error: problem };
-  const repo = r.repo.trim();
+  const repo = cleanRepo(r.repo);
   const worktree = fillTemplate(r.folder.trim(), ticket, repo);
   if (!isAbsolutePath(worktree)) return { error: 'The folder of the worktree must come to an absolute path; start it with {repo} or a drive.' };
   return {

@@ -118,6 +118,25 @@ function detailOf(tool: string | null, input: unknown): string | null {
   }
 }
 
+/** The first question of an AskUserQuestion input, fit to show. */
+function firstQuestion(input: unknown): string | null {
+  const questions = (input as { questions?: unknown } | null)?.questions;
+  return clean(Array.isArray(questions) ? (questions[0] as { question?: unknown } | undefined)?.question : undefined);
+}
+
+/** Tools whose permission menu opens on "Yes" (allow once) and is refused with Escape. */
+const PLAIN_YES_TOOLS = new Set(['Bash', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch']);
+
+/**
+ * Whether Enter on the menu of this tool means "allow once" and nothing more. MCP tools ask the
+ * same way. Anything else (plan approval, questions, tools ShellYard does not know) is not
+ * answered by pressing keys blind.
+ */
+export function plainYesMenu(tool: string | null): boolean {
+  if (!tool) return false;
+  return PLAIN_YES_TOOLS.has(tool) || /^mcp__[\w-]+__[\w-]+$/.test(tool);
+}
+
 /**
  * The Bash command of a permission request exactly as Claude Code sent it: what an area rule is
  * checked against and made from. Never shown as is (see parseHookRequest for that).
@@ -141,22 +160,27 @@ export function parseHookRequest(body: unknown): HookRequest | null {
   const tool = typeof b.tool_name === 'string' ? clean(b.tool_name) : null;
   switch (b.hook_event_name) {
     case 'PermissionRequest':
-      return { kind: 'permission', tool, detail: detailOf(tool, b.tool_input), message: null };
+      // Only a menu that opens on a plain "Yes" can be answered from outside: anything else
+      // (ExitPlanMode, AskUserQuestion, a tool we do not know) is shown as a question.
+      return {
+        kind: plainYesMenu(tool) ? 'permission' : 'question',
+        tool,
+        detail: tool === 'AskUserQuestion' ? firstQuestion(b.tool_input) : detailOf(tool, b.tool_input),
+        message: null,
+      };
     case 'Notification': {
       if (parseHookBody(b)?.idleReminder) return null;
       const message = clean(b.message);
       if (b.notification_type === 'permission_prompt' || (message !== null && /permission/i.test(message))) {
         const named = message ? /permission to use ([\w.-]+)/i.exec(message) : null;
-        return { kind: 'permission', tool: named ? named[1]! : null, detail: null, message };
+        const namedTool = named ? named[1]! : null;
+        return { kind: plainYesMenu(namedTool) ? 'permission' : 'question', tool: namedTool, detail: null, message };
       }
       return { kind: 'question', tool: null, detail: null, message };
     }
-    case 'PreToolUse': {
+    case 'PreToolUse':
       if (tool !== 'AskUserQuestion') return null;
-      const questions = (b.tool_input as { questions?: unknown } | null)?.questions;
-      const first = Array.isArray(questions) ? (questions[0] as { question?: unknown } | undefined)?.question : undefined;
-      return { kind: 'question', tool, detail: clean(first), message: null };
-    }
+      return { kind: 'question', tool, detail: firstQuestion(b.tool_input), message: null };
     default:
       return null;
   }

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { cleanupClaudeLaunch, parseHookBody, parseHookRequest, permissionCommand, prepareClaudeLaunch, withoutClaudeSessionMarkers } from '../../src/server/claude-launch.js';
+import { cleanupClaudeLaunch, parseHookBody, parseHookRequest, permissionCommand, plainYesMenu, prepareClaudeLaunch, withoutClaudeSessionMarkers } from '../../src/server/claude-launch.js';
 import { useTempHome } from '../helpers.js';
 
 const base = { sessionId: 'sess-1', port: 7717, hookToken: 'hook-token', hookScriptPath: 'C:\\pkg\\dist\\hook\\hook.js', statusScriptPath: 'C:\\pkg\\dist\\hook\\statusline.js', extraArgs: [] };
@@ -173,5 +173,27 @@ describe('permissionCommand', () => {
     expect(permissionCommand({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'x' } })).toBeNull();
     expect(permissionCommand({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: {} })).toBeNull();
     expect(permissionCommand(null)).toBeNull();
+  });
+});
+
+describe('plainYesMenu and the kind of a request', () => {
+  const kindOf = (tool_name: string) => parseHookRequest({ hook_event_name: 'PermissionRequest', tool_name, tool_input: {} })?.kind;
+
+  it('answers from outside only the menus that open on a plain Yes', () => {
+    for (const t of ['Bash', 'Edit', 'Write', 'WebFetch', 'mcp__jira__get_issue']) expect(plainYesMenu(t), t).toBe(true);
+    for (const t of ['ExitPlanMode', 'AskUserQuestion', 'SomethingNew', 'mcp__bad']) expect(plainYesMenu(t), t).toBe(false);
+    expect(plainYesMenu(null)).toBe(false);
+  });
+
+  it('shows plan approvals, questions and unknown tools as questions, never as permissions', () => {
+    expect(kindOf('Bash')).toBe('permission');
+    expect(kindOf('ExitPlanMode')).toBe('question');
+    expect(kindOf('AskUserQuestion')).toBe('question');
+    expect(kindOf('SomethingNew')).toBe('question');
+  });
+
+  it('does the same for a permission notification', () => {
+    expect(parseHookRequest({ hook_event_name: 'Notification', notification_type: 'permission_prompt', message: 'Claude needs your permission to use ExitPlanMode' })?.kind).toBe('question');
+    expect(parseHookRequest({ hook_event_name: 'Notification', notification_type: 'permission_prompt', message: 'Claude needs your permission' })?.kind).toBe('question');
   });
 });

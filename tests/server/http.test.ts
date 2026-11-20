@@ -97,6 +97,13 @@ describe('http api', () => {
     await new Promise((r) => server.close(r));
   });
 
+  /** A permission request, then the notification that its menu is on screen; the status of the first. */
+  const ask = async (id: string, body: string): Promise<number> => {
+    const status = (await call('POST', `/api/hooks/${id}`, { auth: 'hook', body })).status;
+    if (status === 204) await call('POST', `/api/hooks/${id}`, { auth: 'hook', body: JSON.stringify({ hook_event_name: 'Notification', notification_type: 'permission_prompt', message: 'Claude needs your permission' }) });
+    return status;
+  };
+
   const newSession = async (kind: 'shell' | 'claude' = 'shell') =>
     (await call('POST', '/api/sessions', { body: JSON.stringify({ kind, command: process.execPath, cwd: home.dir() }) })).json();
 
@@ -317,7 +324,7 @@ describe('http api', () => {
     it('records what a permission request asks, and lets the user answer it once', async () => {
       const c = await newSession('claude');
       const hook = { hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'dotnet test' } };
-      expect((await call('POST', `/api/hooks/${c.id}`, { auth: 'hook', body: JSON.stringify(hook) })).status).toBe(204);
+      expect(await ask(c.id, JSON.stringify(hook))).toBe(204);
       const pending = mgr.get(c.id)!.pending!;
       expect(pending).toMatchObject({ kind: 'permission', tool: 'Bash', detail: 'dotnet test' });
 
@@ -353,13 +360,17 @@ describe('http api', () => {
     it('types it into the sessions at their prompt and says which did not take it', async () => {
       const a = await newSession('claude');
       const b = await newSession('claude');
+      const fresh = await newSession('claude');
+      mgr.noteStatusLine(a.id);
+      mgr.noteStatusLine(b.id);
       mgr.hook(b.id, 'UserPromptSubmit', false);
       const sh = await newSession('shell');
-      const r = await send({ ids: [a.id, b.id, sh.id, 'gone', a.id], prompt: 'run the tests' });
+      const r = await send({ ids: [a.id, b.id, fresh.id, sh.id, 'gone', a.id], prompt: 'run the tests' });
       expect(r.status).toBe(200);
       expect((await r.json()).results).toEqual([
         { id: a.id, outcome: 'sent' },
         { id: b.id, outcome: 'busy' },
+        { id: fresh.id, outcome: 'starting' },
         { id: sh.id, outcome: 'not-claude' },
         { id: 'gone', outcome: 'missing' },
       ]);
@@ -406,7 +417,7 @@ describe('http api', () => {
         [s.id, permission('dotnet test', 'Edit')],
         [other.s.id, permission('dotnet test')],
       ] as const) {
-        expect((await call('POST', `/api/hooks/${id}`, { auth: 'hook', body })).status).toBe(204);
+        expect(await ask(id, body)).toBe(204);
         expect(mgr.get(id)).toMatchObject({ status: 'attention', reason: 'blocked' });
         mgr.input(id, '\x1b');
       }
@@ -415,7 +426,7 @@ describe('http api', () => {
 
     it('"always in this area" adds the rule made from the command, and allows it once', async () => {
       const { story, s } = await inArea();
-      await call('POST', `/api/hooks/${s.id}`, { auth: 'hook', body: permission('dotnet test src/Hcm.Payroll.Tests --filter Slot') });
+      await ask(s.id, permission('dotnet test src/Hcm.Payroll.Tests --filter Slot'));
       const r = await answer(s.id, mgr.get(s.id)!.pending!.id, 'area');
       expect(r.status).toBe(200);
       expect(ptys.last().written).toEqual(['\r']);
@@ -424,16 +435,23 @@ describe('http api', () => {
 
     it('refuses "always in this area" for what cannot become a rule, typing nothing', async () => {
       const { s } = await inArea();
-      await call('POST', `/api/hooks/${s.id}`, { auth: 'hook', body: permission('dotnet test; rm -rf /') });
+      await ask(s.id, permission('dotnet test; rm -rf /'));
       expect((await answer(s.id, mgr.get(s.id)!.pending!.id, 'area')).status).toBe(409);
       mgr.input(s.id, '\x1b');
 
-      await call('POST', `/api/hooks/${s.id}`, { auth: 'hook', body: permission('x', 'Edit') });
+      await ask(s.id, permission('x', 'Edit'));
       expect((await answer(s.id, mgr.get(s.id)!.pending!.id, 'area')).status).toBe(409);
+      mgr.input(s.id, '\x1b');
+
+      // A permission known only from the notification: no command to make a rule from.
+      await call('POST', `/api/hooks/${s.id}`, { auth: 'hook', body: JSON.stringify({ hook_event_name: 'Notification', notification_type: 'permission_prompt', message: 'Claude needs your permission to use Bash' }) });
+      const r = await answer(s.id, mgr.get(s.id)!.pending!.id, 'area');
+      expect(r.status).toBe(409);
+      expect((await r.json()).error).toMatch(/did not say which command/);
       mgr.input(s.id, '\x1b');
 
       const loose = await newSession('claude');
-      await call('POST', `/api/hooks/${loose.id}`, { auth: 'hook', body: permission('dotnet test') });
+      await ask(loose.id, permission('dotnet test'));
       expect((await answer(loose.id, mgr.get(loose.id)!.pending!.id, 'area')).status).toBe(409);
       expect((await answer(loose.id, 'stale', 'area')).status).toBe(409);
       expect(ptys.last().written).toEqual([]);

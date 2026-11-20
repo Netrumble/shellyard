@@ -99,6 +99,13 @@ describe('suggestPattern', () => {
     expect(suggestPattern('npm run build')).toBe('npm run *');
   });
 
+  it('keeps the command whole for a program not known to have subcommands', () => {
+    expect(suggestPattern('rm build dist')).toBe('rm build dist');
+    expect(suggestPattern('sudo apt install x')).toBe('sudo apt install x');
+    expect(suggestPattern('python manage.py migrate')).toBe('python manage.py migrate');
+    expect(suggestPattern('git.exe status --short')).toBe('git.exe status *');
+  });
+
   it('keeps the command whole when it is short, or its second word is an option or a path', () => {
     expect(suggestPattern('git status')).toBe('git status');
     expect(suggestPattern('ls')).toBe('ls');

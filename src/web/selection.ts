@@ -15,13 +15,14 @@ export function isSelectGesture(e: { shiftKey: boolean; ctrlKey: boolean; metaKe
   return !e.altKey && (e.shiftKey || e.ctrlKey || e.metaKey);
 }
 
-export type SendOutcome = 'sent' | 'busy' | 'not-claude' | 'exited' | 'missing';
+export type SendOutcome = 'sent' | 'busy' | 'starting' | 'not-claude' | 'exited' | 'missing';
 
 /** Why a session did not take the prompt; "sent" and "missing" are worded where they are used. */
 const WHY: Record<SendOutcome, string> = {
   sent: 'sent',
   missing: 'closed',
   busy: 'busy: it is working or waiting on a question',
+  starting: 'still starting: try again in a moment',
   'not-claude': 'not a Claude Code session',
   exited: 'it has ended',
 };

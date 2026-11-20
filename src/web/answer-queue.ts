@@ -7,6 +7,8 @@ export interface QueueContext {
   typing: boolean;
   /** The focus is on a button: Enter presses it, and must not also open the terminal. */
   onButton: boolean;
+  /** A dialog is open over the queue: its keys are its own, never an answer to what is behind it. */
+  inDialog: boolean;
   /** Something is selected. */
   hasItem: boolean;
   /** The selected item is a permission request that can be answered from here. */
@@ -38,7 +40,7 @@ const KEYS: Record<string, QueueAction> = {
 const ANSWERS = new Set<QueueAction>(['allow', 'always', 'deny']);
 
 export function queueAction(e: { key: string; ctrlKey: boolean; altKey: boolean; metaKey: boolean; repeat: boolean }, c: QueueContext): QueueAction | null {
-  if (c.typing || e.ctrlKey || e.altKey || e.metaKey) return null;
+  if (c.typing || c.inDialog || e.ctrlKey || e.altKey || e.metaKey) return null;
   const action = KEYS[e.key.toLowerCase()];
   if (!action) return null;
   if (action === 'next' || action === 'prev') return action;

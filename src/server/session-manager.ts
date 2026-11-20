@@ -81,6 +81,8 @@ interface Entry {
   asked: HookRequest | null;
   /** The raw command of the permission request on screen, kept off the info the page gets. */
   pendingCommand: { requestId: string; command: string | null } | null;
+  /** Claude Code has drawn its main screen (its first status line came): typing now reaches it. */
+  ready: boolean;
 }
 
 /**
@@ -279,6 +281,7 @@ export class SessionManager {
       env: { ...(profile?.env ?? {}) },
       asked: null,
       pendingCommand: null,
+      ready: false,
     };
     this.entries.set(id, entry);
 
@@ -366,6 +369,7 @@ export class SessionManager {
     info.liveCwd = null;
     info.pending = null;
     entry.asked = null;
+    entry.ready = false;
     info.cwd = cwd;
     if (info.kind === 'claude') {
       if (entry.conversationId) entry.retired.add(entry.conversationId);
@@ -628,12 +632,14 @@ export class SessionManager {
    * a moment later, as a scheduled run does. Refuses (and types nothing into) a session that is
    * not at its prompt. Enter is pressed only if the same process is still waiting there.
    */
-  typePrompt(id: string, prompt: string): 'sent' | 'missing' | PromptRefusal {
+  typePrompt(id: string, prompt: string): 'sent' | 'missing' | 'starting' | PromptRefusal {
     const e = this.entries.get(id);
     if (!e) return 'missing';
     const refusal = promptRefusal(e.info);
     if (refusal) return refusal;
     if (!e.pty) return 'exited';
+    // Typed before Claude Code is up, the prompt would be lost while the outcome said "sent".
+    if (!e.ready) return 'starting';
     const generation = e.generation;
     this.input(id, pasteOf(prompt));
     setTimeout(() => {
@@ -653,11 +659,25 @@ export class SessionManager {
     if (name === 'PreToolUse' && request) e.asked = request;
     else if (name === 'PostToolUse' || name === 'UserPromptSubmit' || name === 'Stop') e.asked = null;
     this.dispatch(e, { type: 'hook', name, idleReminder });
+    // A request that never blocked the session was settled without the user (another hook,
+    // the permission mode): the session has moved on, and the request with it. While blocked,
+    // tool events come from subagents and say nothing about the request on screen.
+    const blocked = e.info.status === 'attention' && e.info.reason === 'blocked';
+    if (e.info.pending && !blocked && name !== 'PermissionRequest' && name !== 'Notification') {
+      e.info.pending = null;
+      this.emitChange();
+    }
     if (this.notePending(e, name, request)) {
       if (name === 'PermissionRequest' && e.info.pending) e.pendingCommand = { requestId: e.info.pending.id, command };
       this.emitChange();
     }
     return true;
+  }
+
+  /** A Claude session reported a status line: its main screen is up. */
+  noteStatusLine(id: string): void {
+    const e = this.entries.get(id);
+    if (e) e.ready = true;
   }
 
   /** The Bash command of the request on screen, as Claude Code sent it; null once it is gone. */
@@ -674,11 +694,14 @@ export class SessionManager {
    */
   private notePending(e: Entry, name: HookName, request: HookRequest | null): boolean {
     const { info } = e;
-    if (!request || !(info.status === 'attention' && info.reason === 'blocked')) return false;
+    if (!request || info.status === 'exited') return false;
+    // Known before the menu shows (it may never show); the page offers answers only once the
+    // session is blocked on it, and the next tool event clears it if it was settled elsewhere.
     if (name === 'PermissionRequest') {
       info.pending = { ...request, id: randomUUID(), since: this.deps.now() };
       return true;
     }
+    if (!(info.status === 'attention' && info.reason === 'blocked')) return false;
     if (name !== 'Notification' || info.pending) return false;
     const asked = request.kind === 'question' ? e.asked : null;
     info.pending = { ...request, ...(asked ? { tool: asked.tool, detail: asked.detail } : {}), id: randomUUID(), since: this.deps.now() };

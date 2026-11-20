@@ -419,6 +419,7 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       if (payload.modelName) manager.setModel(id, payload.modelName);
       const reported = rawStatus as { cwd?: unknown; workspace?: { current_dir?: unknown } | null };
       manager.setLiveCwd(id, reported.workspace?.current_dir ?? reported.cwd);
+      manager.noteStatusLine(id);
       deps.onClaudeStatus?.(id);
       send(res, 204);
       return;
@@ -485,26 +486,33 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
         const choice = b.choice === 'once' || b.choice === 'deny' || b.choice === 'area' ? b.choice : null;
         if (typeof b.requestId !== 'string' || !choice) throw new HttpError(400, 'Give the request id and a choice: once, area or deny');
         const STALE = 'That request is no longer waiting: it was answered in the terminal, or another one came.';
+        // For "always in this area", everything the rule needs is checked before any key is pressed.
+        let rule: { storyId: string; pattern: string } | null = null;
         if (choice === 'area') {
-          // The rule is made first, from the command as Claude Code sent it; the answer follows.
           const s = manager.get(id);
           if (!s) throw new HttpError(404, 'No such session');
           if (s.pending?.id !== b.requestId || s.pending.kind !== 'permission') throw new HttpError(409, STALE);
           if (!deps.rules) throw new HttpError(409, 'Area rules are not available here.');
           if (!s.storyId || !deps.stories.list().some((x) => x.id === s.storyId)) throw new HttpError(409, 'This session is in no area. Put it in one first, or allow this once.');
           if (s.pending.tool !== 'Bash') throw new HttpError(409, 'Only Bash commands can be allowed for a whole area. Allow this once.');
-          const pattern = suggestPattern(manager.pendingCommand(id, b.requestId) ?? '');
+          const command = manager.pendingCommand(id, b.requestId);
+          if (command === null) throw new HttpError(409, 'Claude Code did not say which command this is, so it cannot become a rule. Allow it once.');
+          const pattern = suggestPattern(command);
           if (!pattern) throw new HttpError(409, 'This command chains, pipes, redirects or substitutes, so it cannot become a rule. Allow it once.');
-          try {
-            deps.rules.create(s.storyId, pattern);
-          } catch (e) {
-            if (e instanceof RuleError) throw new HttpError(409, e.message);
-            throw e;
-          }
+          rule = { storyId: s.storyId, pattern };
         }
         const outcome = manager.answer(id, b.requestId, choice);
         if (outcome === 'missing') throw new HttpError(404, 'No such session');
         if (outcome === 'stale') throw new HttpError(409, STALE);
+        // The rule follows the answer: a request settled meanwhile in the terminal adds none.
+        if (rule && deps.rules) {
+          try {
+            deps.rules.create(rule.storyId, rule.pattern);
+          } catch (e) {
+            if (e instanceof RuleError) throw new HttpError(409, `Allowed once, but the rule was not added: ${e.message}`);
+            throw e;
+          }
+        }
         return send(res, 200, manager.get(id));
       }
       if (sessionMatch[2] === '/worktree') {

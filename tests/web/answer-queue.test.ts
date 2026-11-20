@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { nextSelection, queueAction, SETTLE_MS, step, type QueueContext } from '../../src/web/answer-queue.js';
 
 const press = (key: string, mods: Partial<{ ctrlKey: boolean; altKey: boolean; metaKey: boolean; repeat: boolean }> = {}) => ({ key, ctrlKey: false, altKey: false, metaKey: false, repeat: false, ...mods });
-const ctx = (over: Partial<QueueContext> = {}): QueueContext => ({ typing: false, onButton: false, answerable: true, canAlways: false, sinceAdvanceMs: 10_000, hasItem: true, ...over });
+const ctx = (over: Partial<QueueContext> = {}): QueueContext => ({ typing: false, onButton: false, inDialog: false, answerable: true, canAlways: false, sinceAdvanceMs: 10_000, hasItem: true, ...over });
 
 describe('queueAction', () => {
   it('maps the letters of the queue to their actions, either case', () => {
@@ -39,6 +39,10 @@ describe('queueAction', () => {
     expect(queueAction(press('Enter'), ctx({ onButton: true }))).toBeNull();
     expect(queueAction(press('a'), ctx({ onButton: true }))).toBe('allow');
     expect(queueAction(press('j'), ctx({ onButton: true }))).toBe('next');
+  });
+
+  it('takes no key while a dialog is open over the queue', () => {
+    for (const k of ['a', 's', 'd', 'r', 'j', 'Enter']) expect(queueAction(press(k), ctx({ inDialog: true, canAlways: true }))).toBeNull();
   });
 
   it('leaves the keys to a terminal or a field being typed in', () => {

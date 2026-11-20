@@ -33,7 +33,7 @@ export function FocusSwitch(): React.JSX.Element {
     >
       <span className="focus-text">
         <span className="focus-title">{on && focus ? `Focus · ${minutesLeft(focus, now)} min left` : `Focus ${FOCUS_MINUTES} min`}</span>
-        {on && <span className="focus-note">Only permissions interrupt · digest at {at}</span>}
+        {on && <span className="focus-note">Only permissions and questions interrupt · digest at {at}</span>}
       </span>
       <span className="focus-track" aria-hidden="true">
         <span className="switch-knob" />

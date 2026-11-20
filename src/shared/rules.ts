@@ -86,14 +86,25 @@ export function ruleMatches(pattern: string, command: string): boolean {
 const SUBCOMMAND = /^[A-Za-z][\w-]*$/;
 
 /**
+ * Programs whose second word is a subcommand, so that "<program> <subcommand> *" still says
+ * what is run. For any other program the second word is an argument ("rm build dist", "sudo
+ * apt install"): widening it would allow far more than was approved.
+ */
+const WITH_SUBCOMMANDS = new Set([
+  'git', 'dotnet', 'npm', 'pnpm', 'yarn', 'bun', 'deno', 'cargo', 'go', 'docker', 'podman', 'kubectl', 'helm',
+  'gh', 'az', 'mvn', 'gradle', 'pip', 'poetry', 'uv', 'terraform', 'make', 'cmake', 'swift', 'flutter', 'rustup',
+]);
+
+/**
  * The rule "Always in this area" makes from a command: the program and its subcommand with any
- * arguments ("dotnet test *"); the whole command when it is that short, or when its second word
- * is an option or a path, so that "rm -rf build" never becomes "rm -rf *". Null when the
- * command can never be a rule.
+ * arguments ("dotnet test *") for a known program with subcommands; otherwise the whole command
+ * exactly, so that "rm build dist" never becomes "rm build *". Null when the command can never
+ * be a rule.
  */
 export function suggestPattern(command: string): string | null {
   const words = commandTokens(command);
   if (!words) return null;
-  if (words.length > 2 && SUBCOMMAND.test(words[1]!)) return `${words[0]} ${words[1]} *`;
+  const program = words[0]!.replace(/\.(exe|cmd)$/i, '').toLowerCase();
+  if (words.length > 2 && WITH_SUBCOMMANDS.has(program) && SUBCOMMAND.test(words[1]!)) return `${words[0]} ${words[1]} *`;
   return words.join(' ');
 }

@@ -16,11 +16,11 @@ describe('focus', () => {
     expect(minutesLeft(f, 44 * MIN + 59_000)).toBe(1);
   });
 
-  it('lets permissions and questions interrupt, and keeps finished sessions for the digest', () => {
+  it('lets permissions and questions interrupt, and keeps finished sessions and guesses for the digest', () => {
     const blocked = session('b', 'attention', 'blocked');
     const maybe = session('m', 'attention', 'maybe-waiting');
     const done = session('f', 'attention', 'finished');
-    expect(splitForFocus([blocked, maybe, done], true)).toEqual({ interrupt: [blocked, maybe], digest: [done] });
+    expect(splitForFocus([blocked, maybe, done], true)).toEqual({ interrupt: [blocked], digest: [maybe, done] });
     expect(splitForFocus([blocked, done], false)).toEqual({ interrupt: [blocked, done], digest: [] });
   });
 
@@ -29,9 +29,9 @@ describe('focus', () => {
   });
 
   it('says what finished, in a sentence', () => {
-    expect(digestText([])).toBe('Nothing finished while you focused.');
-    expect(digestText(['Triage'])).toBe('While you focused, 1 session finished: Triage.');
-    expect(digestText(['A', 'B', 'C'])).toBe('While you focused, 3 sessions finished: A, B and C.');
+    expect(digestText([])).toBe('Nothing finished or went quiet while you focused.');
+    expect(digestText(['Triage'])).toBe('While you focused, 1 session finished or went quiet: Triage.');
+    expect(digestText(['A', 'B', 'C'])).toBe('While you focused, 3 sessions finished or went quiet: A, B and C.');
   });
 
   it('is remembered by this browser until it ends, and survives a broken storage', () => {

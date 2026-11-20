@@ -139,6 +139,8 @@ export function AnswerQueue({ storyFilter }: { storyFilter?: string | null }): R
       const action = queueAction(e, {
         typing: isTypingTarget(active),
         onButton: active instanceof HTMLButtonElement || active instanceof HTMLAnchorElement,
+        // Any dialog or overlay (palette, ticket, area, new session): focus inside it, or one open at all.
+        inDialog: (active?.closest('[role="dialog"], dialog, .overlay, .popover') ?? null) !== null || document.querySelector('.overlay, [aria-modal="true"]') !== null,
         hasItem: s !== null,
         answerable: s !== null && answerable(s) && !working,
         canAlways: s !== null && areaRuleFor(s, areas) !== null,

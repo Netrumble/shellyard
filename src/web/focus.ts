@@ -27,8 +27,9 @@ export function minutesLeft(f: Focus, now: number): number {
 /** Of the sessions that just started waiting: which may interrupt now, and which wait for the digest. */
 export function splitForFocus(waiting: SessionInfo[], on: boolean): { interrupt: SessionInfo[]; digest: SessionInfo[] } {
   if (!on) return { interrupt: waiting, digest: [] };
-  const finished = (s: SessionInfo): boolean => s.reason === 'finished';
-  return { interrupt: waiting.filter((s) => !finished(s)), digest: waiting.filter(finished) };
+  // A permission or a question blocks the session; a finished turn or a guess that it waits does not.
+  const blocks = (s: SessionInfo): boolean => s.reason === 'blocked';
+  return { interrupt: waiting.filter(blocks), digest: waiting.filter((s) => !blocks(s)) };
 }
 
 /** Adds sessions to the digest, each once. */
@@ -38,11 +39,11 @@ export function addToDigest(digest: string[], ids: string[]): string[] {
   return next;
 }
 
-/** "While you focused, 3 sessions finished: A, B and C." */
+/** "While you focused, 3 sessions finished or went quiet: A, B and C." */
 export function digestText(names: string[]): string {
-  if (names.length === 0) return 'Nothing finished while you focused.';
+  if (names.length === 0) return 'Nothing finished or went quiet while you focused.';
   const list = names.length === 1 ? names[0]! : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
-  return `While you focused, ${names.length} session${names.length === 1 ? '' : 's'} finished: ${list}.`;
+  return `While you focused, ${names.length} session${names.length === 1 ? '' : 's'} finished or went quiet: ${list}.`;
 }
 
 export function loadFocus(now: number): Focus | null {
