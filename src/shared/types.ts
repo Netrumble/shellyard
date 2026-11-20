@@ -244,3 +244,20 @@ export type ServerMessage =
   | { t: 'activity'; rates: Record<string, number> }
   | { t: 'snapshot'; id: string; data: string }
   | { t: 'output'; id: string; data: string };
+
+export interface Worktree {
+  path: string;
+  /** Null when the worktree is detached. */
+  branch: string | null;
+  /** The checked-out commit, shortened to 7 characters. */
+  head: string;
+  isMain: boolean;
+  locked: boolean;
+  prunable: boolean;
+}
+
+export interface WorktreeListing {
+  /** The worktree the asked folder belongs to. */
+  current: string;
+  worktrees: Worktree[];
+}
