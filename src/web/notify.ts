@@ -27,13 +27,27 @@ export function viewForSession(sessions: SessionInfo[], id: string): { kind: 'si
   return sessions.some((s) => s.id === id) ? { kind: 'single', id } : { kind: 'board' };
 }
 
+/**
+ * What a click on a notification does. In a browser the default is left alone: it is the browser
+ * that brings the notification's tab to the front, which `window.focus()` alone often cannot do
+ * for a tab in the background or in another window. Only in the desktop app, where the app shows
+ * its own window, is the default prevented.
+ */
+export function handleNotificationClick(
+  e: Pick<Event, 'preventDefault'>,
+  onClick: () => void,
+  w: Window & { shellyardDesktop?: DesktopBridge } = window,
+): void {
+  if (w.shellyardDesktop) e.preventDefault();
+  bringToFront(w);
+  onClick();
+}
+
 /** Shows a notification that, when clicked, brings ShellYard to the front and runs `onClick`. */
 function show(title: string, options: NotificationOptions, onClick: () => void): void {
   const n = new Notification(title, options);
   n.onclick = (e) => {
-    e.preventDefault();
-    bringToFront();
-    onClick();
+    handleNotificationClick(e, onClick);
     n.close();
   };
 }
