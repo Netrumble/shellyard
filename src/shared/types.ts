@@ -303,7 +303,36 @@ export interface ScheduleRun {
   sessionId: string | null;
   /** True for a run asked for by hand. */
   manual: boolean;
+  /**
+   * When the run ended, for a run that ended while ShellYard followed it ('turn' or 'session');
+   * null otherwise. With `at`, how long the run took.
+   */
+  finishedAt: number | null;
+  /** How the run ended (see RunEnd); null while it runs, or when it never had a session at work. */
+  endedBy: RunEnd | null;
+  /** Claude Code's estimate of what the run's session cost until it finished; null when unknown. */
+  costUsd: number | null;
+  /** How long the run waited on the user (a permission or a question), in all. */
+  blockedMs: number;
+  /** Since when it waits on the user now; null when it does not. */
+  blockedSince: number | null;
+  /**
+   * When its wait of now was found longer than the schedules allow (SCHEDULE_STUCK_AFTER_MS);
+   * null when it does not wait, or not that long yet. Each wait is reported on its own.
+   */
+  stuckAt: number | null;
 }
+
+/**
+ * How a scheduled run ended. 'turn': Claude Code finished its turn after the prompt. 'session':
+ * the session ended or was closed before that. 'restart': ShellYard stopped while it ran; a
+ * session comes back as a new one, so the run could not be followed further. 'unknown': it was
+ * saved before ShellYard followed runs.
+ */
+export type RunEnd = 'turn' | 'session' | 'restart' | 'unknown';
+
+/** How long a scheduled run may wait on the user before it is reported as stuck. */
+export const SCHEDULE_STUCK_AFTER_MS = 10 * 60 * 1000;
 
 /** A prompt given to a new Claude Code session at set times. */
 export interface Schedule {
@@ -366,6 +395,8 @@ export type ServerMessage =
   | { t: 'activity'; rates: Record<string, number> }
   /** The errors of this run, newest first. */
   | { t: 'errors'; errors: ErrorReport[] }
+  /** The uncommitted changes of the worktrees sessions work in; a worktree without any is absent. */
+  | { t: 'changes'; changes: ChangeSummary[] }
   | { t: 'snapshot'; id: string; data: string }
   | { t: 'output'; id: string; data: string };
 
@@ -380,6 +411,50 @@ export interface Worktree {
   prunable: boolean;
   /** The entry of a bare repository: no files checked out, nothing to work in. */
   bare: boolean;
+}
+
+/**
+ * How git sees a file that differs from the last commit. A rename shows as the old path deleted
+ * and the new one added; "conflicted" is a file left by a merge that is not resolved.
+ */
+export type ChangeStatus = 'modified' | 'added' | 'deleted' | 'untracked' | 'typechange' | 'conflicted';
+
+/** A file of a worktree that is not as the last commit has it. */
+export interface ChangedFile {
+  /** Relative to the top of the worktree, with forward slashes. */
+  path: string;
+  status: ChangeStatus;
+  /** Lines added and removed; null for a binary file, or one too large to count. */
+  added: number | null;
+  removed: number | null;
+}
+
+/** The uncommitted changes of a worktree: everything not as the last commit has it. */
+export interface WorktreeChanges {
+  worktree: string;
+  files: ChangedFile[];
+  added: number;
+  removed: number;
+  /** True when there were more files than are listed. */
+  truncated: boolean;
+}
+
+/** The changes of a worktree in figures, for the badge of the sessions working in it. */
+export interface ChangeSummary {
+  worktree: string;
+  files: number;
+  added: number;
+  removed: number;
+}
+
+/** What changed in one file, as a unified diff against the last commit. */
+export interface FileDiff {
+  path: string;
+  status: ChangeStatus;
+  binary: boolean;
+  /** True when the diff is too long to show; `diff` is then empty. */
+  tooLarge: boolean;
+  diff: string;
 }
 
 export interface WorktreeListing {

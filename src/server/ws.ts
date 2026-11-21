@@ -11,6 +11,7 @@ import type { ScheduleStore } from './schedules.js';
 import type { StoryStore } from './stories.js';
 import type { UsageStore } from './usage.js';
 import type { ErrorReporter } from './errors.js';
+import type { ChangeTracker } from './changes.js';
 
 interface Subscription {
   /** False while the snapshot is being taken; live output is held back until it is sent. */
@@ -55,7 +56,7 @@ function parseMessage(raw: string): ClientMessage | null {
 
 export function attachWebSocket(
   server: Server,
-  deps: { manager: SessionManager; stories?: StoryStore; rules?: RuleStore; closed?: ClosedStore; schedules?: ScheduleStore; usage?: UsageStore; activity?: ActivityMeter; errors?: ErrorReporter; port: number; pageHost: string; token: string },
+  deps: { manager: SessionManager; stories?: StoryStore; rules?: RuleStore; closed?: ClosedStore; schedules?: ScheduleStore; usage?: UsageStore; activity?: ActivityMeter; errors?: ErrorReporter; changes?: ChangeTracker; port: number; pageHost: string; token: string },
 ): { close(): void } {
   const { manager } = deps;
   const wss = new WebSocketServer({
@@ -92,6 +93,9 @@ export function attachWebSocket(
 
   deps.errors?.onChange((errors) => {
     for (const c of clients) send(c, { t: 'errors', errors });
+  });
+  deps.changes?.onChange((changes) => {
+    for (const c of clients) send(c, { t: 'changes', changes });
   });
 
   // Usage changes with every status report; clients get at most one update per pulse.
@@ -200,6 +204,7 @@ export function attachWebSocket(
       if (deps.schedules) send(client, { t: 'schedules', schedules: deps.schedules.list() });
       if (deps.usage) send(client, { t: 'usage', usage: deps.usage.summary() });
       if (deps.errors) send(client, { t: 'errors', errors: deps.errors.list() });
+      if (deps.changes) send(client, { t: 'changes', changes: deps.changes.list() });
       ws.on('message', (data, isBinary) => {
         if (!isBinary) onMessage(client, String(data));
       });

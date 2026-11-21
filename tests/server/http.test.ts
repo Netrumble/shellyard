@@ -768,6 +768,24 @@ describe.skipIf(!hasGit)('http api: git', () => {
     expect((await post('/api/git/switch', { path: null, branch: 'x', create: true })).status).toBe(400);
   });
 
+  it('lists the uncommitted changes of a worktree and the diff of one file', async () => {
+    const none = { auth: 'none' as const };
+    expect((await call('GET', `/api/git/changes?path=${q(repo)}`, none)).status).toBe(401);
+    expect((await call('GET', `/api/git/diff?path=${q(repo)}&file=a.txt`, none)).status).toBe(401);
+    expect((await call('GET', `/api/git/changes?path=${q(repo)}`)).json()).toEqual({ worktree: repo, files: [], added: 0, removed: 0, truncated: false });
+    writeFileSync(join(repo, 'a.txt'), 'b\n');
+    const c = (await call('GET', `/api/git/changes?path=${q(repo)}`)).json();
+    expect(c.files).toEqual([{ path: 'a.txt', status: 'modified', added: 1, removed: 1 }]);
+    const d = await call('GET', `/api/git/diff?path=${q(repo)}&file=a.txt`);
+    expect(d.status).toBe(200);
+    expect(d.json().diff).toContain('+b');
+    // Only a changed file is read: anything else is refused with the reason.
+    expect((await call('GET', `/api/git/diff?path=${q(repo)}&file=..%2Fplain`)).status).toBe(400);
+    expect((await call('GET', `/api/git/diff?path=${q(repo)}`)).status).toBe(400);
+    expect((await call('GET', `/api/git/changes?path=relative`)).status).toBe(400);
+    expect((await call('GET', `/api/git/changes?path=${q(plain)}`)).json()).toBeNull();
+  });
+
   it('lists branches and tells whether a worktree is dirty', async () => {
     expect((await call('GET', `/api/git/branches?path=${q(repo)}`)).json().sort()).toEqual(['feature', 'main']);
     expect((await call('GET', `/api/git/status?path=${q(repo)}`)).json()).toEqual({ dirty: false, unreachable: 0 });

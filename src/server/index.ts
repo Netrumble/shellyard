@@ -25,6 +25,7 @@ import { UsageStore } from './usage.js';
 import type { Schedule } from '../shared/types.js';
 import { attachWebSocket } from './ws.js';
 import { ErrorReporter, errorsDir } from './errors.js';
+import { ChangeTracker, changesOf } from './changes.js';
 
 export const DEFAULT_PORT = 7717;
 
@@ -137,6 +138,16 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   const flow = new StatusLog({ now: Date.now, file: join(dataDir(), 'flow.json') });
   manager.onChange((sessions) => flow.observe(sessions));
   manager.onClosed((entry, sessionId) => closed.add(entry, sessionId));
+  // The uncommitted changes of the worktrees sessions work in, for the badges on the page.
+  const changes = new ChangeTracker({ read: (worktree) => changesOf(worktree) });
+  const trackWorktrees = (): void =>
+    changes.track(
+      manager
+        .list()
+        .filter((s) => s.status !== 'exited' && s.git)
+        .map((s) => s.git!.worktree),
+    );
+  manager.onChange(trackWorktrees);
 
   // Schedules: at its time, a schedule opens a Claude Code session like any other, and its
   // prompt is typed into the terminal once Claude Code is ready for it.
@@ -184,6 +195,8 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
     },
   });
   schedules.start();
+  // How each run goes: when it waits on the user, when it finishes.
+  manager.onChange((sessions) => schedules.observe(sessions));
   const deliveryTicker = setInterval(() => delivery.tick(), 200);
   deliveryTicker.unref?.();
 
@@ -247,13 +260,16 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   const stopped = new Promise<void>((r) => (resolveStopped = r));
   let stopping: Promise<void> | null = null;
 
-  const ws = attachWebSocket(server, { manager, stories, rules, closed, schedules, usage, activity, errors, port, pageHost, token });
+  const ws = attachWebSocket(server, { manager, stories, rules, closed, schedules, usage, activity, errors, changes, port, pageHost, token });
   const ticker = setInterval(() => {
     manager.tick();
     schedules.tick();
   }, 1000);
   // A branch switched or a commit made inside a terminal shows up without a git process.
   const headTicker = setInterval(() => manager.refreshHeads(), 10_000);
+  // Changes made outside Claude's tools (an editor, a shell) show up within this time.
+  const changesTicker = setInterval(() => void changes.refreshAll(), 15_000);
+  changesTicker.unref?.();
   // The day totals of the flow are written now and then, and on stopping.
   const flowTicker = setInterval(() => flow.persist(), 60_000);
   flowTicker.unref?.();
@@ -262,6 +278,8 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
     stopping ??= (async () => {
       clearInterval(ticker);
       clearInterval(headTicker);
+      clearInterval(changesTicker);
+      changes.stop();
       clearInterval(flowTicker);
       clearInterval(deliveryTicker);
       scanning = false;
@@ -269,6 +287,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
       saveNow();
       saving = false;
       manager.shutdown();
+      schedules.flush();
       usage.flush();
       flow.observe([]);
       flow.persist();
@@ -304,6 +323,13 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
       onClaudeStatus: (id) => delivery.ready(id),
       onPromptSubmitted: (id) => delivery.submitted(id),
       errors,
+      // After Claude uses a tool or ends a turn, its worktree is read again.
+      onHook: (id, name) => {
+        if (name !== 'PostToolUse' && name !== 'Stop') return;
+        const worktree = manager.get(id)?.git?.worktree;
+        if (worktree) changes.soon(worktree);
+      },
+      changes,
       port,
       pageHost,
       token,

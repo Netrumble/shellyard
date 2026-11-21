@@ -8,6 +8,7 @@ import { setView, toggleSelection, useStore } from '../store.js';
 import { useNow } from './Cluster.js';
 import { dragSource, useDropTarget } from './drag-target.js';
 import { StatusGlyph } from './StatusGlyph.js';
+import { changeLabel } from '../diff.js';
 
 const SPARK_W = 72;
 const SPARK_H = 20;
@@ -29,7 +30,9 @@ function Sparkline({ sessionId }: { sessionId: string }): React.JSX.Element | nu
  * to another session.
  */
 export function SessionRow({ session }: { session: SessionInfo }): React.JSX.Element {
-  const { activity, selection } = useStore();
+  const { activity, selection, changes } = useStore();
+  // The uncommitted changes of the session's worktree; the terminal's header opens them.
+  const summary = session.git ? changes[session.git.worktree] : undefined;
   const now = useNow(1000);
   const line = sessionLine(session, activity[session.id] ?? 0);
   const age = shortAge(now - session.statusSince);
@@ -44,7 +47,7 @@ export function SessionRow({ session }: { session: SessionInfo }): React.JSX.Ele
         type="button"
         className="srow"
         title={`${session.name}. Click to open, Shift-click to pick for an action on several, drag to another area or next to another session.`}
-        aria-label={`${session.name}: ${line}, for ${age}${picked ? ', picked' : ''}`}
+        aria-label={`${session.name}: ${line}, for ${age}${summary ? `, ${changeLabel(summary)}` : ''}${picked ? ', picked' : ''}`}
         {...dragSource(SESSION_DRAG, session.id)}
         onClick={(e) => (isSelectGesture(e) ? toggleSelection(session.id) : setView({ kind: 'single', id: session.id }))}
         onKeyDown={(e) => {
@@ -62,6 +65,11 @@ export function SessionRow({ session }: { session: SessionInfo }): React.JSX.Ele
           <span className="srow-name">{session.name}</span>
           <span className="srow-line">{line}</span>
         </span>
+        {summary && (
+          <span className="srow-changes" aria-hidden="true">
+            <span className="plus">+{summary.added}</span> <span className="minus">−{summary.removed}</span>
+          </span>
+        )}
         <Sparkline sessionId={session.id} />
         <span className="srow-age">{age}</span>
       </button>

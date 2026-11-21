@@ -1,10 +1,21 @@
 import { execFile } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import type { Worktree, WorktreeListing } from '../shared/types.js';
+import { removeDirPatiently } from './remove-dir.js';
 
-/** The message is git's trimmed stderr, or a validation message. */
-export class GitError extends Error {}
+/**
+ * The message is git's trimmed stderr, or a validation message. `code` is the code of the
+ * error git was run with, when there is one (for instance ERR_CHILD_PROCESS_STDIO_MAXBUFFER).
+ */
+export class GitError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string | number,
+  ) {
+    super(message);
+  }
+}
 
 /** A request this module turns down itself (main worktree, not a worktree, bad name...): never worth retrying. */
 export class GitRefusal extends GitError {}
@@ -55,7 +66,7 @@ export function runGit(args: string[], cwd: string): Promise<string> {
       (error, stdout, stderr) => {
         if (error) {
           const text = String(stderr ?? '').trim();
-          reject(new GitError(text || error.message));
+          reject(new GitError(text || error.message, (error as NodeJS.ErrnoException).code ?? undefined));
           return;
         }
         resolvePromise(String(stdout));
@@ -258,14 +269,9 @@ export function countOf(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-/** Deletes what is left of a folder, trying again a few times; true when it is gone. */
-function removeLeftover(path: string): boolean {
-  try {
-    rmSync(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  } catch {
-    // Still held by some process: the caller says so.
-  }
-  return !existsSync(path);
+/** Deletes what is left of a folder, trying again for a few seconds while it is busy; true when it is gone. */
+function removeLeftover(path: string): Promise<boolean> {
+  return removeDirPatiently(path, { timeoutMs: 3000 });
 }
 
 /**
@@ -276,7 +282,7 @@ export async function removeWorktree(
   repo: string,
   path: string,
   o: { force: boolean; deleteBranch: boolean },
-  seams: { run?: RunGit; removeFolder?: (path: string) => boolean } = {},
+  seams: { run?: RunGit; removeFolder?: (path: string) => boolean | Promise<boolean> } = {},
 ): Promise<{ listing: WorktreeListing; warning: string | null }> {
   const run = seams.run ?? runGit;
   refuseDash('Path', path);
@@ -299,7 +305,7 @@ export async function removeWorktree(
       // The removal is done then; what is left of the folder is deleted here if it can be.
       const still = (await listingOf(repo)).worktrees.some((w) => samePath(w.path, target.path));
       if (still) throw e;
-      if (existsSync(target.path) && !(seams.removeFolder ?? removeLeftover)(target.path)) {
+      if (existsSync(target.path) && !(await (seams.removeFolder ?? removeLeftover)(target.path))) {
         warnings.push(`The folder ${target.path} could not be fully deleted; remove it by hand.`);
       }
     }
