@@ -76,7 +76,7 @@ mkdirSync(mainPackage, { recursive: true });
 execFileSync(tarProgram(), ['-xzf', join(stage, packed), '-C', mainPackage, '--strip-components=1'], { stdio: 'inherit' });
 rmSync(join(stage, packed), { force: true });
 
-for (const f of ['main.js', 'find-node.js', 'login-env.js', 'updates.js', 'icon.png']) copyFileSync(join(desktop, f), join(stage, f));
+for (const f of ['main.js', 'preload.cjs', 'find-node.js', 'login-env.js', 'updates.js', 'icon.png']) copyFileSync(join(desktop, f), join(stage, f));
 // A macOS app icon must be at least 512 pixels; sips, part of macOS, scales the one there is.
 if (process.platform === 'darwin') execFileSync('sips', ['-z', '512', '512', join(stage, 'icon.png'), '--out', join(stage, 'icon-mac.png')], { stdio: 'ignore' });
 

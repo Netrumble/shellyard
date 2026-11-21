@@ -19,7 +19,8 @@ server runs on it, as with `shellyard`.
 - The window attaches to the ShellYard server if one is running, and starts one in the background if
   not.
 - Closing the window hides it: ShellYard stays in the notification area (the tray; the menu bar on
-  macOS) and still tells you when a session needs you. Click the icon to bring the window back; its menu also opens ShellYard in
+  macOS) and still tells you when a session needs you: click the notification to bring the window
+  back on that session. Click the icon to bring the window back; its menu also opens ShellYard in
   the browser, or quits the app.
 - **Quitting the app does not close your shells.** The server keeps running in the background with
   every shell and Claude Code session in it, until you close each one with its `✕` in ShellYard.

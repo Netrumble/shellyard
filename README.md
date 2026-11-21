@@ -241,7 +241,9 @@ filtered by area.
 (In `config.json` and in the code an area is called a "story", its first name.)
 
 The tab title shows how many sessions are waiting, and a browser notification appears when one
-starts waiting while you are looking elsewhere.
+starts waiting while you are looking elsewhere. Clicking the notification opens that session (the
+board, if it has been closed since); in the desktop app it also brings back the window, even
+when it is hidden in the notification area or the menu bar.
 
 When you start a Claude Code session you can choose its model.
 

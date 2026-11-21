@@ -1,6 +1,6 @@
 // The desktop app: a window on the ShellYard server. The server itself is the one `shellyard` starts, a
 // background process that outlives the window, so closing the app never stops a session.
-import { app, BrowserWindow, dialog, Menu, nativeImage, Notification, session, shell, Tray } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, session, shell, Tray } from 'electron';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +19,8 @@ const icon = nativeImage.createFromPath(join(here, 'icon.png'));
 let win = null;
 let tray = null;
 let serverState = null;
+/** The page's origin in this start; only it may ask for the window. */
+let pageOrigin = null;
 /** True once the user asked to quit: until then closing the window only hides it. */
 let quitting = false;
 let toldAboutTray = false;
@@ -283,6 +285,7 @@ async function openWindow() {
   serverState = started.state;
   // The page's own host name of this start (<random>.localhost), never a fixed address.
   const origin = pageAddress(started.state);
+  pageOrigin = origin;
 
   // A session of the app's own, not the default one, emptied before every load: a service
   // worker left by whatever answered on a ShellYard address while the server was down (another
@@ -298,7 +301,8 @@ async function openWindow() {
     icon: icon.isEmpty() ? undefined : icon,
     autoHideMenuBar: true,
     backgroundColor: '#181b21',
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, session: ses },
+    // The preload gives the page one call, showWindow (see preload.cjs), and nothing else.
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, session: ses, preload: join(here, 'preload.cjs') },
   });
 
   // Links leave the app for the browser; the window itself stays on the server.
@@ -339,6 +343,18 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', showWindow);
+  // A click on a notification of the page (a session that needs you): the page opens the
+  // session, and asks for the window, which may be hidden in the tray or minimised.
+  ipcMain.on('shellyard:show-window', (e) => {
+    if (!win || e.sender !== win.webContents) return;
+    let from = null;
+    try {
+      from = new URL(e.senderFrame?.url ?? '').origin;
+    } catch {
+      return;
+    }
+    if (from === pageOrigin) showWindow();
+  });
   app.on('before-quit', () => {
     quitting = true;
   });
