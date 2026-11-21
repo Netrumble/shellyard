@@ -83,6 +83,7 @@ let state: State = {
 };
 const listeners = new Set<() => void>();
 const sessionListeners: Array<(prev: SessionInfo[], next: SessionInfo[]) => void> = [];
+const scheduleListeners: Array<(prev: Schedule[], next: Schedule[]) => void> = [];
 let socket: Socket | null = null;
 /** A token taken from the address, to be stored once the server has accepted it. */
 let unconfirmedToken: string | null = null;
@@ -248,6 +249,11 @@ export async function saveSoundTrim(id: string, trim: { start: number; end: numb
   }
 }
 
+/** Called with the schedules before and after each update from the server, after the first. */
+export function onSchedulesChange(cb: (prev: Schedule[], next: Schedule[]) => void): void {
+  scheduleListeners.push(cb);
+}
+
 /** Runs on every change of the session list, with the list before and after. */
 export function onSessionsChange(cb: (prev: SessionInfo[], next: SessionInfo[]) => void): void {
   sessionListeners.push(cb);
@@ -300,7 +306,13 @@ export function startStore(): void {
   socket.onStories((stories) => set({ stories, view: withoutDeadFilter(state.view, stories) }));
   socket.onRules((rules) => set({ rules }));
   socket.onClosed((closed) => set({ closed }));
-  socket.onSchedules((schedules) => set({ schedules }));
+  let schedulesLoaded = false;
+  socket.onSchedules((schedules) => {
+    const prev = state.schedules;
+    set({ schedules });
+    if (schedulesLoaded) for (const cb of scheduleListeners) cb(prev, schedules);
+    schedulesLoaded = true;
+  });
   socket.onUsage((usage) => set({ usage }));
   socket.onChanges((list) => set({ changes: Object.fromEntries(list.map((c) => [c.worktree, c])) }));
   socket.onActivity((activity) => set({ activity, sparks: recordActivity(state.sparks, activity, Date.now()) }));

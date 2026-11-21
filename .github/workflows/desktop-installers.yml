@@ -1,5 +1,6 @@
 # At every push to main: works out the next version, builds the desktop installers (the Windows
-# setup program and the macOS disk image, Apple Silicon) and publishes them as a GitHub release.
+# setup program and the macOS disk images, Apple Silicon and Intel) and publishes them as a
+# GitHub release.
 #
 # The version: VERSION_BASE below sets the major and minor, and its patch stays 0. The patch of
 # the release is one more than the highest patch already released with that major and minor:
@@ -67,6 +68,14 @@ jobs:
             files: |
               desktop/release/*.dmg
               desktop/release/*.dmg.sha256
+          # The disk image is for the processor of the machine that builds it: Intel Macs get
+          # theirs from an Intel runner.
+          - name: macOS Intel (.dmg)
+            os: macos-15-intel
+            artifact: shellyard-macos-x64
+            files: |
+              desktop/release/*.dmg
+              desktop/release/*.dmg.sha256
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
@@ -107,6 +116,8 @@ jobs:
         env:
           # The app is ad-hoc signed (see electron-builder.json): no certificate is looked for.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          # "Check for updates…" in the app looks at the releases of the repository that built it.
+          SHELLYARD_UPDATE_REPO: ${{ github.repository }}
         run: npm run installer
 
       - uses: actions/upload-artifact@v4
@@ -144,7 +155,7 @@ jobs:
           ## Install
 
           - **Windows**: run \`ShellYard-Setup-$VERSION.exe\`. It is not code-signed yet: if SmartScreen says "Windows protected your PC", click **More info**, then **Run anyway**.
-          - **macOS (Apple Silicon)**: open \`ShellYard-$VERSION-arm64.dmg\` and drag ShellYard into Applications.
+          - **macOS**: open \`ShellYard-$VERSION-arm64.dmg\` on Apple Silicon (M1 and later), \`ShellYard-$VERSION-x64.dmg\` on an Intel Mac, and drag ShellYard into Applications.
 
           > [!IMPORTANT]
           > **macOS refuses to open the app the first time** ("Apple could not verify ShellYard.app is free of malware…"): it is not signed with an Apple Developer ID nor notarised yet. It is not damaged. Allow it once, either in Terminal:

@@ -13,6 +13,7 @@
     "main.js",
     "find-node.js",
     "login-env.js",
+    "updates.js",
     "icon.png",
     "README.md"
   ],

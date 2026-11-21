@@ -176,11 +176,13 @@ describe.runIf(hasGit)('changesOf and diffOf', () => {
     expect(await diffOf(repo, 'img.bin')).toMatchObject({ status: 'modified', binary: true, diff: '' });
   });
 
+  // '[a].txt' read as a pattern is 'a.txt': its diff must not show up. (Brackets, as '*' and '?'
+  // are not allowed in a file name on Windows.)
   it('takes pathspec characters in a name literally', async () => {
-    writeFileSync(join(repo, '*.txt'), 'star\n');
-    git(repo, 'add', '*.txt');
+    writeFileSync(join(repo, '[a].txt'), 'star\n');
+    git(repo, 'add', ':(literal)[a].txt');
     writeFileSync(join(repo, 'a.txt'), 'changed\n');
-    const d = await diffOf(repo, '*.txt');
+    const d = await diffOf(repo, '[a].txt');
     expect(d.diff).toContain('+star');
     expect(d.diff).not.toContain('changed');
   });

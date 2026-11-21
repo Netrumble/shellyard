@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { SCHEDULE_PERMISSION_MODES, type Schedule, type ScheduleOutcome, type SchedulePermissionMode, type ScheduleRun, type ScheduleWhen } from '../shared/types.js';
+import { SCHEDULE_PERMISSION_MODES, SCHEDULE_STUCK_AFTER_MS, type RunEnd, type Schedule, type ScheduleOutcome, type SchedulePermissionMode, type ScheduleRun, type ScheduleWhen } from '../shared/types.js';
 import { nextRun, parseCron, parseTime } from './schedule-time.js';
 
 // Schedules: a prompt given to a new Claude Code session at set times. This file decides
@@ -126,15 +126,53 @@ function toFields(input: Record<string, unknown>, base: Fields | null, now: numb
 
 const OUTCOMES: ScheduleOutcome[] = ['started', 'delivered', 'undelivered', 'failed', 'skipped'];
 
+/** A run as it is recorded when it starts: nothing known yet of how it went. */
+function newRun(at: number, outcome: ScheduleOutcome, detail: string | null, sessionId: string | null, manual: boolean): ScheduleRun {
+  return { at, outcome, detail, sessionId, manual, finishedAt: null, endedBy: null, costUsd: null, blockedMs: 0, blockedSince: null, stuckAt: null };
+}
+
+const moment = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null);
+
+const RUN_ENDS: RunEnd[] = ['turn', 'session', 'restart', 'unknown'];
+
+/** Whether a run had a session at work: it has one, and got its prompt or may still. */
+const atWork = (r: ScheduleRun): boolean => r.sessionId !== null && (r.outcome === 'started' || r.outcome === 'delivered');
+
+/** A run whose session is still followed: at work, and not ended. */
+const followed = (r: ScheduleRun): boolean => atWork(r) && r.endedBy === null;
+
+/**
+ * A run as read from the file, when ShellYard starts. A run that was still followed then belongs
+ * to a session of the server that stopped: sessions come back as new ones, so it is not followed
+ * any more ('restart'), and the time the server was off is not counted as waiting on the user.
+ * A run saved before runs were followed is 'unknown': nothing is said of how it went.
+ */
 function toRun(v: unknown): ScheduleRun | null {
   if (!isObject(v) || typeof v.at !== 'number' || !Number.isFinite(v.at) || !OUTCOMES.includes(v.outcome as ScheduleOutcome)) return null;
-  return {
-    at: v.at,
-    outcome: v.outcome as ScheduleOutcome,
-    detail: typeof v.detail === 'string' ? v.detail.slice(0, 500) : null,
-    sessionId: typeof v.sessionId === 'string' ? v.sessionId : null,
-    manual: v.manual === true,
+  const run: ScheduleRun = {
+    ...newRun(v.at, v.outcome as ScheduleOutcome, typeof v.detail === 'string' ? v.detail.slice(0, 500) : null, typeof v.sessionId === 'string' ? v.sessionId : null, v.manual === true),
+    finishedAt: moment(v.finishedAt),
+    endedBy: RUN_ENDS.includes(v.endedBy as RunEnd) ? (v.endedBy as RunEnd) : null,
+    costUsd: moment(v.costUsd),
+    blockedMs: moment(v.blockedMs) ?? 0,
+    blockedSince: null,
+    stuckAt: moment(v.stuckAt),
   };
+  if (followed(run)) run.endedBy = 'endedBy' in v ? 'restart' : 'unknown';
+  return run;
+}
+
+/** How long after its session finished a run still takes the cost Claude Code reports: the last report comes a little late. */
+const COST_GRACE_MS = 30_000;
+
+/** How often the cost of a run at work is saved and shown, at most. */
+const COST_SAVE_EVERY_MS = 15_000;
+
+/** What the store needs to know of a session to follow the run it belongs to. */
+export interface RunSessionState {
+  id: string;
+  status: string;
+  reason: string | null;
 }
 
 function toStored(v: unknown): Schedule | null {
@@ -160,6 +198,12 @@ const copy = (s: Schedule): Schedule => ({ ...s, when: { ...s.when, ...('days' i
 export class ScheduleStore {
   private schedules: Schedule[];
   private readonly changeCbs: Array<(schedules: Schedule[]) => void> = [];
+  /** When the cost of each run at work was last saved. */
+  private readonly costSavedAt = new WeakMap<ScheduleRun, number>();
+  /** Runs whose session went on to another turn after theirs: late costs are not theirs any more. */
+  private readonly costClosed = new WeakSet<ScheduleRun>();
+  /** True while a cost taken is not saved yet. */
+  private costPending = false;
 
   constructor(private readonly deps: ScheduleDeps) {
     this.schedules = this.load();
@@ -195,7 +239,13 @@ export class ScheduleStore {
     }
   }
 
+  /** Saves what is held only in memory (a cost not saved yet); called when ShellYard stops. */
+  flush(): void {
+    if (this.costPending) this.save();
+  }
+
   private changed(): void {
+    this.costPending = false;
     this.save();
     const list = this.list();
     for (const cb of this.changeCbs) cb(list);
@@ -268,12 +318,12 @@ export class ScheduleStore {
       // A launcher that no longer exists is reported by the launch itself.
       if (current !== null && current !== s.launcher) {
         const detail = 'Its launcher was changed since the schedule was saved (command, arguments or environment). Open the schedule and save it again to run it with the launcher as it is now.';
-        return this.record(s, { at, outcome: 'failed', detail, sessionId: null, manual });
+        return this.record(s, newRun(at, 'failed', detail, null, manual));
       }
     }
     const previous = s.runs.find((r) => r.sessionId !== null);
     if (!manual && previous?.sessionId && this.deps.busy(previous.sessionId)) {
-      return this.record(s, { at, outcome: 'skipped', detail: 'The session of the previous run was still at work.', sessionId: null, manual });
+      return this.record(s, newRun(at, 'skipped', 'The session of the previous run was still at work.', null, manual));
     }
     let result: LaunchResult;
     try {
@@ -281,8 +331,8 @@ export class ScheduleStore {
     } catch (e) {
       result = { error: (e as Error).message };
     }
-    if ('error' in result) return this.record(s, { at, outcome: 'failed', detail: result.error.slice(0, 500), sessionId: null, manual });
-    return this.record(s, { at, outcome: 'started', detail: null, sessionId: result.sessionId, manual });
+    if ('error' in result) return this.record(s, newRun(at, 'failed', result.error.slice(0, 500), null, manual));
+    return this.record(s, newRun(at, 'started', null, result.sessionId, manual));
   }
 
   /** Sets what became of the prompt of the run that opened `sessionId`. */
@@ -291,6 +341,77 @@ export class ScheduleStore {
     if (!run || run.outcome !== 'started') return;
     run.outcome = outcome;
     run.detail = detail;
+    this.changed();
+  }
+
+  /** The run that opened a session, if any. */
+  private runOf(sessionId: string): ScheduleRun | null {
+    for (const s of this.schedules) {
+      const run = s.runs.find((r) => r.sessionId === sessionId);
+      if (run) return run;
+    }
+    return null;
+  }
+
+  /**
+   * Follows the sessions of the runs in progress: when they wait on the user and for how long,
+   * and when they finish their turn after the prompt (or end). Called with every change of the
+   * sessions; saves only when something about a run changed.
+   */
+  observe(sessions: RunSessionState[]): void {
+    const now = this.deps.now();
+    const byId = new Map(sessions.map((x) => [x.id, x]));
+    let any = false;
+    for (const s of this.schedules) {
+      for (const run of s.runs) {
+        // Once the session works again after the run's turn, what it costs is the user's own work.
+        if (run.endedBy === 'turn' && run.sessionId !== null && byId.get(run.sessionId)?.status === 'working') this.costClosed.add(run);
+        if (!followed(run)) continue;
+        const session = byId.get(run.sessionId!);
+        const ended = !session || session.status === 'exited';
+        const blocked = !ended && session.status === 'attention' && session.reason === 'blocked';
+        if (blocked && run.blockedSince === null) {
+          run.blockedSince = now;
+          any = true;
+        } else if (!blocked && run.blockedSince !== null) {
+          run.blockedMs += Math.max(0, now - run.blockedSince);
+          run.blockedSince = null;
+          // The next wait is reported on its own, if it too lasts.
+          run.stuckAt = null;
+          any = true;
+        }
+        // Its turn is over once the prompt was given and Claude Code waits for the next one.
+        const done = run.outcome === 'delivered' && session !== undefined && (session.status === 'idle' || (session.status === 'attention' && session.reason === 'finished'));
+        if (ended || done) {
+          run.finishedAt = now;
+          run.endedBy = done ? 'turn' : 'session';
+          any = true;
+        }
+      }
+    }
+    if (any) this.changed();
+  }
+
+  /**
+   * Takes the cost Claude Code reports for a session, for the run that opened it: while it runs,
+   * and a little after it ended, as the last report comes late. Reports come every few seconds:
+   * while the run works its cost is saved (and shown) at most every COST_SAVE_EVERY_MS; once it
+   * has ended, at once.
+   */
+  observeCost(sessionId: string, costUsd: number | null): void {
+    if (costUsd === null || !Number.isFinite(costUsd) || costUsd < 0) return;
+    const run = this.runOf(sessionId);
+    if (!run || !atWork(run) || run.costUsd === costUsd || this.costClosed.has(run)) return;
+    const now = this.deps.now();
+    const running = run.endedBy === null;
+    const late = run.finishedAt !== null && (run.endedBy === 'turn' || run.endedBy === 'session') && now - run.finishedAt <= COST_GRACE_MS;
+    if (!running && !late) return;
+    run.costUsd = costUsd;
+    if (running && now - (this.costSavedAt.get(run) ?? -Infinity) < COST_SAVE_EVERY_MS) {
+      this.costPending = true;
+      return;
+    }
+    this.costSavedAt.set(run, now);
     this.changed();
   }
 
@@ -313,7 +434,7 @@ export class ScheduleStore {
     let any = false;
     for (const s of this.schedules) {
       if (!s.enabled || s.nextRunAt === null || s.nextRunAt > now - LATE_GRACE_MS || s.catchUp) continue;
-      this.record(s, { at: now, outcome: 'skipped', detail: `ShellYard was not running at the time of this run (${new Date(s.nextRunAt).toLocaleString('en-GB')}).`, sessionId: null, manual: false });
+      this.record(s, newRun(now, 'skipped', `ShellYard was not running at the time of this run (${new Date(s.nextRunAt).toLocaleString('en-GB')}).`, null, false));
       this.plan(s, now);
       any = true;
     }
@@ -326,10 +447,18 @@ export class ScheduleStore {
     if (s.nextRunAt === null) s.enabled = false;
   }
 
-  /** Starts whatever is due. Called every second. */
+  /** Starts whatever is due, and reports runs that wait on the user too long. Called every second. */
   tick(): void {
     const now = this.deps.now();
     let any = false;
+    for (const s of this.schedules) {
+      for (const run of s.runs) {
+        if (followed(run) && run.blockedSince !== null && run.stuckAt === null && now - run.blockedSince >= SCHEDULE_STUCK_AFTER_MS) {
+          run.stuckAt = now;
+          any = true;
+        }
+      }
+    }
     for (const s of this.schedules) {
       if (!s.enabled || s.nextRunAt === null || s.nextRunAt > now) continue;
       this.fire(s, false);

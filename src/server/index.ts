@@ -183,6 +183,8 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
     },
   });
   schedules.start();
+  // How each run goes: when it waits on the user, when it finishes.
+  manager.onChange((sessions) => schedules.observe(sessions));
   const deliveryTicker = setInterval(() => delivery.tick(), 200);
   deliveryTicker.unref?.();
 
@@ -273,6 +275,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
       saveNow();
       saving = false;
       manager.shutdown();
+      schedules.flush();
       usage.flush();
       flow.observe([]);
       flow.persist();
