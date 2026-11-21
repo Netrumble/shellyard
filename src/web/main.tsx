@@ -2,10 +2,12 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App.js';
 import { newlyWaiting } from './attention.js';
-import { notify } from './notify.js';
+import { notify, notifyStuck } from './notify.js';
+import { newlyStuck } from './schedule-text.js';
+import { durationLabel } from './gauges.js';
 import { pickSound, playSound, shouldPlay } from './sounds.js';
 import type { SessionInfo } from '../shared/types.js';
-import { getState, noteDigest, onSessionsChange, refreshSounds, setView, startStore } from './store.js';
+import { getState, noteDigest, onSchedulesChange, onSessionsChange, refreshSounds, setView, startStore } from './store.js';
 import { focusOn, splitForFocus } from './focus.js';
 import './theme.css';
 
@@ -18,6 +20,15 @@ onSessionsChange((prev, next) => {
   noteDigest(digest.map((s) => s.id));
   for (const s of waiting) notify(s, () => setView({ kind: 'single', id: s.id }), getState().sound);
   if (waiting.length > 0 && shouldPlay(document.hasFocus(), getState().sound)) void playEventSound(waiting);
+});
+
+// A scheduled run that waits on the user too long is reported once, with a reminder.
+onSchedulesChange((prev, next) => {
+  for (const { schedule, run } of newlyStuck(prev, next)) {
+    const waited = run.blockedSince !== null ? durationLabel(Date.now() - run.blockedSince) : '';
+    const open = (): void => setView(run.sessionId ? { kind: 'single', id: run.sessionId } : { kind: 'schedules' });
+    notifyStuck(schedule.name, `The scheduled run has been waiting on you for ${waited}.`, `${schedule.id}-${run.at}`, open, getState().sound);
+  }
 });
 
 /**

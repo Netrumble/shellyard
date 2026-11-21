@@ -415,6 +415,8 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
         conversationId: manager.conversationOf(id),
       });
       deps.usage.learnModelName(payload.modelId, payload.modelName);
+      // A session a schedule opened is new, never resumed: its running total is the run's cost.
+      if (!session.resumed) deps.schedules?.observeCost(id, payload.costUsd);
       noteConversation(id, rawStatus);
       if (payload.modelName) manager.setModel(id, payload.modelName);
       const reported = rawStatus as { cwd?: unknown; workspace?: { current_dir?: unknown } | null };

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { SCHEDULE_PERMISSION_MODES, type Schedule, type ScheduleOutcome, type SchedulePermissionMode, type ScheduleRun, type ScheduleWhen } from '../shared/types.js';
+import { SCHEDULE_PERMISSION_MODES, SCHEDULE_STUCK_AFTER_MS, type Schedule, type ScheduleOutcome, type SchedulePermissionMode, type ScheduleRun, type ScheduleWhen } from '../shared/types.js';
 import { nextRun, parseCron, parseTime } from './schedule-time.js';
 
 // Schedules: a prompt given to a new Claude Code session at set times. This file decides
@@ -126,15 +126,37 @@ function toFields(input: Record<string, unknown>, base: Fields | null, now: numb
 
 const OUTCOMES: ScheduleOutcome[] = ['started', 'delivered', 'undelivered', 'failed', 'skipped'];
 
+/** A run as it is recorded when it starts: nothing known yet of how it went. */
+function newRun(at: number, outcome: ScheduleOutcome, detail: string | null, sessionId: string | null, manual: boolean): ScheduleRun {
+  return { at, outcome, detail, sessionId, manual, finishedAt: null, closed: false, costUsd: null, blockedMs: 0, blockedSince: null, stuckAt: null };
+}
+
+const moment = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null);
+
 function toRun(v: unknown): ScheduleRun | null {
   if (!isObject(v) || typeof v.at !== 'number' || !Number.isFinite(v.at) || !OUTCOMES.includes(v.outcome as ScheduleOutcome)) return null;
   return {
-    at: v.at,
-    outcome: v.outcome as ScheduleOutcome,
-    detail: typeof v.detail === 'string' ? v.detail.slice(0, 500) : null,
-    sessionId: typeof v.sessionId === 'string' ? v.sessionId : null,
-    manual: v.manual === true,
+    ...newRun(v.at, v.outcome as ScheduleOutcome, typeof v.detail === 'string' ? v.detail.slice(0, 500) : null, typeof v.sessionId === 'string' ? v.sessionId : null, v.manual === true),
+    finishedAt: moment(v.finishedAt),
+    closed: v.closed === true,
+    costUsd: moment(v.costUsd),
+    blockedMs: moment(v.blockedMs) ?? 0,
+    blockedSince: moment(v.blockedSince),
+    stuckAt: moment(v.stuckAt),
   };
+}
+
+/** A run whose session is still followed: it has one, got its prompt or may still, and has not finished. */
+const followed = (r: ScheduleRun): boolean => r.sessionId !== null && r.finishedAt === null && (r.outcome === 'started' || r.outcome === 'delivered');
+
+/** How long after its session finished a run still takes the cost Claude Code reports: the last report comes a little late. */
+const COST_GRACE_MS = 30_000;
+
+/** What the store needs to know of a session to follow the run it belongs to. */
+export interface RunSessionState {
+  id: string;
+  status: string;
+  reason: string | null;
 }
 
 function toStored(v: unknown): Schedule | null {
@@ -268,12 +290,12 @@ export class ScheduleStore {
       // A launcher that no longer exists is reported by the launch itself.
       if (current !== null && current !== s.launcher) {
         const detail = 'Its launcher was changed since the schedule was saved (command, arguments or environment). Open the schedule and save it again to run it with the launcher as it is now.';
-        return this.record(s, { at, outcome: 'failed', detail, sessionId: null, manual });
+        return this.record(s, newRun(at, 'failed', detail, null, manual));
       }
     }
     const previous = s.runs.find((r) => r.sessionId !== null);
     if (!manual && previous?.sessionId && this.deps.busy(previous.sessionId)) {
-      return this.record(s, { at, outcome: 'skipped', detail: 'The session of the previous run was still at work.', sessionId: null, manual });
+      return this.record(s, newRun(at, 'skipped', 'The session of the previous run was still at work.', null, manual));
     }
     let result: LaunchResult;
     try {
@@ -281,8 +303,8 @@ export class ScheduleStore {
     } catch (e) {
       result = { error: (e as Error).message };
     }
-    if ('error' in result) return this.record(s, { at, outcome: 'failed', detail: result.error.slice(0, 500), sessionId: null, manual });
-    return this.record(s, { at, outcome: 'started', detail: null, sessionId: result.sessionId, manual });
+    if ('error' in result) return this.record(s, newRun(at, 'failed', result.error.slice(0, 500), null, manual));
+    return this.record(s, newRun(at, 'started', null, result.sessionId, manual));
   }
 
   /** Sets what became of the prompt of the run that opened `sessionId`. */
@@ -292,6 +314,63 @@ export class ScheduleStore {
     run.outcome = outcome;
     run.detail = detail;
     this.changed();
+  }
+
+  /** The run that opened a session, if any. */
+  private runOf(sessionId: string): ScheduleRun | null {
+    for (const s of this.schedules) {
+      const run = s.runs.find((r) => r.sessionId === sessionId);
+      if (run) return run;
+    }
+    return null;
+  }
+
+  /**
+   * Follows the sessions of the runs in progress: when they wait on the user and for how long,
+   * and when they finish their turn after the prompt (or end). Called with every change of the
+   * sessions; saves only when something about a run changed.
+   */
+  observe(sessions: RunSessionState[]): void {
+    const now = this.deps.now();
+    const byId = new Map(sessions.map((x) => [x.id, x]));
+    let any = false;
+    for (const s of this.schedules) {
+      for (const run of s.runs) {
+        if (!followed(run)) continue;
+        const session = byId.get(run.sessionId!);
+        const ended = !session || session.status === 'exited';
+        const blocked = !ended && session.status === 'attention' && session.reason === 'blocked';
+        if (blocked && run.blockedSince === null) {
+          run.blockedSince = now;
+          any = true;
+        } else if (!blocked && run.blockedSince !== null) {
+          run.blockedMs += Math.max(0, now - run.blockedSince);
+          run.blockedSince = null;
+          any = true;
+        }
+        // Its turn is over once the prompt was given and Claude Code waits for the next one.
+        const done = run.outcome === 'delivered' && session !== undefined && (session.status === 'idle' || (session.status === 'attention' && session.reason === 'finished'));
+        if (ended || done) {
+          run.finishedAt = now;
+          run.closed = !done;
+          any = true;
+        }
+      }
+    }
+    if (any) this.changed();
+  }
+
+  /**
+   * Takes the cost Claude Code reports for a session, for the run that opened it: until it
+   * finishes, and a little after. Kept without saving, as reports come every few seconds; it is
+   * saved with the next change of the run.
+   */
+  observeCost(sessionId: string, costUsd: number | null): void {
+    if (costUsd === null || !Number.isFinite(costUsd) || costUsd < 0) return;
+    const run = this.runOf(sessionId);
+    if (!run || run.sessionId === null) return;
+    if (run.finishedAt !== null && this.deps.now() - run.finishedAt > COST_GRACE_MS) return;
+    run.costUsd = costUsd;
   }
 
   /** Runs a schedule now, whether or not it is enabled; its own timetable is not moved. */
@@ -313,7 +392,7 @@ export class ScheduleStore {
     let any = false;
     for (const s of this.schedules) {
       if (!s.enabled || s.nextRunAt === null || s.nextRunAt > now - LATE_GRACE_MS || s.catchUp) continue;
-      this.record(s, { at: now, outcome: 'skipped', detail: `ShellYard was not running at the time of this run (${new Date(s.nextRunAt).toLocaleString('en-GB')}).`, sessionId: null, manual: false });
+      this.record(s, newRun(now, 'skipped', `ShellYard was not running at the time of this run (${new Date(s.nextRunAt).toLocaleString('en-GB')}).`, null, false));
       this.plan(s, now);
       any = true;
     }
@@ -326,10 +405,18 @@ export class ScheduleStore {
     if (s.nextRunAt === null) s.enabled = false;
   }
 
-  /** Starts whatever is due. Called every second. */
+  /** Starts whatever is due, and reports runs that wait on the user too long. Called every second. */
   tick(): void {
     const now = this.deps.now();
     let any = false;
+    for (const s of this.schedules) {
+      for (const run of s.runs) {
+        if (followed(run) && run.blockedSince !== null && run.stuckAt === null && now - run.blockedSince >= SCHEDULE_STUCK_AFTER_MS) {
+          run.stuckAt = now;
+          any = true;
+        }
+      }
+    }
     for (const s of this.schedules) {
       if (!s.enabled || s.nextRunAt === null || s.nextRunAt > now) continue;
       this.fire(s, false);

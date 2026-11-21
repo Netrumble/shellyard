@@ -4115,3 +4115,14 @@ button.worktree-chip[aria-expanded='true'] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* How the last run of a schedule went; a run waiting on the user stands out. */
+.schedule-result {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+}
+
+.schedule.needs-you {
+  border-left: 4px solid var(--accent);
+}

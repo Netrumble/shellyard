@@ -312,7 +312,15 @@ for a permission, the session waits under **Needs attention** until you answer.
 
 Each schedule shows its next run and how the last one went, and **History** lists the last
 twenty runs: *Prompt given*, *Session open, prompt not given* (Claude Code did not become ready,
-or did not confirm it took the prompt), *Could not start* (with the reason) or *Skipped*. **Run
+or did not confirm it took the prompt), *Could not start* (with the reason) or *Skipped*.
+
+Beside that, a run says how it is going or went: *Working for 3m*, *Done in 4m · $0.42 · waited on
+you 2m*, or *Waiting on you for 12m*. A run is done when Claude Code finishes its turn after the
+prompt; its duration counts from the start of the run. A session closed or ended before that,
+or replaced by a new one when ShellYard restarts, makes the run *Ended after 6m, before finishing*. The cost is Claude
+Code's own estimate for the session until then (see Usage). A run that waits on a permission or a
+question for more than 10 minutes is marked, its schedule stands out in the list, and a
+notification reminds you once, even if the page is in view, since the first one went unanswered. **Run
 now** starts a run at once without moving the timetable; the **On** box pauses a schedule.
 
 Things to know:

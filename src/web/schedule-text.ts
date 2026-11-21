@@ -1,4 +1,5 @@
-import type { ScheduleOutcome, ScheduleWhen } from '../shared/types.js';
+import type { Schedule, ScheduleOutcome, ScheduleRun, ScheduleWhen } from '../shared/types.js';
+import { durationLabel } from './gauges.js';
 
 // What a schedule says in words, and the conversions its form needs.
 
@@ -51,6 +52,38 @@ export function outcomeText(outcome: ScheduleOutcome): string {
     case 'skipped':
       return 'Skipped';
   }
+}
+
+/** An estimated cost in dollars: cents below ten dollars, whole dollars above. */
+export function costLabel(usd: number): string {
+  return usd < 10 ? `$${usd.toFixed(2)}` : `$${Math.round(usd)}`;
+}
+
+/**
+ * How a run went beyond its prompt, in a few words, and whether it needs the user: "Done in 4m ·
+ * $0.42", "Waiting on you for 12m", "Working for 3m". Empty when there is nothing to add (a run
+ * that failed, was skipped, or whose prompt was not given).
+ */
+export function runResult(run: ScheduleRun, now: number): { text: string; tone: string; needsYou: boolean } {
+  const cost = run.costUsd !== null && run.costUsd > 0 ? costLabel(run.costUsd) : null;
+  const waited = run.blockedMs > 0 ? `waited on you ${durationLabel(run.blockedMs)}` : null;
+  const join = (...parts: Array<string | null>): string => parts.filter(Boolean).join(' · ');
+  if (run.finishedAt !== null && run.closed) return { text: join(`Ended after ${durationLabel(run.finishedAt - run.at)}, before finishing`, cost, waited), tone: 'tone-muted', needsYou: false };
+  if (run.finishedAt !== null) return { text: join(`Done in ${durationLabel(run.finishedAt - run.at)}`, cost, waited), tone: 'tone-ok', needsYou: false };
+  if (run.sessionId === null || (run.outcome !== 'started' && run.outcome !== 'delivered')) return { text: '', tone: '', needsYou: false };
+  if (run.blockedSince !== null) {
+    const text = join(`Waiting on you for ${durationLabel(now - run.blockedSince)}`, cost);
+    return { text, tone: run.stuckAt !== null ? 'tone-dead' : 'tone-warn', needsYou: true };
+  }
+  return { text: join(`Working for ${durationLabel(now - run.at)}`, cost, waited), tone: 'tone-done', needsYou: false };
+}
+
+/** The runs that have just been found waiting on the user too long, with their schedule. */
+export function newlyStuck(prev: Schedule[], next: Schedule[]): Array<{ schedule: Schedule; run: ScheduleRun }> {
+  const before = new Set(prev.flatMap((s) => s.runs.filter((r) => r.stuckAt !== null).map((r) => `${s.id}@${r.at}`)));
+  const out: Array<{ schedule: Schedule; run: ScheduleRun }> = [];
+  for (const s of next) for (const r of s.runs) if (r.stuckAt !== null && r.blockedSince !== null && !before.has(`${s.id}@${r.at}`)) out.push({ schedule: s, run: r });
+  return out;
 }
 
 /** The colour class of an outcome, from the ones the rest of the page uses. */

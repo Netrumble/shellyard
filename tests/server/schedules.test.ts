@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { Schedule } from '../../src/shared/types.js';
+import { SCHEDULE_STUCK_AFTER_MS, type Schedule } from '../../src/shared/types.js';
 import { launcherFingerprint, ScheduleError, ScheduleStore, type LaunchResult } from '../../src/server/schedules.js';
 import { useTempHome } from '../helpers.js';
 
@@ -79,10 +79,91 @@ describe('ScheduleStore', () => {
     store.tick();
     expect(launches.map((l) => l.id)).toEqual([s.id]);
     const after = store.list()[0]!;
-    expect(after.runs).toEqual([{ at: now, outcome: 'started', detail: null, sessionId: 'session-1', manual: false }]);
+    expect(after.runs).toEqual([{ at: now, outcome: 'started', detail: null, sessionId: 'session-1', manual: false, finishedAt: null, closed: false, costUsd: null, blockedMs: 0, blockedSince: null, stuckAt: null }]);
     expect(after.nextRunAt).toBe(now + HOUR);
     store.tick();
     expect(launches).toHaveLength(1);
+  });
+
+  describe('how a run goes', () => {
+    /** A store with one run started now, on session-1. */
+    const started = (): { store: ScheduleStore; id: string; start: number } => {
+      const store = fresh();
+      const s = store.create(input());
+      store.runNow(s.id);
+      return { store, id: s.id, start: now };
+    };
+    const run = (store: ScheduleStore) => store.list()[0]!.runs[0]!;
+    const state = (status: string, reason: string | null = null) => [{ id: 'session-1', status, reason }];
+
+    it('takes how long the run took and what it cost, once its turn is over after the prompt', () => {
+      const { store, id, start } = started();
+      store.resolveRun(id, 'session-1', 'delivered', null);
+      store.observe(state('working'));
+      store.observeCost('session-1', 0.12);
+      now += 4 * MIN;
+      store.observeCost('session-1', 0.42);
+      store.observe(state('attention', 'finished'));
+      expect(run(store)).toMatchObject({ finishedAt: start + 4 * MIN, closed: false, costUsd: 0.42, blockedMs: 0 });
+      // A report coming a little late still counts; work done much later by hand does not.
+      now += 10_000;
+      store.observeCost('session-1', 0.45);
+      now += 5 * MIN;
+      store.observeCost('session-1', 3);
+      expect(run(store).costUsd).toBe(0.45);
+    });
+
+    it('is not over while the prompt is still on its way, even if the session waits at its prompt', () => {
+      const { store } = started();
+      store.observe(state('idle'));
+      expect(run(store).finishedAt).toBeNull();
+    });
+
+    it('counts the time spent waiting on the user, and ends when the session ends', () => {
+      const { store, id } = started();
+      store.resolveRun(id, 'session-1', 'delivered', null);
+      store.observe(state('attention', 'blocked'));
+      const since = now;
+      expect(run(store).blockedSince).toBe(since);
+      now += 3 * MIN;
+      store.observe(state('working'));
+      expect(run(store)).toMatchObject({ blockedSince: null, blockedMs: 3 * MIN });
+      now += MIN;
+      // Gone from the list: closed, or replaced by a new session after a restart.
+      store.observe([]);
+      expect(run(store)).toMatchObject({ finishedAt: now, closed: true });
+    });
+
+    it('reports a run that waits on the user too long, once', () => {
+      const { store, id } = started();
+      store.resolveRun(id, 'session-1', 'delivered', null);
+      store.observe(state('attention', 'blocked'));
+      now += SCHEDULE_STUCK_AFTER_MS - 1;
+      store.tick();
+      expect(run(store).stuckAt).toBeNull();
+      now += 1;
+      store.tick();
+      const stuckAt = now;
+      expect(run(store).stuckAt).toBe(stuckAt);
+      now += MIN;
+      store.tick();
+      expect(run(store).stuckAt).toBe(stuckAt);
+    });
+
+    it('keeps all of it across a restart', () => {
+      const { store, id, start } = started();
+      store.resolveRun(id, 'session-1', 'delivered', null);
+      store.observeCost('session-1', 0.3);
+      now += 2 * MIN;
+      store.observe(state('attention', 'finished'));
+      expect(make().list()[0]!.runs[0]).toMatchObject({ finishedAt: start + 2 * MIN, costUsd: 0.3, blockedMs: 0, stuckAt: null });
+    });
+
+    it('reads an older file, whose runs say nothing of how they went', () => {
+      fresh();
+      writeFileSync(join(home.dir(), 'schedules.json'), JSON.stringify({ version: 1, schedules: [{ id: 'a', ...input(), runs: [{ at: 5, outcome: 'delivered', detail: null, sessionId: 'x', manual: false }] }] }));
+      expect(make().list()[0]!.runs[0]).toEqual({ at: 5, outcome: 'delivered', detail: null, sessionId: 'x', manual: false, finishedAt: null, closed: false, costUsd: null, blockedMs: 0, blockedSince: null, stuckAt: null });
+    });
   });
 
   it('records how the prompt fared once that is known', () => {

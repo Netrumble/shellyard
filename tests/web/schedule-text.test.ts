@@ -1,5 +1,6 @@
+import type { Schedule, ScheduleRun } from '../../src/shared/types.js';
 import { describe, expect, it } from 'vitest';
-import { describeWhen, fromLocalInput, outcomeText, toLocalInput } from '../../src/web/schedule-text.js';
+import { describeWhen, fromLocalInput, newlyStuck, outcomeText, runResult, toLocalInput } from '../../src/web/schedule-text.js';
 
 describe('describeWhen', () => {
   it('says a weekly timetable the way a person would', () => {
@@ -39,5 +40,41 @@ describe('the date-and-time field', () => {
     expect(fromLocalInput('2026-11-20T09:05')).toBe(t);
     expect(fromLocalInput('')).toBeNull();
     expect(fromLocalInput('not a date')).toBeNull();
+  });
+});
+
+describe('runResult', () => {
+  const MIN = 60_000;
+  const base: ScheduleRun = { at: 0, outcome: 'delivered', detail: null, sessionId: 's', manual: false, finishedAt: null, closed: false, costUsd: null, blockedMs: 0, blockedSince: null, stuckAt: null };
+
+  it('says how long a finished run took, what it cost and how long it waited on you', () => {
+    expect(runResult({ ...base, finishedAt: 4 * MIN, costUsd: 0.4234, blockedMs: 2 * MIN }, 10 * MIN)).toEqual({ text: 'Done in 4m · $0.42 · waited on you 2m', tone: 'tone-ok', needsYou: false });
+    expect(runResult({ ...base, finishedAt: 30_000, costUsd: 12.6 }, MIN).text).toBe('Done in 30s · $13');
+    expect(runResult({ ...base, finishedAt: 6 * MIN, closed: true }, 10 * MIN)).toMatchObject({ text: 'Ended after 6m, before finishing', tone: 'tone-muted' });
+  });
+
+  it('says a run waits on you, more loudly once it is stuck', () => {
+    const waiting = { ...base, blockedSince: 2 * MIN, costUsd: 0.1 };
+    expect(runResult(waiting, 14 * MIN)).toEqual({ text: 'Waiting on you for 12m · $0.10', tone: 'tone-warn', needsYou: true });
+    expect(runResult({ ...waiting, stuckAt: 12 * MIN }, 14 * MIN).tone).toBe('tone-dead');
+  });
+
+  it('says a run is working, and nothing for runs that never had a session at work', () => {
+    expect(runResult({ ...base, outcome: 'started' }, 3 * MIN).text).toBe('Working for 3m');
+    expect(runResult({ ...base, outcome: 'failed', sessionId: null }, MIN).text).toBe('');
+    expect(runResult({ ...base, outcome: 'undelivered' }, MIN).text).toBe('');
+  });
+});
+
+describe('newlyStuck', () => {
+  const run = (over: Partial<ScheduleRun>): ScheduleRun => ({ at: 1, outcome: 'delivered', detail: null, sessionId: 's', manual: false, finishedAt: null, closed: false, costUsd: null, blockedMs: 0, blockedSince: 1, stuckAt: null, ...over });
+  const schedule = (runs: ScheduleRun[]) => ({ id: 'a', name: 'Nightly', runs }) as unknown as Schedule;
+
+  it('finds a run once, when it becomes stuck while still waiting', () => {
+    const before = [schedule([run({})])];
+    const after = [schedule([run({ stuckAt: 5 })])];
+    expect(newlyStuck(before, after).map((x) => x.run.stuckAt)).toEqual([5]);
+    expect(newlyStuck(after, after)).toEqual([]);
+    expect(newlyStuck(before, [schedule([run({ stuckAt: 5, blockedSince: null })])])).toEqual([]);
   });
 });
