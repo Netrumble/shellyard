@@ -2,7 +2,7 @@ import { createReadStream, statSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { pipeline } from 'node:stream';
 import { extname, isAbsolute, resolve, sep } from 'node:path';
-import type { ConversationItem, CreateSessionRequest, Meta } from '../shared/types.js';
+import type { ConversationItem, CreateSessionRequest, HookName, Meta } from '../shared/types.js';
 import { classifyHost, healthProof, isChallenge, originAllowed, requestAuthorized, safeEqual } from './auth.js';
 import { MAX_IMAGE_BYTES, readImage, saveImage } from './backgrounds.js';
 import { MAX_SOUND_BYTES, SoundStore } from './sounds.js';
@@ -13,6 +13,7 @@ import { MAX_PROMPT } from '../shared/sessions.js';
 import { RecipeError, type RecipeStore } from './recipes.js';
 import { startFromTicket, TicketError } from './tickets.js';
 import type { StatusLog } from './status-log.js';
+import { changesOf, diffOf, type ChangeTracker } from './changes.js';
 
 /** The most sessions one prompt is sent to at once. */
 const MAX_PROMPT_TARGETS = 50;
@@ -50,6 +51,10 @@ export interface HttpDeps {
   onClaudeStatus?: (sessionId: string) => void;
   /** A hosted Claude session took a prompt. */
   onPromptSubmitted?: (sessionId: string) => void;
+  /** A hosted Claude session reported a hook event (it used a tool, ended a turn...). */
+  onHook?: (sessionId: string, name: HookName) => void;
+  /** The figures of the worktrees' uncommitted changes, kept current by what the page reads. */
+  changes?: ChangeTracker;
   port: number;
   /** The host name the page is served on in this start (see newPageHost). */
   pageHost: string;
@@ -381,6 +386,7 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       noteConversation(hookedId, raw);
       manager.setLiveCwd(hookedId, (raw as { cwd?: unknown }).cwd);
       if (parsed.name === 'UserPromptSubmit') deps.onPromptSubmitted?.(hookedId);
+      deps.onHook?.(hookedId, parsed.name);
       send(res, 204);
       return;
     }
@@ -902,6 +908,23 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
         return send(res, 200, result);
       }
       throw new HttpError(405, 'Method not allowed');
+    }
+
+    // The uncommitted changes of a worktree, and the diff of one of its files.
+    if (path === '/api/git/changes') {
+      if (method !== 'GET') throw new HttpError(405, 'Method not allowed');
+      const folder = absolutePath(url.searchParams.get('path'));
+      const changes = await gitCall(() => changesOf(folder));
+      deps.changes?.record(folder, changes);
+      return send(res, 200, changes);
+    }
+
+    if (path === '/api/git/diff') {
+      if (method !== 'GET') throw new HttpError(405, 'Method not allowed');
+      const folder = absolutePath(url.searchParams.get('path'));
+      const file = url.searchParams.get('file');
+      if (!file) throw new HttpError(400, 'file is required');
+      return send(res, 200, await gitCall(() => diffOf(folder, file)));
     }
 
     if (path === '/api/git/switch') {
