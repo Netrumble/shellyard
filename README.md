@@ -408,6 +408,20 @@ In the new-session dialog, when the folder is in a repository with more than one
 sub-folder if it exists in that worktree. **Manage…** opens the same dialog to create one first.
 The choice is not offered for launchers that set their own folder (WSL, `--cd`).
 
+### Uncommitted changes
+
+When the worktree a session works in has changes that are not committed, a badge beside the
+branch chip says how many: `3 files +42 −7`. The session's row on the board shows the lines too.
+Click the badge to see them: the changed files on the left (modified, added, deleted, new and not
+tracked yet), and the diff of the one chosen on the right, against the last commit, staged or
+not. The arrows (or `J`/`K`) move through the files; **Refresh** reads them again.
+
+The badge is read again shortly after Claude Code uses a tool or finishes a turn, and every 15
+seconds for changes made elsewhere (an editor, a shell), and the open dialog follows. A commit
+takes the files out. These are the changes of the whole worktree, whoever made them: sessions
+that share a worktree share its badge. Files git ignores are not listed; a binary file, or a diff
+larger than 1 MB, is listed without its lines.
+
 ### Terminal background
 
 A terminal normally follows the theme. In a launcher's settings you can give its sessions another

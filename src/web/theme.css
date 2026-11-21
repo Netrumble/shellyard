@@ -1945,7 +1945,11 @@ button.new-story {
 
 .srow {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  /* Glyph and text, then as many small columns as the row has (changes, sparkline, age). */
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto;
+  grid-auto-flow: column;
+  grid-auto-columns: auto;
   align-items: center;
   gap: 12px;
   width: 100%;
@@ -1976,6 +1980,12 @@ button.new-story {
   font-weight: 700;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.srow-changes {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
@@ -4125,4 +4135,250 @@ button.worktree-chip[aria-expanded='true'] {
 
 .schedule.needs-you {
   border-left: 4px solid var(--accent);
+}
+
+/* Uncommitted changes: the badge beside the branch, and the dialog with the diff. */
+
+.plus {
+  color: var(--ok);
+}
+
+.minus {
+  color: var(--danger);
+}
+
+.model.changes-chip {
+  cursor: pointer;
+  background: transparent;
+  font-variant-numeric: tabular-nums;
+}
+
+.model.changes-chip:hover {
+  border-color: var(--muted);
+  color: var(--text);
+}
+
+.dialog.changes-dialog {
+  width: min(1280px, calc(100vw - 32px));
+  height: calc(100vh - 32px);
+  overflow: hidden;
+}
+
+.changes-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.changes-head h2 {
+  margin: 0;
+}
+
+.changes-where {
+  font-weight: 400;
+  color: var(--muted);
+  margin-left: 6px;
+}
+
+.changes-total {
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.changes-note {
+  margin: 0;
+  font-size: 12px;
+}
+
+.changes-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(220px, 320px) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.changes-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.changes-files li.hint {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.changes-files button {
+  display: grid;
+  grid-template-columns: 1.4em minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 10px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  font-size: 13px;
+}
+
+.changes-files button:hover {
+  background: var(--panel-2);
+}
+
+.changes-files button.selected {
+  background: var(--panel-2);
+  box-shadow: inset 3px 0 0 var(--done);
+}
+
+.change-letter {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-weight: 700;
+  text-align: center;
+  color: var(--warn);
+}
+
+.change-letter.added,
+.change-letter.untracked {
+  color: var(--ok);
+}
+
+.change-letter.deleted,
+.change-letter.conflicted {
+  color: var(--danger);
+}
+
+.change-path {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.change-name,
+.change-dir {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.change-dir {
+  font-size: 11px;
+  color: var(--muted);
+  direction: rtl;
+  text-align: left;
+}
+
+.change-count {
+  font-size: 12px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.changes-diff {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--term-bg);
+  color: var(--term-fg);
+  overflow: hidden;
+}
+
+.changes-diff > .hint,
+.changes-diff > .error {
+  padding: 12px;
+}
+
+.changes-file-title {
+  padding: 6px 10px;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff {
+  flex: 1;
+  overflow: auto;
+  font: 12.5px/1.5 ui-monospace, 'Cascadia Mono', Consolas, 'DejaVu Sans Mono', monospace;
+  padding-bottom: 8px;
+}
+
+.diff-row {
+  display: grid;
+  grid-template-columns: 4.5ch 4.5ch max-content;
+  min-width: 100%;
+  width: max-content;
+}
+
+.diff-row.hunk,
+.diff-row.note {
+  grid-template-columns: max-content;
+  padding: 2px 10px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--done) 12%, transparent);
+}
+
+.diff-row.hunk {
+  margin-top: 6px;
+}
+
+.diff-row.note {
+  font-style: italic;
+}
+
+.diff-no {
+  padding: 0 6px;
+  text-align: right;
+  color: color-mix(in srgb, var(--term-fg) 45%, transparent);
+  user-select: none;
+}
+
+.diff-code {
+  white-space: pre;
+  padding-right: 16px;
+}
+
+.diff-mark {
+  display: inline-block;
+  width: 2ch;
+  padding-left: 4px;
+  user-select: none;
+}
+
+.diff-row.add {
+  background: color-mix(in srgb, #3fae5a 18%, transparent);
+}
+
+.diff-row.del {
+  background: color-mix(in srgb, #f0686c 18%, transparent);
+}
+
+.diff-row.add .diff-mark {
+  color: #3fae5a;
+}
+
+.diff-row.del .diff-mark {
+  color: #f0686c;
+}
+
+/* The light theme's terminals are light: the marks take the darker greens and reds of its text. */
+:root[data-theme='light'] .diff-row.add .diff-mark {
+  color: #1a7f37;
+}
+
+:root[data-theme='light'] .diff-row.del .diff-mark {
+  color: #c22a2a;
 }

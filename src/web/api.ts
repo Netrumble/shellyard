@@ -1,4 +1,4 @@
-import type { AreaRule, ConversationItem, FlowSummary, CreateSessionRequest, FolderListing, Meta, PermissionChoice, Profile, Schedule, ScheduleRun, SessionInfo, SoundFile, SoundLibrary, SoundSettings, Story, TerminalBackground, TerminalFont, WorktreeListing } from '../shared/types.js';
+import type { AreaRule, ConversationItem, FileDiff, WorktreeChanges, FlowSummary, CreateSessionRequest, FolderListing, Meta, PermissionChoice, Profile, Schedule, ScheduleRun, SessionInfo, SoundFile, SoundLibrary, SoundSettings, Story, TerminalBackground, TerminalFont, WorktreeListing } from '../shared/types.js';
 import type { SendOutcome } from './selection.js';
 import type { Recipe } from '../shared/recipes.js';
 
@@ -176,6 +176,8 @@ export const api = {
   removeWorktree: (b: { repo: string; path: string; force: boolean; deleteBranch: boolean }): Promise<{ listing: WorktreeListing; warning: string | null }> =>
     call('DELETE', '/api/git/worktrees', b),
   switchBranch: (b: { path: string; branch: string; create: boolean }): Promise<void> => call('POST', '/api/git/switch', b),
+  changes: (path: string): Promise<WorktreeChanges | null> => call('GET', `/api/git/changes?path=${encodeURIComponent(path)}`),
+  diff: (path: string, file: string): Promise<FileDiff> => call('GET', `/api/git/diff?path=${encodeURIComponent(path)}&file=${encodeURIComponent(file)}`),
   moveSessionToWorktree: (id: string, path: string): Promise<SessionInfo> => call('POST', `/api/sessions/${encodeURIComponent(id)}/worktree`, { path }),
   runSchedule: (id: string): Promise<ScheduleRun> => call('POST', `/api/schedules/${encodeURIComponent(id)}/run`),
 };

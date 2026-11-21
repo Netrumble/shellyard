@@ -369,6 +369,8 @@ export type ServerMessage =
   | { t: 'usage'; usage: UsageSummary }
   /** Bytes printed in the last second, per session; sessions printing nothing are absent. */
   | { t: 'activity'; rates: Record<string, number> }
+  /** The uncommitted changes of the worktrees sessions work in; a worktree without any is absent. */
+  | { t: 'changes'; changes: ChangeSummary[] }
   | { t: 'snapshot'; id: string; data: string }
   | { t: 'output'; id: string; data: string };
 
@@ -383,6 +385,50 @@ export interface Worktree {
   prunable: boolean;
   /** The entry of a bare repository: no files checked out, nothing to work in. */
   bare: boolean;
+}
+
+/**
+ * How git sees a file that differs from the last commit. A rename shows as the old path deleted
+ * and the new one added; "conflicted" is a file left by a merge that is not resolved.
+ */
+export type ChangeStatus = 'modified' | 'added' | 'deleted' | 'untracked' | 'typechange' | 'conflicted';
+
+/** A file of a worktree that is not as the last commit has it. */
+export interface ChangedFile {
+  /** Relative to the top of the worktree, with forward slashes. */
+  path: string;
+  status: ChangeStatus;
+  /** Lines added and removed; null for a binary file, or one too large to count. */
+  added: number | null;
+  removed: number | null;
+}
+
+/** The uncommitted changes of a worktree: everything not as the last commit has it. */
+export interface WorktreeChanges {
+  worktree: string;
+  files: ChangedFile[];
+  added: number;
+  removed: number;
+  /** True when there were more files than are listed. */
+  truncated: boolean;
+}
+
+/** The changes of a worktree in figures, for the badge of the sessions working in it. */
+export interface ChangeSummary {
+  worktree: string;
+  files: number;
+  added: number;
+  removed: number;
+}
+
+/** What changed in one file, as a unified diff against the last commit. */
+export interface FileDiff {
+  path: string;
+  status: ChangeStatus;
+  binary: boolean;
+  /** True when the diff is too long to show; `diff` is then empty. */
+  tooLarge: boolean;
+  diff: string;
 }
 
 export interface WorktreeListing {

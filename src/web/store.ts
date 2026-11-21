@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import type { AreaRule, ClosedSession, Meta, Schedule, SessionInfo, SoundFile, SoundLibrary, Story, UsageSummary } from '../shared/types.js';
+import type { AreaRule, ChangeSummary, ClosedSession, Meta, Schedule, SessionInfo, SoundFile, SoundLibrary, Story, UsageSummary } from '../shared/types.js';
 import { api, configureApi } from './api.js';
 import { loadEffects, loadSound, saveEffects, saveSound, type EffectsLevel } from './effects.js';
 import { connect, type ConnectionState, type Socket } from './socket.js';
@@ -31,6 +31,8 @@ interface State {
   usage: UsageSummary | null;
   /** Bytes printed in the last second per session; absent means quiet. */
   activity: Record<string, number>;
+  /** The uncommitted changes of the worktrees sessions work in, by worktree path. */
+  changes: Record<string, ChangeSummary>;
   /** What each terminal printed over the last minutes, for the lines on the board. */
   sparks: SparkHistory;
   /** Sessions picked on the board for one action on all of them, in the order picked. */
@@ -63,6 +65,7 @@ let state: State = {
   schedules: [],
   usage: null,
   activity: {},
+  changes: {},
   sparks: emptyHistory(),
   selection: [],
   focus: null,
@@ -311,6 +314,7 @@ export function startStore(): void {
     schedulesLoaded = true;
   });
   socket.onUsage((usage) => set({ usage }));
+  socket.onChanges((list) => set({ changes: Object.fromEntries(list.map((c) => [c.worktree, c])) }));
   socket.onActivity((activity) => set({ activity, sparks: recordActivity(state.sparks, activity, Date.now()) }));
   socket.onState((connection) => {
     // Once the token is known to be refused, a failing socket must not hide that message.

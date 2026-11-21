@@ -4,8 +4,18 @@ import { isAbsolute, join, resolve } from 'node:path';
 import type { Worktree, WorktreeListing } from '../shared/types.js';
 import { removeDirPatiently } from './remove-dir.js';
 
-/** The message is git's trimmed stderr, or a validation message. */
-export class GitError extends Error {}
+/**
+ * The message is git's trimmed stderr, or a validation message. `code` is the code of the
+ * error git was run with, when there is one (for instance ERR_CHILD_PROCESS_STDIO_MAXBUFFER).
+ */
+export class GitError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string | number,
+  ) {
+    super(message);
+  }
+}
 
 /** A request this module turns down itself (main worktree, not a worktree, bad name...): never worth retrying. */
 export class GitRefusal extends GitError {}
@@ -56,7 +66,7 @@ export function runGit(args: string[], cwd: string): Promise<string> {
       (error, stdout, stderr) => {
         if (error) {
           const text = String(stderr ?? '').trim();
-          reject(new GitError(text || error.message));
+          reject(new GitError(text || error.message, (error as NodeJS.ErrnoException).code ?? undefined));
           return;
         }
         resolvePromise(String(stdout));
