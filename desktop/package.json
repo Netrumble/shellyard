@@ -12,6 +12,7 @@
     "bin",
     "main.js",
     "find-node.js",
+    "login-env.js",
     "icon.png",
     "README.md"
   ],

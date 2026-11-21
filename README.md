@@ -26,7 +26,7 @@ window: your profile, your PATH, your permissions. The page is its screen and ke
 ShellYard comes in the browser or as a desktop app (see [Which one to pick](#which-one-to-pick)).
 Every way needs Node.js 22 or later on PATH: the server that runs your sessions is a Node process.
 
-### In the browser, from npm (Windows and Linux)
+### In the browser, from npm (Windows, macOS and Linux)
 
 ```
 npm install -g @talentiaoss/shellyard
@@ -51,31 +51,50 @@ ShellYard then runs in its own window, with an icon in the notification area: cl
 keeps it there, and it still tells you when a session needs you. To uninstall it, use **Settings →
 Apps → Installed apps → ShellYard**. Uninstalling leaves your data in `~/.shellyard`.
 
-### As a desktop app, from npm (Linux, or Windows from a terminal)
+### As a desktop app, with the disk image (macOS)
+
+1. Download `ShellYard-<version>-arm64.dmg` (Apple Silicon) from the
+   [latest release](https://github.com/Talentia-Software-OSS/shellyard/releases/latest), with the
+   `.dmg.sha256` beside it. To check the download: `shasum -a 256 -c ShellYard-<version>-arm64.dmg.sha256`
+   must print `OK`.
+2. Open it and drag ShellYard into Applications.
+3. The app is not signed with an Apple Developer certificate nor notarised, so the first time macOS
+   refuses to open it. Either remove the quarantine mark once, in Terminal:
+   `xattr -dr com.apple.quarantine /Applications/ShellYard.app`, or open it, then go to
+   **System Settings → Privacy & Security** and press **Open Anyway**.
+
+ShellYard then runs in its own window, with an icon in the menu bar: closing the window keeps it
+there, and it still tells you when a session needs you; Cmd+Q quits it (the sessions keep running).
+Opened from the Finder or the Dock, the app takes the PATH of your login shell (`$SHELL -il`), so
+`node`, `claude` and `code` are found as in a terminal. To uninstall it, move it to the Bin; your
+data stays in `~/.shellyard`.
+
+### As a desktop app, from npm (Linux, macOS, or Windows from a terminal)
 
 ```
 npm install -g @talentiaoss/shellyard-desktop
 shellyard-desktop
 ```
 
-This is the same desktop app as the Windows setup program, installed the npm way. It is meant for
-Linux, where there is no setup program, and for people who prefer to manage their tools with npm.
+This is the same desktop app as the Windows setup program and the macOS disk image, installed the
+npm way. It is meant for Linux, where there is no installer, and for people who prefer to manage
+their tools with npm.
 The first install downloads Electron (about 100 MB). See [desktop/README.md](desktop/README.md).
 
 ### Which one to pick
 
-| | `shellyard` (npm) | Setup program (`.exe`) | `shellyard-desktop` (npm) |
-|---|---|---|---|
-| Where ShellYard shows | a tab in your browser | its own window | its own window |
-| Icon in the notification area, notifications when the window is closed | no | yes | yes |
-| Start menu and desktop shortcuts | no | yes | no: start it with `shellyard-desktop` |
-| Uninstall | `npm uninstall -g @talentiaoss/shellyard` | Settings → Apps | `npm uninstall -g @talentiaoss/shellyard-desktop` |
-| Update | `npm update -g @talentiaoss/shellyard` | run the new setup program | `npm update -g @talentiaoss/shellyard-desktop` |
-| Systems | Windows, Linux | Windows | Windows, Linux |
-| Size | small | about 120 MB (includes Electron) | about 100 MB (downloads Electron) |
+| | `shellyard` (npm) | Setup program (`.exe`) | Disk image (`.dmg`) | `shellyard-desktop` (npm) |
+|---|---|---|---|---|
+| Where ShellYard shows | a tab in your browser | its own window | its own window | its own window |
+| Icon in the notification area or menu bar, notifications when the window is closed | no | yes | yes | yes |
+| Shortcuts | no | Start menu and desktop | Applications, Launchpad | no: start it with `shellyard-desktop` |
+| Uninstall | `npm uninstall -g @talentiaoss/shellyard` | Settings → Apps | move it to the Bin | `npm uninstall -g @talentiaoss/shellyard-desktop` |
+| Update | `npm update -g @talentiaoss/shellyard` | run the new setup program | replace the app with the new one | `npm update -g @talentiaoss/shellyard-desktop` |
+| Systems | Windows, macOS, Linux | Windows | macOS (Apple Silicon) | Windows, macOS, Linux |
+| Size | small | about 120 MB (includes Electron) | about 120 MB (includes Electron) | about 100 MB (downloads Electron) |
 
-On Windows, the setup program is the simplest choice for a desktop window; `shellyard` alone is enough
-if a browser tab suits you.
+On Windows the setup program, and on a Mac the disk image, are the simplest choice for a desktop
+window; `shellyard` alone is enough if a browser tab suits you.
 
 All three are views of the same server: you can use them at once, and they show the same sessions.
 Both desktop variants carry their own copy of the server, so you do not need to install `shellyard`
@@ -104,19 +123,78 @@ running when you close the browser tab. Open the page again with `shellyard`.
 
 ## What you see
 
-- **Board** — the opening page: one box per area, and in it one light per terminal, with its
-  name and state. An area lights up when one of its terminals is waiting for you, and those
-  areas come first, so a glance tells who needs you and where. Click a light to open that
-  terminal; click the area's name to open all its terminals side by side; drag a light to
-  another area to move it there. Drag the corner of an area to resize it; the size is remembered
-  in this browser, and a button on the area puts it back to the default.
-
-- **Needs attention** — one card per session waiting for you, each with its live terminal.
-  Click into a card and type your answer there. Sessions blocked on a permission or a question
-  come first; sessions that finished their turn follow, with a "Mark as seen" button.
+- **Board** — the opening page. It starts with the sessions waiting for you, as cards with a
+  wait timer and the answers that fit (allow once, deny, always in this area). The areas follow,
+  the busiest first, each with its folder and branch, a bar by state and one row per session
+  (state, model, a five-minute sparkline, age). Click a session to open its terminal; click the
+  area's name to open all its terminals side by side; drag a session to another area to move it
+  there. A switch shows the board as **Areas**, as a **Timeline** of the last hour per session
+  (working, waiting on you, finished), or as a **Wall** of every terminal side by side.
+- **Needs attention** — a queue: the waiting sessions on the left, the one selected on the right
+  with its request, its live terminal and the answers. It is meant for the keyboard: `A` allows
+  once, `D` denies, `S` allows and adds an area rule (see below), `R` puts the cursor in the
+  terminal, `J`/`K` or the arrows move, `Enter` opens the terminal. After an answer the queue moves
+  on by itself. Allow and deny are offered only for requests that can be read in full and open on
+  a plain "Yes" (Bash, Edit, Write, WebFetch, MCP tools); anything else (a plan to approve, a
+  question, a command cut short) is answered in the terminal.
 - **Terminals** — every session side by side, or one maximised.
-- **Sidebar** — all sessions with their status, grouped by area, and your launchers: click one
-  to start a session from it.
+- **Sidebar** — navigation, the sessions grouped by area, and your launchers: click one to start a
+  session from it, or press Alt+1 to Alt+9.
+
+### Find in a terminal
+
+**Ctrl+Shift+F** (**Cmd+F** on a Mac) opens a search bar over the terminal that has the focus. It
+searches the screen and the scrollback (the last 5000 lines), highlights every match and counts
+them; text selected in the terminal is searched for at once. `Enter` goes to the next match,
+`Shift+Enter` to the previous one, `Aa` matches case and `.*` takes a regular expression; `Escape`
+closes the bar and gives the keys back to the terminal. Plain Ctrl+F is left to the program in the
+terminal, where shells use it to move the cursor.
+
+### Command palette and Focus
+
+**Ctrl K** (**Cmd K**) opens a palette that jumps to a session (waiting ones first), an area, a
+launcher, a view or a conversation to resume, or runs an action. In a terminal Ctrl K cuts the rest
+of the line, so there **Ctrl Shift K** opens it.
+
+**Focus 45 min**, in the header, lets only permissions and questions interrupt for 45 minutes:
+sessions that finish meanwhile come in one digest at the end, notified if the page is not in view.
+Sound settings are untouched; Focus only filters which events make one.
+
+### Act on several sessions
+
+Shift-click (or Ctrl/Cmd-click, Shift+Enter, Shift+Space) picks sessions on the board. A bar at its
+foot then sends one prompt to all of them, marks the finished ones as seen, or moves them to an
+area, and says what happened to each. A prompt is typed only into Claude Code sessions waiting at
+their prompt; a session at work, blocked on a question or still starting is left alone and listed
+as refused. Escape lets go of the selection.
+
+### Area rules
+
+An area can let its sessions run some Bash commands without asking. A rule is a command word by
+word, `*` last for any further arguments: `dotnet test *`, `git status`. When Claude Code asks for a
+permission, a rule of the session's area that covers the command answers "allow", and the session
+never stops. **Always in this area** (on a waiting card, or `S` in the queue) allows the request
+and adds the rule made from its command: the program and its subcommand with any arguments for
+programs known to have subcommands (git, dotnet, npm…), the exact command for any other. The area's
+menu opens its rules: switch them on or off, delete, add, and see how many interruptions each
+avoided this week.
+
+A rule never covers a command that chains, pipes, redirects, substitutes, spans several lines or
+starts with `VAR=value`, quoted or not. A damaged `rules.json` gives fewer rules, never more.
+
+### Start from ticket
+
+**Start from ticket** on the board turns a ticket code into a place to work, in one step: a git
+worktree on the ticket's branch, an area in it named after the ticket, and the sessions of a
+*recipe* started there, each Claude Code one given its first prompt as soon as it is ready. The
+dialog shows the numbered steps before anything is done.
+
+A recipe names the repository, the base branch, the branch and the folder of the worktree (with
+`{ticket}`, `{ticket-lower}` and `{repo}` in them) and up to ten sessions, each with a launcher, a
+model and a first prompt. Recipes are edited in the same dialog and kept in `recipes.json`. An
+existing branch is checked out as it is. A ticket that already has an area, or a recipe whose
+launcher is gone, is refused before git is touched; if the area cannot be made, the new worktree
+and branch are taken away again.
 
 ### Areas
 
@@ -334,6 +412,12 @@ What these figures are, and are not:
 
 History is kept for 90 days in `usage.json`.
 
+The Usage view also shows **Your flow today**: how long Claude Code sessions were blocked on you,
+how fast you answered (the median), how many sessions worked at once, and how many requests the
+area rules answered for you, each against the average of the previous week. The board's summary
+repeats the median answer and the time blocked. These figures are kept for two weeks in
+`flow.json`, as totals only.
+
 ### Instruments and effects
 
 The interface is styled as a sports-car instrument cluster. Beside each session a small rev
@@ -382,7 +466,9 @@ Known limits:
 - Of a launcher, the name, the start folder and the terminal background can be changed in the page; its
   command and arguments are edited in `config.json` (under `profiles`, the name launchers keep there). A custom command takes no arguments field yet.
 - Some key combinations are taken by the browser before they reach the terminal (Ctrl+W, Ctrl+T,
-  Ctrl+N). Ctrl+C copies when text is selected and interrupts otherwise; Ctrl+V pastes.
+  Ctrl+N). Ctrl+C copies when text is selected and interrupts otherwise; Ctrl+V pastes. On a Mac,
+  Cmd+C and Cmd+V copy and paste as well. Ctrl+Shift+F (Cmd+F on a Mac) opens
+  the search instead of reaching the program.
 
 ## Where things are kept
 
@@ -397,6 +483,9 @@ Everything is in `~/.shellyard/`:
 | `closed.json` | The last fifty sessions that ended or were closed, to reopen them |
 | `backgrounds/` | The images uploaded as terminal backgrounds |
 | `schedules.json` | The schedules, with the last twenty runs of each |
+| `rules.json` | The area rules: Bash commands an area's sessions run without asking |
+| `recipes.json` | The recipes of Start from ticket |
+| `flow.json` | Time blocked on you and answer times, per day, for two weeks |
 | `usage.json` | Usage history: cost and tokens per day, model and story (90 days), and how far each of Claude Code's conversation files has been read |
 | `open.html` | The private page `shellyard` opens in your browser (readable by you only) |
 | `run/` | Per-session settings files, removed when a session ends |
@@ -471,6 +560,19 @@ npm test            # unit and integration tests
 npm run build       # server (tsc) and web UI (vite) into dist/
 node dist/cli/shellyard.js --foreground
 ```
+
+At every push to `main`, the [Desktop installers](.github/workflows/desktop-installers.yml)
+workflow runs the tests, builds the Windows setup program and the macOS disk image (each on its own
+system) and publishes them, with their checksums, as a GitHub release. It can also be started by
+hand (Actions → Desktop installers → Run workflow).
+
+The version of each release is worked out by the workflow: `VERSION_BASE` at its top gives the
+major and minor (its patch stays 0), and the patch is one more than the highest already released
+with that major and minor. With `VERSION_BASE: 0.2.0` and `v0.2.0` released, the next push gives
+`v0.2.1`, then `v0.2.2`; to start 0.3, set `VERSION_BASE` to `0.3.0`, and the first release is
+`v0.3.0`. The version is set in the packages only for the build: `package.json` in the repository
+is not changed, and the npm packages are published separately. See
+[desktop/README.md](desktop/README.md) to build the installers locally.
 
 ## Licence
 

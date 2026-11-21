@@ -1,4 +1,5 @@
 import { FitAddon } from '@xterm/addon-fit';
+import { SearchAddon, type ISearchOptions, type ISearchResultChangeEvent } from '@xterm/addon-search';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { useEffect, useRef, useState } from 'react';
@@ -6,8 +7,18 @@ import type { TerminalBackground, TerminalFont } from '../../shared/types.js';
 import { backgroundUrl } from '../api.js';
 import { getSocket, getState, onThemeChange } from '../store.js';
 import { hostStyle, terminalFont, terminalLook } from '../terminal-look.js';
+import { HIGHLIGHT_LIMIT, isSearchKey, isValidPattern, searchCountText } from '../terminal-search.js';
 
 const RESIZE_DEBOUNCE_MS = 100;
+
+/** The marks of the matches; the addon wants #RRGGBB colours. */
+const SEARCH_DECORATIONS: NonNullable<ISearchOptions['decorations']> = {
+  matchBorder: '#e8a33d',
+  matchOverviewRuler: '#e8a33d',
+  activeMatchBackground: '#e8a33d',
+  activeMatchBorder: '#ffd27a',
+  activeMatchColorOverviewRuler: '#ffd27a',
+};
 
 function cssVar(name: string, fallback: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
@@ -55,6 +66,53 @@ export function TerminalView(props: {
   sizeRef.current = props.size;
   /** Sets the terminal to the session's size when another page has changed it. */
   const followSize = useRef<() => void>(() => undefined);
+  const searchAddon = useRef<SearchAddon | null>(null);
+  const terminal = useRef<Terminal | null>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [caseSensitive, setCaseSensitive] = useState(false);
+  const [regex, setRegex] = useState(false);
+  const [result, setResult] = useState<ISearchResultChangeEvent | null>(null);
+  const invalid = !isValidPattern(query, regex);
+  /** Opens the search bar, or puts the cursor back in it when it is open. */
+  const openSearch = useRef<() => void>(() => undefined);
+  openSearch.current = () => {
+    // Selected text is what the user most likely wants to find.
+    const selected = terminal.current?.getSelection() ?? '';
+    if (selected && !selected.includes('\n')) setQuery(selected);
+    setSearchOpen(true);
+    requestAnimationFrame(() => {
+      searchInput.current?.focus();
+      searchInput.current?.select();
+    });
+  };
+
+  /** Goes to the next (or previous) match; "incremental" keeps the current one if it still matches. */
+  const find = (direction: 'next' | 'previous', incremental = false): void => {
+    const search = searchAddon.current;
+    if (!search) return;
+    if (!query || !isValidPattern(query, regex)) {
+      search.clearDecorations();
+      setResult(null);
+      return;
+    }
+    const options: ISearchOptions = { caseSensitive, regex, incremental, decorations: SEARCH_DECORATIONS };
+    const found = direction === 'next' ? search.findNext(query, options) : search.findPrevious(query, options);
+    if (!found) setResult({ resultIndex: -1, resultCount: 0 });
+  };
+
+  // Typing, or changing an option, searches again from where the terminal is.
+  useEffect(() => {
+    if (searchOpen) find('next', true);
+  }, [query, caseSensitive, regex, searchOpen]);
+
+  const closeSearch = (): void => {
+    searchAddon.current?.clearDecorations();
+    setResult(null);
+    setSearchOpen(false);
+    terminal.current?.focus();
+  };
 
   // A stored image is fetched once and drawn behind the terminal, under its veil.
   useEffect(() => {
@@ -122,6 +180,11 @@ export function TerminalView(props: {
     const offTheme = onThemeChange(() => applyLook.current());
     const fit = new FitAddon();
     term.loadAddon(fit);
+    const search = new SearchAddon({ highlightLimit: HIGHLIGHT_LIMIT });
+    term.loadAddon(search);
+    const searchResults = search.onDidChangeResults((r) => setResult(r));
+    searchAddon.current = search;
+    terminal.current = term;
     term.open(el);
 
     const safeFit = (): void => {
@@ -194,7 +257,13 @@ export function TerminalView(props: {
 
     // Ctrl+C copies when there is a selection (otherwise it interrupts, as in any terminal),
     // and Ctrl+V is left to the browser so that its paste event reaches the terminal.
+    // Ctrl+Shift+F (Cmd+F on a Mac) opens the search instead of reaching the program.
     term.attachCustomKeyEventHandler((e) => {
+      if (e.type === 'keydown' && isSearchKey(e)) {
+        e.preventDefault();
+        openSearch.current();
+        return false;
+      }
       if (e.type !== 'keydown' || !e.ctrlKey || e.altKey) return true;
       const key = e.key.toLowerCase();
       if (key === 'c' && term.hasSelection()) {
@@ -250,6 +319,9 @@ export function TerminalView(props: {
       applyFont.current = () => undefined;
       offTheme();
       offState();
+      searchResults.dispose();
+      searchAddon.current = null;
+      terminal.current = null;
       unsubscribe();
       socket.send({ t: 'detach', id: sessionId });
       term.dispose();
@@ -257,5 +329,55 @@ export function TerminalView(props: {
   }, [sessionId, autoFocus]);
 
   const style = background?.color ? { background: background.color } : hostStyle(background, imageUrl);
-  return <div className="terminal-host" ref={host} style={style} data-background={background?.image ? 'image' : background?.color ? 'color' : 'theme'} />;
+  return (
+    <div className="terminal-frame">
+      <div className="terminal-host" ref={host} style={style} data-background={background?.image ? 'image' : background?.color ? 'color' : 'theme'} />
+      {searchOpen && (
+        <div className="terminal-search" role="search">
+          <input
+            ref={searchInput}
+            type="text"
+            value={query}
+            placeholder="Find in terminal"
+            aria-label="Find in terminal"
+            aria-invalid={invalid}
+            spellCheck={false}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                find(e.shiftKey ? 'previous' : 'next');
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                closeSearch();
+              } else if (isSearchKey(e)) {
+                // The shortcut again selects what is typed, as browsers do.
+                e.preventDefault();
+                e.currentTarget.select();
+              }
+            }}
+          />
+          <span className="terminal-search-count" aria-live="polite">
+            {searchCountText(query, result, invalid)}
+          </span>
+          <button type="button" className={caseSensitive ? 'on' : ''} aria-pressed={caseSensitive} title="Match case" onClick={() => setCaseSensitive((v) => !v)}>
+            Aa
+          </button>
+          <button type="button" className={regex ? 'on' : ''} aria-pressed={regex} title="Regular expression" onClick={() => setRegex((v) => !v)}>
+            .*
+          </button>
+          <button type="button" title="Previous match (Shift+Enter)" aria-label="Previous match" disabled={!query || invalid} onClick={() => find('previous')}>
+            ↑
+          </button>
+          <button type="button" title="Next match (Enter)" aria-label="Next match" disabled={!query || invalid} onClick={() => find('next')}>
+            ↓
+          </button>
+          <button type="button" title="Close (Escape)" aria-label="Close search" onClick={closeSearch}>
+            ✕
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }

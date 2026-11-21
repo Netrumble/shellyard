@@ -5,6 +5,12 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ensureServer, pageAddress, restartServer, writeLauncherPage } from '@talentiaoss/shellyard/launcher';
 import { findNode } from './find-node.js';
+import { adoptLoginPath } from './login-env.js';
+
+const isMac = process.platform === 'darwin';
+// Opened from the Finder or the Dock, the app has the bare PATH of launchd: node, claude and
+// code are found only with the PATH of the user's shell, which the server then inherits.
+adoptLoginPath();
 
 const here = dirname(fileURLToPath(import.meta.url));
 const icon = nativeImage.createFromPath(join(here, 'icon.png'));
@@ -121,7 +127,10 @@ async function openWindow() {
     win.hide();
     if (!toldAboutTray && Notification.isSupported()) {
       toldAboutTray = true;
-      new Notification({ title: 'ShellYard is still running', body: 'It stays in the notification area and tells you when a session needs you. Quit it from there.', icon }).show();
+      const body = isMac
+        ? 'It stays in the menu bar and tells you when a session needs you. Quit it from there, or with Cmd+Q.'
+        : 'It stays in the notification area and tells you when a session needs you. Quit it from there.';
+      new Notification({ title: 'ShellYard is still running', body, icon }).show();
     }
   });
   win.on('closed', () => {
@@ -142,9 +151,11 @@ if (!app.requestSingleInstanceLock()) {
     quitting = true;
   });
   // Windows shows notifications only for an app with an id.
-  app.setAppUserModelId('com.talentia.shellyard');
+  if (process.platform === 'win32') app.setAppUserModelId('com.talentia.shellyard');
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
+      // On macOS the first menu is the app's own: About, Hide, Quit (Cmd+Q).
+      ...(isMac ? [{ role: 'appMenu' }] : []),
       { role: 'editMenu' },
       { label: 'View', submenu: [{ role: 'reload' }, { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }] },
       { role: 'windowMenu' },
