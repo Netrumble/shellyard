@@ -5,6 +5,7 @@
   "asar": false,
   "files": [
     "main.js",
+    "preload.cjs",
     "find-node.js",
     "login-env.js",
     "icon.png",

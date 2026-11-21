@@ -3,6 +3,41 @@ import { reasonLabel } from './attention.js';
 
 let asked = false;
 
+/** What the desktop app's window offers the page (see desktop/preload.cjs); absent in a browser. */
+interface DesktopBridge {
+  showWindow(): void;
+}
+
+/**
+ * Brings ShellYard to the front after a click on one of its notifications. In a browser the tab
+ * is focused. In the desktop app the window may be hidden in the tray or minimised, which the
+ * page cannot undo by itself: the app is asked to show it.
+ */
+export function bringToFront(w: Window & { shellyardDesktop?: DesktopBridge } = window): void {
+  try {
+    w.shellyardDesktop?.showWindow();
+  } catch {
+    // An older desktop app without the bridge: focusing is all there is.
+  }
+  w.focus();
+}
+
+/** Where a click on a session's notification leads: that session, or the board if it is gone. */
+export function viewForSession(sessions: SessionInfo[], id: string): { kind: 'single'; id: string } | { kind: 'board' } {
+  return sessions.some((s) => s.id === id) ? { kind: 'single', id } : { kind: 'board' };
+}
+
+/** Shows a notification that, when clicked, brings ShellYard to the front and runs `onClick`. */
+function show(title: string, options: NotificationOptions, onClick: () => void): void {
+  const n = new Notification(title, options);
+  n.onclick = (e) => {
+    e.preventDefault();
+    bringToFront();
+    onClick();
+    n.close();
+  };
+}
+
 /** Asks for notification permission once, at a moment the user has just done something. */
 export function requestPermissionOnce(): void {
   if (asked || typeof Notification === 'undefined') return;
@@ -18,22 +53,12 @@ export function requestPermissionOnce(): void {
 export function notify(s: SessionInfo, onClick: () => void, sound: boolean): void {
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
   if (document.hasFocus()) return;
-  const n = new Notification(s.name, { body: reasonLabel(s), tag: `shellyard-${s.id}`, silent: !sound });
-  n.onclick = () => {
-    window.focus();
-    onClick();
-    n.close();
-  };
+  show(s.name, { body: reasonLabel(s), tag: `shellyard-${s.id}`, silent: !sound }, onClick);
 }
 
 /** The digest at the end of a focus: one notification, if the page is not in view. */
 export function notifyDigest(text: string, onClick: () => void, sound: boolean): void {
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
   if (document.hasFocus()) return;
-  const n = new Notification('Focus ended', { body: text, tag: 'shellyard-focus-digest', silent: !sound });
-  n.onclick = () => {
-    window.focus();
-    onClick();
-    n.close();
-  };
+  show('Focus ended', { body: text, tag: 'shellyard-focus-digest', silent: !sound }, onClick);
 }

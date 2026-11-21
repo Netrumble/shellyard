@@ -11,6 +11,7 @@
   "files": [
     "bin",
     "main.js",
+    "preload.cjs",
     "find-node.js",
     "login-env.js",
     "icon.png",

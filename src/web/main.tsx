@@ -2,7 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App.js';
 import { newlyWaiting } from './attention.js';
-import { notify } from './notify.js';
+import { notify, viewForSession } from './notify.js';
 import { pickSound, playSound, shouldPlay } from './sounds.js';
 import type { SessionInfo } from '../shared/types.js';
 import { getState, noteDigest, onSessionsChange, refreshSounds, setView, startStore } from './store.js';
@@ -16,7 +16,7 @@ onSessionsChange((prev, next) => {
   // In focus, only what blocks a session interrupts; finished ones wait for the digest.
   const { interrupt: waiting, digest } = splitForFocus(newlyWaiting(prev, next), focusOn(getState().focus, Date.now()));
   noteDigest(digest.map((s) => s.id));
-  for (const s of waiting) notify(s, () => setView({ kind: 'single', id: s.id }), getState().sound);
+  for (const s of waiting) notify(s, () => setView(viewForSession(getState().sessions, s.id)), getState().sound);
   if (waiting.length > 0 && shouldPlay(document.hasFocus(), getState().sound)) void playEventSound(waiting);
 });
 
