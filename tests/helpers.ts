@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,28 +6,22 @@ import type { Launch } from '../src/server/shells.js';
 import type { PtyFactory, PtyLike } from '../src/server/pty-session.js';
 
 /**
- * Deletes a test folder. On Windows a folder is busy while a process works in it, and the git
- * processes the server starts in a session's folder can take a few seconds to end on a slow
- * machine (a CI runner): the deletion is tried again for up to six seconds.
+ * Deletes a test folder. On Windows a folder stays busy for a moment after a process that worked
+ * in it ends (the git processes the server starts in a session's folder), so the deletion is
+ * tried again for up to six seconds. The loop is done here: rmSync's own maxRetries does not
+ * retry on Windows with every Node version.
  */
 export function removeDir(dir: string): void {
-  try {
-    rmSync(dir, { recursive: true, force: true, maxRetries: 60, retryDelay: 100 });
-  } catch (e) {
-    // TEMPORARY diagnostics for the Windows CI runner: who holds the folder.
-    if (process.env.SHELLYARD_DIAG && process.platform === 'win32') {
-      const run = (file: string, args: string[]): string => {
-        try {
-          return execFileSync(file, args, { encoding: 'utf8', timeout: 20000 });
-        } catch (err) {
-          return `(${file} failed: ${(err as Error).message})`;
-        }
-      };
-      console.error(`DIAG busy folder ${dir}`);
-      console.error(`DIAG handle:\n${run(process.env.SHELLYARD_DIAG, ['-accepteula', '-nobanner', dir])}`);
-      console.error(`DIAG processes:\n${run('powershell', ['-NoProfile', '-Command', 'Get-CimInstance Win32_Process | Where-Object { $_.Name -match "git|node|sh|bash|code|cmd|conhost" } | Select-Object ProcessId,ParentProcessId,Name,CommandLine | Format-List | Out-String -Width 400'])}`);
+  const until = Date.now() + 6000;
+  for (;;) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (!['EBUSY', 'EPERM', 'ENOTEMPTY', 'EMFILE', 'ENFILE'].includes(code ?? '') || Date.now() > until) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
     }
-    throw e;
   }
 }
 
