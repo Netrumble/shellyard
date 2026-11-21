@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { createServer, request, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -17,7 +17,7 @@ import { RecipeStore } from '../../src/server/recipes.js';
 import { StatusLog } from '../../src/server/status-log.js';
 import { UsageStore } from '../../src/server/usage.js';
 import type { Profile, SessionInfo } from '../../src/shared/types.js';
-import { fakePtyFactory, useTempHome } from '../helpers.js';
+import { fakePtyFactory, removeDir, useTempHome } from '../helpers.js';
 
 const TOKEN = 't'.repeat(64);
 const HOOK_TOKEN = 'h'.repeat(64);
@@ -725,7 +725,7 @@ describe.skipIf(!hasGit)('http api: git', () => {
     mgr.shutdown();
     server.closeAllConnections();
     await new Promise((r) => server.close(r));
-    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    removeDir(root);
   });
 
   it('needs the page token on every git route', async () => {
