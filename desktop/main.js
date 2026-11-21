@@ -1,11 +1,13 @@
 // The desktop app: a window on the ShellYard server. The server itself is the one `shellyard` starts, a
 // background process that outlives the window, so closing the app never stops a session.
 import { app, BrowserWindow, dialog, Menu, nativeImage, Notification, session, shell, Tray } from 'electron';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ensureServer, pageAddress, restartServer, writeLauncherPage } from '@talentiaoss/shellyard/launcher';
 import { findNode } from './find-node.js';
 import { adoptLoginPath } from './login-env.js';
+import { AUTO_CHECK_EVERY_MS, checkForUpdate, DEFAULT_UPDATE_REPO, isRepoName } from './updates.js';
 
 const isMac = process.platform === 'darwin';
 // Opened from the Finder or the Dock, the app has the bare PATH of launchd: node, claude and
@@ -28,19 +30,176 @@ function showWindow() {
   win.focus();
 }
 
+// --- Updates -------------------------------------------------------------------------------
+// GitHub is asked for a newer release only when the user chooses "Check for updates…", or after
+// turning on the automatic check (off unless chosen). A newer version is offered as a download
+// in the browser: the app never installs anything by itself.
+
+/** The repository whose releases are checked: named by the build, else the main one. */
+function updateRepo() {
+  try {
+    const named = JSON.parse(readFileSync(join(here, 'package.json'), 'utf8'))?.shellyard?.updateRepo;
+    return isRepoName(named) ? named : DEFAULT_UPDATE_REPO;
+  } catch {
+    return DEFAULT_UPDATE_REPO;
+  }
+}
+
+const settingsFile = () => join(app.getPath('userData'), 'desktop-settings.json');
+
+/** The app's own choices, kept beside its other data: whether to check by itself, and the version last notified. */
+function readSettings() {
+  try {
+    const raw = JSON.parse(readFileSync(settingsFile(), 'utf8'));
+    return { autoCheckUpdates: raw?.autoCheckUpdates === true, notifiedVersion: typeof raw?.notifiedVersion === 'string' ? raw.notifiedVersion : null };
+  } catch {
+    return { autoCheckUpdates: false, notifiedVersion: null };
+  }
+}
+
+function writeSettings(patch) {
+  try {
+    mkdirSync(dirname(settingsFile()), { recursive: true });
+    writeFileSync(settingsFile(), JSON.stringify({ ...readSettings(), ...patch }, null, 2));
+  } catch (e) {
+    console.error('ShellYard: could not save the settings:', e);
+  }
+}
+
+let checking = false;
+let firstCheck = null;
+let dailyCheck = null;
+
+/** Tells about a newer version and offers to get it. */
+async function offerUpdate(update) {
+  const buttons = [...(update.installer ? ['Download'] : []), 'Release page', 'Later'];
+  const how = update.installer
+    ? `Download opens ${update.installer.name} in your browser. Install it as the first time; your sessions keep running.`
+    : 'The release page says how to get it.';
+  const again = isMac ? ' The new app has to be allowed once, as the first time (see the release page).' : '';
+  const { response } = await dialog.showMessageBox({
+    type: 'info',
+    title: 'Update available',
+    message: `ShellYard ${update.version} is available`,
+    detail: `You have ${app.getVersion()}. ${how}${again}`,
+    buttons,
+    defaultId: 0,
+    cancelId: buttons.length - 1,
+    noLink: true,
+    icon: icon.isEmpty() ? undefined : icon,
+  });
+  if (buttons[response] === 'Download') void shell.openExternal(update.installer.url);
+  if (buttons[response] === 'Release page') void shell.openExternal(update.page);
+}
+
+/**
+ * Asks GitHub whether a newer version is out. Asked by the user, it always answers; by the
+ * automatic check, it says so once per version, as a notification, and keeps quiet otherwise.
+ */
+async function checkUpdates({ manual }) {
+  if (checking) return;
+  checking = true;
+  try {
+    const update = await checkForUpdate({ repo: updateRepo(), current: app.getVersion() });
+    if (!update) {
+      if (manual) await dialog.showMessageBox({ type: 'info', title: 'ShellYard', message: `ShellYard ${app.getVersion()} is the latest version.`, buttons: ['OK'], noLink: true });
+      return;
+    }
+    if (!manual) {
+      if (readSettings().notifiedVersion === update.version) return;
+      writeSettings({ notifiedVersion: update.version });
+      if (Notification.isSupported()) {
+        const n = new Notification({ title: `ShellYard ${update.version} is available`, body: 'Click to see how to get it.', icon });
+        n.on('click', () => void offerUpdate(update));
+        n.show();
+        return;
+      }
+    }
+    await offerUpdate(update);
+  } catch (e) {
+    if (manual) await dialog.showMessageBox({ type: 'warning', title: 'ShellYard', message: 'Could not check for updates', detail: String(e?.message ?? e), buttons: ['OK'], noLink: true });
+    else console.error('ShellYard: the update check failed:', e);
+  } finally {
+    checking = false;
+  }
+}
+
+/** Starts or stops the automatic check: a little after the start, then once a day. */
+function scheduleAutoCheck() {
+  clearTimeout(firstCheck);
+  clearInterval(dailyCheck);
+  firstCheck = dailyCheck = null;
+  if (!readSettings().autoCheckUpdates) return;
+  firstCheck = setTimeout(() => void checkUpdates({ manual: false }), 10_000);
+  dailyCheck = setInterval(() => void checkUpdates({ manual: false }), AUTO_CHECK_EVERY_MS);
+}
+
+/** The two update items, in the tray menu and in the app's menu. */
+function updateMenuItems() {
+  return [
+    { label: 'Check for updates…', click: () => void checkUpdates({ manual: true }) },
+    {
+      label: 'Check for updates automatically',
+      type: 'checkbox',
+      checked: readSettings().autoCheckUpdates,
+      click: (item) => {
+        writeSettings({ autoCheckUpdates: item.checked });
+        scheduleAutoCheck();
+        buildMenus();
+      },
+    },
+  ];
+}
+
+/** The app's menu bar, and the tray's menu once the tray is there. */
+function buildMenus() {
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      // On macOS the first menu is the app's own: About, updates, Hide, Quit (Cmd+Q).
+      ...(isMac
+        ? [
+            {
+              label: app.name,
+              submenu: [
+                { role: 'about' },
+                { type: 'separator' },
+                ...updateMenuItems(),
+                { type: 'separator' },
+                { role: 'services' },
+                { type: 'separator' },
+                { role: 'hide' },
+                { role: 'hideOthers' },
+                { role: 'unhide' },
+                { type: 'separator' },
+                { role: 'quit' },
+              ],
+            },
+          ]
+        : []),
+      { role: 'editMenu' },
+      { label: 'View', submenu: [{ role: 'reload' }, { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }] },
+      { role: 'windowMenu' },
+      ...(isMac ? [] : [{ label: 'Help', submenu: [...updateMenuItems(), { type: 'separator' }, { label: `ShellYard ${app.getVersion()}`, enabled: false }] }]),
+    ]),
+  );
+  tray?.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: 'Show ShellYard', click: showWindow },
+      { label: 'Open in the browser', click: () => serverState && void shell.openPath(writeLauncherPage(serverState)) },
+      { type: 'separator' },
+      ...updateMenuItems(),
+      { type: 'separator' },
+      { label: 'Quit (sessions keep running)', click: () => app.quit() },
+    ]),
+  );
+}
+
 /** The icon in the notification area: the app keeps running there, and so do its notifications. */
 function createTray() {
   if (tray) return;
   tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon.resize({ width: 16, height: 16 }));
   tray.setToolTip('ShellYard');
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: 'Show ShellYard', click: showWindow },
-      { label: 'Open in the browser', click: () => serverState && void shell.openPath(writeLauncherPage(serverState)) },
-      { type: 'separator' },
-      { label: 'Quit (sessions keep running)', click: () => app.quit() },
-    ]),
-  );
+  buildMenus();
   tray.on('click', showWindow);
 }
 
@@ -152,16 +311,12 @@ if (!app.requestSingleInstanceLock()) {
   });
   // Windows shows notifications only for an app with an id.
   if (process.platform === 'win32') app.setAppUserModelId('com.talentia.shellyard');
-  Menu.setApplicationMenu(
-    Menu.buildFromTemplate([
-      // On macOS the first menu is the app's own: About, Hide, Quit (Cmd+Q).
-      ...(isMac ? [{ role: 'appMenu' }] : []),
-      { role: 'editMenu' },
-      { label: 'View', submenu: [{ role: 'reload' }, { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }] },
-      { role: 'windowMenu' },
-    ]),
-  );
-  app.whenReady().then(openWindow, (e) => {
+  app.whenReady().then(() => {
+    // The app's menu reads the saved settings, which live in a folder known only once ready.
+    buildMenus();
+    scheduleAutoCheck();
+    return openWindow();
+  }, (e) => {
     dialog.showErrorBox('ShellYard', String(e?.message ?? e));
     app.quit();
   });

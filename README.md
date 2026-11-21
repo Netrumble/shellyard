@@ -11,7 +11,9 @@ window: your profile, your PATH, your permissions. The page is its screen and ke
 > **Is it safe?** ShellYard stays on your machine and is built so that nothing else can use it:
 > - **Nothing leaves your PC.** The server listens on `127.0.0.1` only: no other computer can
 >   reach it, and ShellYard itself sends nothing to the internet (the programs you run in it, such
->   as Claude Code, connect as they always do).
+>   as Claude Code, connect as they always do). The one exception is yours to make: the desktop
+>   app asks GitHub whether a newer version is out when you choose **Check for updates…**, or
+>   once a day if you turn the automatic check on (it is off until you do).
 > - **Only your page gets in.** Every request that does something needs a secret token, created
 >   anew at each start; requests from other websites or other host names are refused.
 > - **No cookies.** The token is never kept in a cookie, so it is never sent to anything else.
@@ -115,6 +117,19 @@ window; `shellyard` alone is enough if a browser tab suits you.
 All three are views of the same server: you can use them at once, and they show the same sessions.
 Both desktop variants carry their own copy of the server, so you do not need to install `shellyard`
 as well; install it only if you also want its commands (`shellyard status`, `shellyard stop`, …).
+
+### Updates of the desktop app
+
+**Check for updates…**, in the app's menu (the ShellYard menu on macOS, Help elsewhere) and in the
+tray's, asks GitHub for the latest release. When a newer one is out, the app says so and offers to
+download its installer for your system (the setup program, or the disk image for your Mac's
+processor) in your browser, or to open the release page; install it as the first time. Your
+sessions keep running meanwhile. The app never downloads nor installs anything by itself.
+
+**Check for updates automatically**, beside it, does the same a few seconds after the app starts and
+then once a day, and tells about each new version once, as a notification. It is off until you turn
+it on. These are the only requests ShellYard makes to the internet itself: GitHub receives the
+address of your machine and the name "ShellYard-desktop", nothing else.
 
 ## Commands
 

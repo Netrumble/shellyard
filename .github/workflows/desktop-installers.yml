@@ -116,6 +116,8 @@ jobs:
         env:
           # The app is ad-hoc signed (see electron-builder.json): no certificate is looked for.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          # "Check for updates…" in the app looks at the releases of the repository that built it.
+          SHELLYARD_UPDATE_REPO: ${{ github.repository }}
         run: npm run installer
 
       - uses: actions/upload-artifact@v4
