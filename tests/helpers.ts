@@ -5,6 +5,15 @@ import { afterEach, beforeEach } from 'vitest';
 import type { Launch } from '../src/server/shells.js';
 import type { PtyFactory, PtyLike } from '../src/server/pty-session.js';
 
+/**
+ * Deletes a test folder. On Windows a folder is busy while a process works in it, and the git
+ * processes the server starts in a session's folder can take a few seconds to end on a slow
+ * machine (a CI runner): the deletion is tried again for up to six seconds.
+ */
+export function removeDir(dir: string): void {
+  rmSync(dir, { recursive: true, force: true, maxRetries: 60, retryDelay: 100 });
+}
+
 /** Gives each test its own data folder through SHELLYARD_HOME, so the real one is never touched. */
 export function useTempHome(): { dir: () => string } {
   let dir = '';
@@ -23,7 +32,7 @@ export function useTempHome(): { dir: () => string } {
     else process.env.SHELLYARD_HOME = previous;
     if (previousClaude === undefined) delete process.env.CLAUDE_CONFIG_DIR;
     else process.env.CLAUDE_CONFIG_DIR = previousClaude;
-    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    removeDir(dir);
   });
   return { dir: () => dir };
 }

@@ -10,7 +10,7 @@ import { startServer, type RunningServer } from '../../src/server/index.js';
 import type { RestoreEntry } from '../../src/server/restore.js';
 import { SessionManager } from '../../src/server/session-manager.js';
 import type { ClosedSession, ServerMessage, SessionInfo } from '../../src/shared/types.js';
-import { fakePtyFactory, useTempHome, waitUntil } from '../helpers.js';
+import { fakePtyFactory, removeDir, useTempHome, waitUntil } from '../helpers.js';
 
 const node = process.execPath;
 const CONV = '11111111-1111-4111-8111-111111111111';
@@ -262,8 +262,7 @@ describe('closed sessions over http, websocket and a restart', () => {
     mkdirSync(gone);
     const shell = (await call(s, 'POST', '/api/sessions', { kind: 'shell', command: node, cwd: gone, name: 'lost' })).json as SessionInfo;
     await call(s, 'DELETE', `/api/sessions/${shell.id}`);
-    const { rmSync } = await import('node:fs');
-    rmSync(gone, { recursive: true, maxRetries: 10, retryDelay: 100 });
+    removeDir(gone);
     const [closed] = (await call(s, 'GET', '/api/closed')).json as ClosedSession[];
     const r = await call(s, 'POST', `/api/closed/${closed!.id}/reopen`);
     expect(r.status).toBe(409);
