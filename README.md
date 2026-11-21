@@ -498,6 +498,27 @@ the computer, outside the browser, are not the page's to switch off.
 Every dial and lamp also gives its value as text; the rev counters are decoration, since each
 session's status is already written beside its name.
 
+## When something goes wrong
+
+An unexpected error (a fault in the server, a failure of the page, or a server that does not
+start) is written to a report file of its own in `~/.shellyard/errors/`, and ShellYard tells you
+where it is:
+
+- a notice at the foot of the page, with the error, the full path of the report, **Copy path**
+  and **Show in folder** (Finder, Explorer or the file manager, with the file selected where it
+  can be). The same error again counts on its notice (`×3`) instead of making a new one;
+- a system notification as well, when the page is not in view;
+- if the page itself breaks, a page that says so, with the report and a **Reload** button: your
+  sessions keep running;
+- if the server does not start, `shellyard` (or the desktop app) prints the path of the report
+  with the last lines of the log.
+
+**Recent errors…** in the settings menu lists the errors since the server started. A report holds
+the message, the stack, what was being done, the versions of ShellYard, Node and the system, and
+the last lines of `shellyard.log`; the access tokens and the page's address are taken out, so it
+can be attached to an issue. The fifty newest are kept. Refusals you can act on (a branch git
+turns down, a session that cannot start) are not errors here: they are said where they happen.
+
 ## How the status of a Claude Code session is known
 
 ShellYard starts `claude` with an extra settings file of its own (passed with `--settings`) that
@@ -546,6 +567,7 @@ Everything is in `~/.shellyard/`:
 | `usage.json` | Usage history: cost and tokens per day, model and story (90 days), and how far each of Claude Code's conversation files has been read |
 | `open.html` | The private page `shellyard` opens in your browser (readable by you only) |
 | `run/` | Per-session settings files, removed when a session ends |
+| `errors/` | One report per unexpected error, the newest fifty (see [When something goes wrong](#when-something-goes-wrong)) |
 
 Set `SHELLYARD_HOME` to use another folder.
 

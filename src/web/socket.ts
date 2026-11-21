@@ -1,4 +1,4 @@
-import type { AreaRule, ChangeSummary, ClientMessage, ClosedSession, Schedule, ServerMessage, SessionInfo, Story, UsageSummary } from '../shared/types.js';
+import type { AreaRule, ChangeSummary, ClientMessage, ClosedSession, ErrorReport, Schedule, ServerMessage, SessionInfo, Story, UsageSummary } from '../shared/types.js';
 
 export type ConnectionState = 'connecting' | 'open' | 'reconnecting' | 'down' | 'unauthorized';
 export type TerminalMessage = { t: 'snapshot' | 'output'; data: string };
@@ -14,6 +14,7 @@ export interface Socket {
   onSchedules(cb: (s: Schedule[]) => void): void;
   onUsage(cb: (u: UsageSummary) => void): void;
   onActivity(cb: (rates: Record<string, number>) => void): void;
+  onErrors(cb: (e: ErrorReport[]) => void): void;
   onChanges(cb: (c: ChangeSummary[]) => void): void;
   /** Called on every state change. Returns an unsubscribe. */
   onState(cb: (s: ConnectionState) => void): () => void;
@@ -42,6 +43,7 @@ export function connect(url: string, protocols: string[]): Socket {
   const scheduleCbs: Array<(s: Schedule[]) => void> = [];
   const usageCbs: Array<(u: UsageSummary) => void> = [];
   const activityCbs: Array<(rates: Record<string, number>) => void> = [];
+  const errorCbs: Array<(e: ErrorReport[]) => void> = [];
   const changesCbs: Array<(c: ChangeSummary[]) => void> = [];
   const stateCbs = new Set<(s: ConnectionState) => void>();
   const failedCbs: Array<() => void> = [];
@@ -84,6 +86,8 @@ export function connect(url: string, protocols: string[]): Socket {
         for (const cb of usageCbs) cb(m.usage);
       } else if (m.t === 'activity') {
         for (const cb of activityCbs) cb(m.rates);
+      } else if (m.t === 'errors') {
+        for (const cb of errorCbs) cb(m.errors);
       } else if (m.t === 'changes') {
         for (const cb of changesCbs) cb(m.changes);
       } else {
@@ -140,6 +144,9 @@ export function connect(url: string, protocols: string[]): Socket {
     },
     onActivity(cb) {
       activityCbs.push(cb);
+    },
+    onErrors(cb) {
+      errorCbs.push(cb);
     },
     onChanges(cb) {
       changesCbs.push(cb);

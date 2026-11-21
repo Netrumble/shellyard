@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import type { AreaRule, ChangeSummary, ClosedSession, Meta, Schedule, SessionInfo, SoundFile, SoundLibrary, Story, UsageSummary } from '../shared/types.js';
+import type { AreaRule, ChangeSummary, ClosedSession, ErrorReport, Meta, Schedule, SessionInfo, SoundFile, SoundLibrary, Story, UsageSummary } from '../shared/types.js';
 import { api, configureApi } from './api.js';
 import { loadEffects, loadSound, saveEffects, saveSound, type EffectsLevel } from './effects.js';
 import { connect, type ConnectionState, type Socket } from './socket.js';
@@ -31,6 +31,8 @@ interface State {
   usage: UsageSummary | null;
   /** Bytes printed in the last second per session; absent means quiet. */
   activity: Record<string, number>;
+  /** The unexpected errors of this run of the server, newest first. */
+  errors: ErrorReport[];
   /** The uncommitted changes of the worktrees sessions work in, by worktree path. */
   changes: Record<string, ChangeSummary>;
   /** What each terminal printed over the last minutes, for the lines on the board. */
@@ -65,6 +67,7 @@ let state: State = {
   schedules: [],
   usage: null,
   activity: {},
+  errors: [],
   changes: {},
   sparks: emptyHistory(),
   selection: [],
@@ -83,6 +86,7 @@ let state: State = {
 };
 const listeners = new Set<() => void>();
 const sessionListeners: Array<(prev: SessionInfo[], next: SessionInfo[]) => void> = [];
+const errorListeners: Array<(prev: ErrorReport[], next: ErrorReport[]) => void> = [];
 const scheduleListeners: Array<(prev: Schedule[], next: Schedule[]) => void> = [];
 let socket: Socket | null = null;
 /** A token taken from the address, to be stored once the server has accepted it. */
@@ -259,6 +263,11 @@ export function onSessionsChange(cb: (prev: SessionInfo[], next: SessionInfo[]) 
   sessionListeners.push(cb);
 }
 
+/** Runs on every change of the error list, with the list before and after. */
+export function onErrorsChange(cb: (prev: ErrorReport[], next: ErrorReport[]) => void): void {
+  errorListeners.push(cb);
+}
+
 /** A view filtered on a story that has been deleted falls back to showing everything. */
 function withoutDeadFilter(view: View, stories: Story[]): View {
   if (view.kind !== 'attention' && view.kind !== 'grid') return view;
@@ -314,6 +323,11 @@ export function startStore(): void {
     schedulesLoaded = true;
   });
   socket.onUsage((usage) => set({ usage }));
+  socket.onErrors((errors) => {
+    const prev = state.errors;
+    set({ errors });
+    for (const cb of errorListeners) cb(prev, errors);
+  });
   socket.onChanges((list) => set({ changes: Object.fromEntries(list.map((c) => [c.worktree, c])) }));
   socket.onActivity((activity) => set({ activity, sparks: recordActivity(state.sparks, activity, Date.now()) }));
   socket.onState((connection) => {
