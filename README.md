@@ -60,10 +60,11 @@ Apps → Installed apps → ShellYard**. Uninstalling leaves your data in `~/.sh
 > yet, so macOS cannot vouch for it. It is not damaged. Allow it once, as shown in step 3; check the
 > download against its checksum first if you want to be sure it is the published file.
 
-1. Download `ShellYard-<version>-arm64.dmg` (Apple Silicon) from the
+1. Download `ShellYard-<version>-arm64.dmg` for Apple Silicon (M1 and later) or
+   `ShellYard-<version>-x64.dmg` for an Intel Mac (Apple menu → About This Mac says which) from the
    [latest release](https://github.com/Talentia-Software-OSS/shellyard/releases/latest), with the
    `.dmg.sha256` beside it. To check the download, in Terminal, in the folder you downloaded them to:
-   `shasum -a 256 -c ShellYard-<version>-arm64.dmg.sha256` must print `OK`.
+   `shasum -a 256 -c ShellYard-<version>-<arch>.dmg.sha256` must print `OK`.
 2. Open the disk image and drag ShellYard into Applications.
 3. Allow it, in one of two ways:
    - **In Terminal** (quickest): remove the quarantine mark macOS puts on downloaded files, then open
@@ -105,7 +106,7 @@ The first install downloads Electron (about 100 MB). See [desktop/README.md](des
 | Shortcuts | no | Start menu and desktop | Applications, Launchpad | no: start it with `shellyard-desktop` |
 | Uninstall | `npm uninstall -g @talentiaoss/shellyard` | Settings → Apps | move it to the Bin | `npm uninstall -g @talentiaoss/shellyard-desktop` |
 | Update | `npm update -g @talentiaoss/shellyard` | run the new setup program | replace the app with the new one | `npm update -g @talentiaoss/shellyard-desktop` |
-| Systems | Windows, macOS, Linux | Windows | macOS (Apple Silicon) | Windows, macOS, Linux |
+| Systems | Windows, macOS, Linux | Windows | macOS (Apple Silicon and Intel) | Windows, macOS, Linux |
 | Size | small | about 120 MB (includes Electron) | about 120 MB (includes Electron) | about 100 MB (downloads Electron) |
 
 On Windows the setup program, and on a Mac the disk image, are the simplest choice for a desktop
@@ -577,9 +578,11 @@ node dist/cli/shellyard.js --foreground
 ```
 
 At every push to `main`, the [Desktop installers](.github/workflows/desktop-installers.yml)
-workflow runs the tests, builds the Windows setup program and the macOS disk image (each on its own
-system) and publishes them, with their checksums, as a GitHub release. It can also be started by
-hand (Actions → Desktop installers → Run workflow).
+workflow runs the tests, builds the Windows setup program and the macOS disk images for Apple
+Silicon and Intel (each on its own system and processor) and publishes them, with their
+checksums, as a GitHub release. It can also be started by hand (Actions → Desktop installers →
+Run workflow). Every pull request is checked by the [Checks](.github/workflows/checks.yml)
+workflow first: types, tests and build on Windows, macOS and Linux.
 
 The version of each release is worked out by the workflow: `VERSION_BASE` at its top gives the
 major and minor (its patch stays 0), and the patch is one more than the highest already released
