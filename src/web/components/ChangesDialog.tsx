@@ -63,8 +63,11 @@ export function ChangesDialog({ worktree, onClose }: { worktree: string; onClose
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [diff, setDiff] = useState<DiffState | null>(null);
-  // Counts the reads, so that only the answer to the latest one is shown.
+  // Counts the answers shown, so that the chosen file's diff is read again with each.
   const [version, setVersion] = useState(0);
+  // Numbers the reads: an answer is shown only if no read was started after its own, so that a
+  // slow answer to an older read (first mount, Refresh, new figures) never replaces a newer one.
+  const latest = useRef(0);
   const live = useRef(true);
   const list = useRef<HTMLUListElement>(null);
   useEscape(onClose);
@@ -77,10 +80,11 @@ export function ChangesDialog({ worktree, onClose }: { worktree: string; onClose
   }, []);
 
   const load = useCallback((): void => {
+    const id = ++latest.current;
     api
       .changes(worktree)
       .then((c) => {
-        if (!live.current) return;
+        if (!live.current || id !== latest.current) return;
         setError(null);
         setChanges(c);
         setVersion((v) => v + 1);
@@ -88,7 +92,7 @@ export function ChangesDialog({ worktree, onClose }: { worktree: string; onClose
         setSelected((s) => (c && s && c.files.some((f) => f.path === s) ? s : (c?.files[0]?.path ?? null)));
       })
       .catch((e: unknown) => {
-        if (!live.current) return;
+        if (!live.current || id !== latest.current) return;
         setError((e as Error).message);
         setChanges((c) => c ?? null);
       });

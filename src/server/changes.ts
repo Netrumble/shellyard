@@ -1,7 +1,7 @@
-import { lstatSync, readFileSync, readlinkSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { lstat, open, readlink } from 'node:fs/promises';
+import { isAbsolute, join, resolve } from 'node:path';
 import type { ChangedFile, ChangeStatus, ChangeSummary, FileDiff, WorktreeChanges } from '../shared/types.js';
-import { GitError, GitRefusal, runGit, type RunGit } from './git.js';
+import { GitError, GitRefusal, isInside, runGit, type RunGit } from './git.js';
 
 // The uncommitted changes of a worktree, as git sees them: every file that is not as the last
 // commit has it, staged or not, and the files git does not track yet (ignored ones aside).
@@ -19,17 +19,27 @@ const EMPTY_TREE: Record<string, string> = {
   sha256: '6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321',
 };
 
+/**
+ * Options every read is run with. --no-optional-locks: git status would otherwise take
+ * .git/index.lock for a moment to refresh the index, and a `git commit` or `git add` that Claude
+ * runs at that very moment would fail. Paths are given as they are, not quoted.
+ */
+const READ_OPTIONS = ['--no-optional-locks', '-c', 'core.quotePath=false'];
+
+/** How many untracked files are read at the same time. */
+const READ_CONCURRENCY = 16;
+
 /** Options every diff is run with: no colours, and never a program the repository names. */
 const DIFF_OPTIONS = ['--no-color', '--no-ext-diff', '--no-textconv', '--no-renames'];
 
 /** The commit changes are counted from: HEAD, or the empty tree in a repository with no commit yet. */
 async function baseOf(top: string, run: RunGit): Promise<string> {
   try {
-    return (await run(['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], top)).trim();
+    return (await run([...READ_OPTIONS, 'rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], top)).trim();
   } catch {
     let format = 'sha1';
     try {
-      format = (await run(['rev-parse', '--show-object-format'], top)).trim() || 'sha1';
+      format = (await run([...READ_OPTIONS, 'rev-parse', '--show-object-format'], top)).trim() || 'sha1';
     } catch {
       // An older git knows only sha1.
     }
@@ -51,10 +61,14 @@ export function statusOf(xy: string): ChangeStatus | null {
   return 'modified';
 }
 
-/** Reads `git status --porcelain=v1 -z`: the path and status of each changed file. */
+/**
+ * Reads `git status --porcelain=v1 -z`: the path and status of each changed file, each path once.
+ * Git can list a path twice: after `git rm --cached f`, f is deleted in the index and untracked
+ * in the worktree. The tracked status is kept, as it is the one the diff against HEAD shows.
+ */
 export function parseStatus(out: string): Array<{ path: string; status: ChangeStatus }> {
   const parts = out.split('\0');
-  const list: Array<{ path: string; status: ChangeStatus }> = [];
+  const byPath = new Map<string, ChangeStatus>();
   for (let i = 0; i < parts.length; i++) {
     const entry = parts[i]!;
     if (entry.length < 4) continue;
@@ -62,9 +76,13 @@ export function parseStatus(out: string): Array<{ path: string; status: ChangeSt
     // A rename or copy is followed by the path it came from (not asked for, but harmless).
     if (xy[0] === 'R' || xy[0] === 'C') i++;
     const status = statusOf(xy);
-    if (status) list.push({ path: entry.slice(3), status });
+    if (!status) continue;
+    const path = entry.slice(3);
+    const known = byPath.get(path);
+    if (known && (status === 'untracked' || known !== 'untracked')) continue;
+    byPath.set(path, status);
   }
-  return list;
+  return [...byPath].map(([path, status]) => ({ path, status }));
 }
 
 /** Reads `git diff --numstat -z`: the lines added and removed per path, null for a binary file. */
@@ -78,27 +96,59 @@ export function parseNumstat(out: string): Map<string, { added: number | null; r
   return counts;
 }
 
-/** A file not tracked yet: its text (a link: where it points), or why it is not shown. */
-function readUntracked(file: string): { text: string } | { binary: true } | { tooLarge: true } | null {
+type Untracked = { data: Buffer } | { binary: true } | { tooLarge: true } | null;
+
+/**
+ * A file not tracked yet: its bytes (a link: where it points), or why it is not shown. It is
+ * read without blocking, so that the terminals and the page go on while many files are read.
+ */
+async function readUntracked(file: string): Promise<Untracked> {
   try {
-    const st = lstatSync(file);
+    const st = await lstat(file);
     // A link is shown as git shows it: by where it points, never by the file it points to.
-    if (st.isSymbolicLink()) return { text: readlinkSync(file) };
+    if (st.isSymbolicLink()) return { data: Buffer.from(await readlink(file)) };
     if (!st.isFile()) return null;
     if (st.size > MAX_DIFF_BYTES) return { tooLarge: true };
-    const data = readFileSync(file);
+    const handle = await open(file, 'r');
+    let data: Buffer;
+    try {
+      data = await handle.readFile();
+    } finally {
+      await handle.close();
+    }
+    if (data.length > MAX_DIFF_BYTES) return { tooLarge: true };
     if (data.subarray(0, SNIFF_BYTES).includes(0)) return { binary: true };
-    return { text: data.toString('utf8') };
+    return { data };
   } catch {
     return null;
   }
 }
 
-function lineCount(text: string): number {
-  if (text.length === 0) return 0;
+function lineCount(data: Buffer): number {
+  if (data.length === 0) return 0;
   let n = 0;
-  for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10) n++;
-  return text.endsWith('\n') ? n : n + 1;
+  for (let i = data.indexOf(10); i !== -1; i = data.indexOf(10, i + 1)) n++;
+  return data[data.length - 1] === 10 ? n : n + 1;
+}
+
+/** The lines of an untracked file, null for one not shown (binary, too large, gone). */
+async function untrackedLines(file: string): Promise<number | null> {
+  const read = await readUntracked(file);
+  return read && 'data' in read ? lineCount(read.data) : null;
+}
+
+/** Maps a list with at most `limit` calls running at once, keeping the order. */
+async function mapLimited<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
 }
 
 /** The whole of a new file as a unified diff, as git would print it against nothing. */
@@ -111,9 +161,11 @@ export function newFileDiff(path: string, text: string): string {
   return `--- /dev/null\n+++ b/${path}\n@@ -0,0 +1,${lines.length} @@\n${body}\n${complete ? '' : '\\ No newline at end of file\n'}`;
 }
 
+const STATUS_ARGS = ['status', '--porcelain=v1', '-z', '--no-renames', '--untracked-files=all'];
+
 async function topOf(folder: string, run: RunGit): Promise<string | null> {
   try {
-    return resolve((await run(['rev-parse', '--show-toplevel'], folder)).trim());
+    return resolve((await run([...READ_OPTIONS, 'rev-parse', '--show-toplevel'], folder)).trim());
   } catch {
     return null;
   }
@@ -125,16 +177,15 @@ export async function changesOf(folder: string, run: RunGit = runGit): Promise<W
   if (!top) return null;
   const base = await baseOf(top, run);
   const [statusOut, numstatOut] = await Promise.all([
-    run(['-c', 'core.quotePath=false', 'status', '--porcelain=v1', '-z', '--no-renames', '--untracked-files=all'], top),
-    run(['-c', 'core.quotePath=false', 'diff', base, '--numstat', '-z', ...DIFF_OPTIONS], top),
+    run([...READ_OPTIONS, ...STATUS_ARGS], top),
+    run([...READ_OPTIONS, 'diff', base, '--numstat', '-z', ...DIFF_OPTIONS], top),
   ]);
   const counts = parseNumstat(numstatOut);
   const all = parseStatus(statusOut).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  const files: ChangedFile[] = all.slice(0, MAX_FILES).map(({ path, status }) => {
+  const files: ChangedFile[] = await mapLimited(all.slice(0, MAX_FILES), READ_CONCURRENCY, async ({ path, status }) => {
     if (status === 'untracked') {
-      const read = readUntracked(join(top, path));
-      const text = read && 'text' in read ? read.text : null;
-      return { path, status, added: text === null ? null : lineCount(text), removed: text === null ? null : 0 };
+      const lines = await untrackedLines(join(top, path));
+      return { path, status, added: lines, removed: lines === null ? null : 0 };
     }
     const c = counts.get(path);
     return { path, status, added: c ? c.added : 0, removed: c ? c.removed : 0 };
@@ -153,27 +204,32 @@ export async function changesOf(folder: string, run: RunGit = runGit): Promise<W
  * path can never reach outside the worktree, nor any file that is as committed.
  */
 export async function diffOf(folder: string, path: string, run: RunGit = runGit): Promise<FileDiff> {
-  const changes = await changesOf(folder, run);
-  if (!changes) throw new GitRefusal('This folder is not in a git repository.');
-  const file = changes.files.find((f) => f.path === path);
-  if (!file) throw new GitRefusal('This file has no uncommitted changes.');
+  const top = await topOf(folder, run);
+  if (!top) throw new GitRefusal('This folder is not in a git repository.');
+  const noChanges = new GitRefusal('This file has no uncommitted changes.');
+  if (!path || isAbsolute(path) || !isInside(resolve(top, path), top)) throw noChanges;
+  // Only this file is looked at: the status of its path, taken literally.
+  const statusOut = await run([...READ_OPTIONS, '--literal-pathspecs', ...STATUS_ARGS, '--', path], top);
+  const file = parseStatus(statusOut).find((f) => f.path === path);
+  if (!file) throw noChanges;
   const result: FileDiff = { path, status: file.status, binary: false, tooLarge: false, diff: '' };
 
   if (file.status === 'untracked') {
-    const read = readUntracked(join(changes.worktree, path));
+    const read = await readUntracked(join(top, path));
     if (!read) return result;
     if ('binary' in read) return { ...result, binary: true };
     if ('tooLarge' in read) return { ...result, tooLarge: true };
-    return { ...result, diff: newFileDiff(path, read.text) };
+    return { ...result, diff: newFileDiff(path, read.data.toString('utf8')) };
   }
 
-  const base = await baseOf(changes.worktree, run);
+  const base = await baseOf(top, run);
   let out: string;
   try {
-    out = await run(['--literal-pathspecs', '-c', 'core.quotePath=false', 'diff', base, ...DIFF_OPTIONS, '--', path], changes.worktree);
+    out = await run([...READ_OPTIONS, '--literal-pathspecs', 'diff', base, ...DIFF_OPTIONS, '--', path], top);
   } catch (e) {
-    // Larger than git's output may be: too large to show anyway.
-    if (e instanceof GitError && /maxBuffer/i.test(e.message)) return { ...result, tooLarge: true };
+    // Larger than git's output may be: too large to show anyway. Told by the code of the error,
+    // as the message is git's stderr whenever git wrote any (a CRLF warning, for instance).
+    if (e instanceof GitError && e.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') return { ...result, tooLarge: true };
     throw e;
   }
   if (out.length > MAX_DIFF_BYTES) return { ...result, tooLarge: true };

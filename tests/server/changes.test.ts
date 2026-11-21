@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChangeTracker, changesOf, diffOf, newFileDiff, parseNumstat, parseStatus, statusOf } from '../../src/server/changes.js';
-import { GitRefusal } from '../../src/server/git.js';
+import { GitError, GitRefusal, runGit, type RunGit } from '../../src/server/git.js';
 import type { WorktreeChanges } from '../../src/shared/types.js';
 import { removeDir } from '../helpers.js';
 
@@ -56,6 +56,14 @@ describe('parseStatus', () => {
       { path: 'new.txt', status: 'modified' },
       { path: 'x', status: 'untracked' },
     ]);
+  });
+
+  it('lists a path once, with its tracked status, when git gives it twice', () => {
+    expect(parseStatus('D  f\0?? f\0?? g\0')).toEqual([
+      { path: 'f', status: 'deleted' },
+      { path: 'g', status: 'untracked' },
+    ]);
+    expect(parseStatus('?? f\0D  f\0')).toEqual([{ path: 'f', status: 'deleted' }]);
   });
 });
 
@@ -182,6 +190,35 @@ describe.runIf(hasGit)('changesOf and diffOf', () => {
     await expect(diffOf(repo, 'a.txt')).rejects.toBeInstanceOf(GitRefusal);
     await expect(diffOf(repo, '../secret.txt')).rejects.toBeInstanceOf(GitRefusal);
     await expect(diffOf(root, 'secret.txt')).rejects.toBeInstanceOf(GitRefusal);
+  });
+
+  it('lists a file removed from the index but kept on disk once', async () => {
+    git(repo, 'rm', '--cached', '-q', 'a.txt');
+    const c = await changesOf(repo);
+    expect(c?.files).toEqual([{ path: 'a.txt', status: 'deleted', added: 0, removed: 3 }]);
+    expect(await diffOf(repo, 'a.txt')).toMatchObject({ status: 'deleted' });
+  });
+
+  it('never takes the index lock, so that a commit made meanwhile does not fail', async () => {
+    writeFileSync(join(repo, 'a.txt'), 'changed\n');
+    const seen: string[][] = [];
+    const run: RunGit = (args, cwd) => {
+      seen.push(args);
+      return runGit(args, cwd);
+    };
+    await changesOf(repo, run);
+    await diffOf(repo, 'a.txt', run);
+    expect(seen.length).toBeGreaterThan(0);
+    for (const args of seen) expect(args[0]).toBe('--no-optional-locks');
+  });
+
+  it('calls a diff larger than git may print too large, even when git warned on stderr', async () => {
+    writeFileSync(join(repo, 'a.txt'), 'changed\n');
+    const run: RunGit = (args, cwd) =>
+      args.includes('diff') && args.includes('a.txt')
+        ? Promise.reject(new GitError('warning: in the working copy of a.txt, LF will be replaced by CRLF', 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'))
+        : runGit(args, cwd);
+    expect(await diffOf(repo, 'a.txt', run)).toMatchObject({ tooLarge: true, diff: '' });
   });
 
   it.runIf(process.platform !== 'win32')('shows a new link by where it points, never by what it points to', async () => {
