@@ -1,11 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChangeTracker, changesOf, diffOf, newFileDiff, parseNumstat, parseStatus, statusOf } from '../../src/server/changes.js';
 import { GitRefusal } from '../../src/server/git.js';
 import type { WorktreeChanges } from '../../src/shared/types.js';
+import { removeDir } from '../helpers.js';
 
 let hasGit = true;
 try {
@@ -86,7 +87,7 @@ describe.runIf(hasGit)('changesOf and diffOf', () => {
     repo = join(root, 'repo');
     makeRepo(repo);
   });
-  afterEach(() => rmSync(root, { recursive: true, force: true }));
+  afterEach(() => removeDir(root));
 
   it('is null outside a repository', async () => {
     expect(await changesOf(root)).toBeNull();
