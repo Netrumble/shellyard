@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ErrorReporter, errorParts, redact, revealCommand } from '../../src/server/errors.js';
 import { removeDir } from '../helpers.js';
 
@@ -12,6 +12,12 @@ describe('redact', () => {
   it('takes out the secrets given and anything that looks like a token', () => {
     const other = 'c0ffee'.repeat(10) + 'abcd';
     expect(redact(`token ${TOKEN}, host myhostlabel.localhost, other ${other}`, [TOKEN, 'myhostlabel'])).toBe('token [redacted], host [redacted].localhost, other [redacted]');
+  });
+  it('takes out a page host name even when no secret is given', () => {
+    const label = '0123456789abcdef'.repeat(2);
+    expect(redact(`listening, page on http://${label}.localhost:7717`, [])).toBe('listening, page on http://[redacted].localhost:7717');
+    // Hex of that length elsewhere is left alone: a commit, a hash in a path.
+    expect(redact(`commit ${label}`, [])).toBe(`commit ${label}`);
   });
   it('leaves short secrets alone, as they would match ordinary words', () => {
     expect(redact('a short one', ['short'])).toBe('a short one');
@@ -65,6 +71,36 @@ describe('ErrorReporter', () => {
     expect(again).toMatchObject({ count: 2, seen: false, lastAt: now });
     expect(readdirSync(dir)).toHaveLength(1);
     expect(readFileSync(first.file, 'utf8')).toContain('Again at');
+  });
+
+  it('tells its listeners of repetitions at most once every so often', () => {
+    vi.useFakeTimers();
+    try {
+      const rep = reporter({ repeatEmitMs: 5000 });
+      const counts: number[] = [];
+      rep.onChange((l) => counts.push(l[0]!.count));
+      const boom = (): Error => new Error('again and again');
+      rep.report({ source: 'server', error: boom() });
+      // Once a second for ten seconds.
+      for (let i = 0; i < 10; i++) {
+        now += 1000;
+        vi.advanceTimersByTime(1000);
+        rep.report({ source: 'server', error: boom() });
+      }
+      vi.advanceTimersByTime(5000);
+      expect(counts).toEqual([1, 5, 10, 11]);
+      // Every repetition is still counted and noted in the file.
+      expect(rep.list()[0]!.count).toBe(11);
+      expect(readFileSync(rep.list()[0]!.file, 'utf8').match(/Again at/g)).toHaveLength(10);
+      // After a quiet spell, a repetition is told at once.
+      now += 60_000;
+      vi.advanceTimersByTime(60_000);
+      rep.report({ source: 'server', error: boom() });
+      expect(counts).toEqual([1, 5, 10, 11, 12]);
+      rep.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('writes a new report for another error, newest first', () => {

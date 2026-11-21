@@ -64,12 +64,18 @@ export function installPageErrorReporting(where: () => string): void {
   });
 }
 
-/** The errors to tell the user about: new ones, and known ones that happened again, unseen. */
+/** How long a known error must have been quiet for its return to be told again. */
+export const QUIET_MS = 60_000;
+
+/**
+ * The errors to tell the user about: new ones, and known ones that came back, unseen, after a
+ * quiet minute at least. An error that repeats without pause is told once; its count goes on.
+ */
 export function freshErrors(prev: ErrorReport[], next: ErrorReport[]): ErrorReport[] {
   const before = new Map(prev.map((r) => [r.id, r]));
   return next.filter((r) => {
     if (r.seen) return false;
     const old = before.get(r.id);
-    return !old || r.count > old.count;
+    return !old || (r.count > old.count && r.lastAt - old.lastAt >= QUIET_MS);
   });
 }

@@ -22,18 +22,26 @@ const MAX_STACK = 20_000;
 const MAX_CONTEXT = 300;
 /** A token as ShellYard makes them: 32 random bytes in hex. */
 const TOKEN_LIKE = /\b[0-9a-f]{64}\b/gi;
+/** The label of a page's host name as ShellYard makes them (16 random bytes in hex), before .localhost. */
+const PAGE_HOST_LIKE = /\b[0-9a-f]{32}(?=\.localhost\b)/gi;
+/** How often, at most, a repeated error tells the listeners (the page) again. */
+export const REPEAT_EMIT_MS = 5000;
 
+/**
+ * The folder of the reports. It is not made here: a report makes it when it is written, so that a
+ * folder that cannot be made costs the reports only, never the start of the server.
+ */
 export function errorsDir(home: string): string {
-  const dir = join(home, 'errors');
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  return dir;
+  return join(home, 'errors');
 }
 
 /** Takes every secret out of a text. Secrets shorter than 8 characters are not secrets worth the name. */
 export function redact(text: string, secrets: readonly string[]): string {
   let out = text;
   for (const s of secrets) if (s.length >= 8) out = out.split(s).join('[redacted]');
-  return out.replace(TOKEN_LIKE, '[redacted]');
+  // Page host names are taken out whatever the secrets given: a report written by another process
+  // (the CLI, at a start that timed out) knows none, yet the log tail may name the page's host.
+  return out.replace(TOKEN_LIKE, '[redacted]').replace(PAGE_HOST_LIKE, '[redacted]');
 }
 
 /** The first line of an error and its stack, whatever was thrown. */
@@ -79,6 +87,8 @@ export interface ReporterDeps {
   logTail?: () => string;
   keep?: number;
   perMinute?: number;
+  /** See REPEAT_EMIT_MS. */
+  repeatEmitMs?: number;
 }
 
 /** Writes and keeps the error reports of one run of the server. */
@@ -87,6 +97,8 @@ export class ErrorReporter {
   private readonly byKey = new Map<string, ErrorReport>();
   private recent: number[] = [];
   private readonly cbs: Array<(list: ErrorReport[]) => void> = [];
+  private lastEmit = -Infinity;
+  private emitTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly deps: ReporterDeps) {}
 
@@ -105,8 +117,29 @@ export class ErrorReporter {
   }
 
   private emit(): void {
+    if (this.emitTimer) clearTimeout(this.emitTimer);
+    this.emitTimer = null;
+    this.lastEmit = this.deps.now();
     const list = this.list();
     for (const cb of this.cbs) cb(list);
+  }
+
+  /**
+   * Tells the listeners of a repetition, but not more than once every REPEAT_EMIT_MS: an error
+   * that comes back every second must not become a broadcast every second.
+   */
+  private emitSoon(): void {
+    if (this.emitTimer) return;
+    const wait = this.lastEmit + (this.deps.repeatEmitMs ?? REPEAT_EMIT_MS) - this.deps.now();
+    if (wait <= 0) return this.emit();
+    this.emitTimer = setTimeout(() => this.emit(), wait);
+    this.emitTimer.unref?.();
+  }
+
+  /** Stops a pending notice of repetitions; the reporter can still be used. */
+  dispose(): void {
+    if (this.emitTimer) clearTimeout(this.emitTimer);
+    this.emitTimer = null;
   }
 
   /** Marks a report as seen (its notice closed); false when there is no such report. */
@@ -156,7 +189,7 @@ export class ErrorReporter {
         }
       }
       this.reports = [known, ...this.reports.filter((r) => r !== known)];
-      this.emit();
+      this.emitSoon();
       return { ...known };
     }
 

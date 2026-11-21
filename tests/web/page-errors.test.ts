@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { describeThrown, freshErrors, isNoise, SendGate } from '../../src/web/page-errors.js';
+import { describeThrown, freshErrors, isNoise, QUIET_MS, SendGate } from '../../src/web/page-errors.js';
 import type { ErrorReport } from '../../src/shared/types.js';
 
-const report = (id: string, count = 1, seen = false): ErrorReport => ({
+const report = (id: string, count = 1, seen = false, lastAt = 1): ErrorReport => ({
   id,
   source: 'server',
   message: 'm',
@@ -10,7 +10,7 @@ const report = (id: string, count = 1, seen = false): ErrorReport => ({
   file: `/e/${id}.log`,
   at: 1,
   count,
-  lastAt: 1,
+  lastAt,
   seen,
 });
 
@@ -44,9 +44,13 @@ describe('SendGate', () => {
 });
 
 describe('freshErrors', () => {
-  it('gives new errors and those that happened again, unseen', () => {
+  it('gives new errors and those that came back, unseen, after a quiet spell', () => {
     const prev = [report('a'), report('b')];
-    const next = [report('c'), report('a', 2), report('b'), report('d', 1, true)];
+    const next = [report('c'), report('a', 2, false, 1 + QUIET_MS), report('b'), report('d', 1, true)];
     expect(freshErrors(prev, next).map((r) => r.id)).toEqual(['c', 'a']);
+  });
+  it('tells an error that repeats without pause only once', () => {
+    const prev = [report('a', 5, false, 10_000)];
+    expect(freshErrors(prev, [report('a', 10, false, 15_000)])).toEqual([]);
   });
 });

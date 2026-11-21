@@ -279,6 +279,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
       const recorded = readServerState();
       if (recorded && recorded.pid === process.pid && recorded.startedAt === startedAt) clearServerState();
       log('stopped');
+      errors.dispose();
       if (activeReporter === errors) activeReporter = null;
       resolveStopped();
     })();
@@ -322,6 +323,19 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
 
 /** The reporter of the server running in this process, for errors no request or task catches. */
 let activeReporter: ErrorReporter | null = null;
+/**
+ * The reporter used when no server runs in this process. One for the whole process, made when
+ * first needed, so that a repeated error is counted and the rate limit holds here as well.
+ */
+let fallbackReporter: { dir: string; reporter: ErrorReporter } | null = null;
+
+function fallback(): ErrorReporter {
+  const dir = errorsDir(dataDir());
+  if (fallbackReporter?.dir !== dir) {
+    fallbackReporter = { dir, reporter: new ErrorReporter({ dir, now: Date.now, version: packageVersion(), logTail: () => readLogTail(40) }) };
+  }
+  return fallbackReporter.reporter;
+}
 
 function readLogTail(lines: number): string {
   try {
@@ -338,7 +352,7 @@ function readLogTail(lines: number): string {
 export function reportUncaught(source: 'server' | 'startup', e: unknown, context: string): string | null {
   let reporter = activeReporter;
   try {
-    reporter ??= new ErrorReporter({ dir: errorsDir(dataDir()), now: Date.now, version: packageVersion(), logTail: () => readLogTail(40) });
+    reporter ??= fallback();
     return reporter.report({ source, error: e, context })?.file ?? null;
   } catch {
     return null;

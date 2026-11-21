@@ -1,10 +1,10 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { readServerState } from '../../src/server/config.js';
-import { startServer, type RunningServer } from '../../src/server/index.js';
+import { reportUncaught, startServer, type RunningServer } from '../../src/server/index.js';
 import { fakePtyFactory, useTempHome } from '../helpers.js';
 
 async function freePort(): Promise<number> {
@@ -43,6 +43,20 @@ describe('startServer', () => {
     running.length = 0;
     expect(readServerState()).toBeNull();
     await expect(fetch(`http://127.0.0.1:${port}/api/health`)).rejects.toThrow();
+  });
+
+  it('starts even when the folder of the error reports cannot be made', async () => {
+    writeFileSync(join(home.dir(), 'errors'), 'a file, not a folder');
+    const s = await start(await freePort());
+    expect(s.errors.report({ source: 'server', error: 'x' })).toBeNull();
+  });
+
+  it('with no server running, counts a repeated uncaught error in one report', () => {
+    const boom = (): Error => new Error('during shutdown');
+    const first = reportUncaught('server', boom(), 'uncaught exception');
+    expect(first).not.toBeNull();
+    for (let i = 0; i < 30; i++) expect(reportUncaught('server', boom(), 'uncaught exception')).toBe(first);
+    expect(readdirSync(join(home.dir(), 'errors'))).toHaveLength(1);
   });
 
   it('listens on loopback only', async () => {
