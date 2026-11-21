@@ -4,7 +4,7 @@ ShellYard in its own window instead of a browser tab. It is the same app: the sa
 sessions, the same page.
 
 On Windows the simplest way is the setup program, `ShellYard-Setup-<version>.exe`; on a Mac with
-Apple Silicon, the disk image `ShellYard-<version>-arm64.dmg`. Both are in the
+a Mac, the disk image `ShellYard-<version>-arm64.dmg` (Apple Silicon) or `-x64.dmg` (Intel). All are in the
 [latest release](https://github.com/Talentia-Software-OSS/shellyard/releases/latest) (see the main
 README for the first start of the unsigned app on macOS). Otherwise, from npm:
 
@@ -68,7 +68,7 @@ stops there.
 ### macOS
 
 `release/ShellYard-<version>-<arch>.dmg` holds the app for the processor of the build machine
-(`arm64` on Apple Silicon), with its `.sha256` beside it. The app is signed ad hoc, which Apple
+(`arm64` on Apple Silicon, `x64` on Intel), with its `.sha256` beside it. The app is signed ad hoc, which Apple
 Silicon requires for it to run at all, but not with a Developer ID nor notarised: Gatekeeper
 refuses it on first opening until its quarantine mark is removed
 (`xattr -dr com.apple.quarantine /Applications/ShellYard.app`) or it is allowed in System Settings →

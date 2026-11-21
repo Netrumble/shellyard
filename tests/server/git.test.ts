@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { removeDir } from '../helpers.js';
 import {
   branches,
   createWorktree,
@@ -81,7 +82,7 @@ describe.skipIf(!hasGit)('git worktrees', () => {
     wtDir = join(root, 'wt');
     makeRepo(repo);
   });
-  afterEach(() => rmSync(root, { recursive: true, force: true }));
+  afterEach(() => removeDir(root));
 
   it('worktreesOf returns null outside a repository', async () => {
     expect(await worktreesOf(join(root))).toBeNull();
@@ -323,6 +324,8 @@ describe.skipIf(!hasGit)('git worktrees', () => {
     it.runIf(process.platform === 'win32')('copes with a folder really held as the working folder of a process', async () => {
       await createWorktree(repo, { path: wtDir, branch: 'feat', newBranch: true });
       const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: wtDir, stdio: 'ignore' });
+      // Listened for from the start: the process may end before the cleanup (it may fail to start).
+      const exited = new Promise((r) => child.once('exit', r));
       try {
         await new Promise((r) => setTimeout(r, 300));
         const r = await removeWorktree(repo, wtDir, { force: false, deleteBranch: true });
@@ -331,7 +334,9 @@ describe.skipIf(!hasGit)('git worktrees', () => {
         // The folder is either gone or reported.
         if (existsSync(wtDir)) expect(r.warning).toMatch(/could not be fully deleted/);
       } finally {
+        // The folder is free only once the process has really ended, not when it is told to.
         child.kill();
+        await exited;
       }
     });
   });

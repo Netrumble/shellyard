@@ -8,6 +8,7 @@
     "preload.cjs",
     "find-node.js",
     "login-env.js",
+    "updates.js",
     "icon.png",
     "package.json",
     "node_modules/**/*",

@@ -11,7 +11,9 @@ window: your profile, your PATH, your permissions. The page is its screen and ke
 > **Is it safe?** ShellYard stays on your machine and is built so that nothing else can use it:
 > - **Nothing leaves your PC.** The server listens on `127.0.0.1` only: no other computer can
 >   reach it, and ShellYard itself sends nothing to the internet (the programs you run in it, such
->   as Claude Code, connect as they always do).
+>   as Claude Code, connect as they always do). The one exception is yours to make: the desktop
+>   app asks GitHub whether a newer version is out when you choose **Check for updates…**, or
+>   once a day if you turn the automatic check on (it is off until you do).
 > - **Only your page gets in.** Every request that does something needs a secret token, created
 >   anew at each start; requests from other websites or other host names are refused.
 > - **No cookies.** The token is never kept in a cookie, so it is never sent to anything else.
@@ -60,10 +62,11 @@ Apps → Installed apps → ShellYard**. Uninstalling leaves your data in `~/.sh
 > yet, so macOS cannot vouch for it. It is not damaged. Allow it once, as shown in step 3; check the
 > download against its checksum first if you want to be sure it is the published file.
 
-1. Download `ShellYard-<version>-arm64.dmg` (Apple Silicon) from the
+1. Download `ShellYard-<version>-arm64.dmg` for Apple Silicon (M1 and later) or
+   `ShellYard-<version>-x64.dmg` for an Intel Mac (Apple menu → About This Mac says which) from the
    [latest release](https://github.com/Talentia-Software-OSS/shellyard/releases/latest), with the
    `.dmg.sha256` beside it. To check the download, in Terminal, in the folder you downloaded them to:
-   `shasum -a 256 -c ShellYard-<version>-arm64.dmg.sha256` must print `OK`.
+   `shasum -a 256 -c ShellYard-<version>-<arch>.dmg.sha256` must print `OK`.
 2. Open the disk image and drag ShellYard into Applications.
 3. Allow it, in one of two ways:
    - **In Terminal** (quickest): remove the quarantine mark macOS puts on downloaded files, then open
@@ -105,7 +108,7 @@ The first install downloads Electron (about 100 MB). See [desktop/README.md](des
 | Shortcuts | no | Start menu and desktop | Applications, Launchpad | no: start it with `shellyard-desktop` |
 | Uninstall | `npm uninstall -g @talentiaoss/shellyard` | Settings → Apps | move it to the Bin | `npm uninstall -g @talentiaoss/shellyard-desktop` |
 | Update | `npm update -g @talentiaoss/shellyard` | run the new setup program | replace the app with the new one | `npm update -g @talentiaoss/shellyard-desktop` |
-| Systems | Windows, macOS, Linux | Windows | macOS (Apple Silicon) | Windows, macOS, Linux |
+| Systems | Windows, macOS, Linux | Windows | macOS (Apple Silicon and Intel) | Windows, macOS, Linux |
 | Size | small | about 120 MB (includes Electron) | about 120 MB (includes Electron) | about 100 MB (downloads Electron) |
 
 On Windows the setup program, and on a Mac the disk image, are the simplest choice for a desktop
@@ -114,6 +117,19 @@ window; `shellyard` alone is enough if a browser tab suits you.
 All three are views of the same server: you can use them at once, and they show the same sessions.
 Both desktop variants carry their own copy of the server, so you do not need to install `shellyard`
 as well; install it only if you also want its commands (`shellyard status`, `shellyard stop`, …).
+
+### Updates of the desktop app
+
+**Check for updates…**, in the app's menu (the ShellYard menu on macOS, Help elsewhere) and in the
+tray's, asks GitHub for the latest release. When a newer one is out, the app says so and offers to
+download its installer for your system (the setup program, or the disk image for your Mac's
+processor) in your browser, or to open the release page; install it as the first time. Your
+sessions keep running meanwhile. The app never downloads nor installs anything by itself.
+
+**Check for updates automatically**, beside it, does the same a few seconds after the app starts and
+then once a day, and tells about each new version once, as a notification. It is off until you turn
+it on. These are the only requests ShellYard makes to the internet itself: GitHub receives the
+address of your machine and the name "ShellYard-desktop", nothing else.
 
 ## Commands
 
@@ -298,7 +314,19 @@ for a permission, the session waits under **Needs attention** until you answer.
 
 Each schedule shows its next run and how the last one went, and **History** lists the last
 twenty runs: *Prompt given*, *Session open, prompt not given* (Claude Code did not become ready,
-or did not confirm it took the prompt), *Could not start* (with the reason) or *Skipped*. **Run
+or did not confirm it took the prompt), *Could not start* (with the reason) or *Skipped*.
+
+Beside that, a run says how it is going or went: *Working for 3m*, *Done in 4m · $0.42 · waited on
+you 2m*, or *Waiting on you for 12m*. A run is done when Claude Code finishes its turn after the
+prompt; its duration counts from the start of the run. A session closed or ended before that
+makes the run *Ended after 6m, before finishing*. A run still at work when ShellYard stops is
+*Stopped with ShellYard, before finishing*: its session comes back as a new one, so the run is
+not followed further, and the time ShellYard was off is not counted as waiting on you. Runs
+from before ShellYard followed them say nothing of how they went. The cost is Claude
+Code's own estimate for the session until the run's turn ends (see Usage); what you go on to ask in
+that session afterwards is not counted. A run that waits on a permission or a question for more
+than 10 minutes is marked, its schedule stands out in the list, and a notification reminds you
+once for that wait, even if the page is in view, since the first one went unanswered. **Run
 now** starts a run at once without moving the timetable; the **On** box pauses a schedule.
 
 Things to know:
@@ -382,6 +410,20 @@ In the new-session dialog, when the folder is in a repository with more than one
 **Worktree** choice appears under Folder. Pick one to start the session there, in the same
 sub-folder if it exists in that worktree. **Manage…** opens the same dialog to create one first.
 The choice is not offered for launchers that set their own folder (WSL, `--cd`).
+
+### Uncommitted changes
+
+When the worktree a session works in has changes that are not committed, a badge beside the
+branch chip says how many: `3 files +42 −7`. The session's row on the board shows the lines too.
+Click the badge to see them: the changed files on the left (modified, added, deleted, new and not
+tracked yet), and the diff of the one chosen on the right, against the last commit, staged or
+not. The arrows (or `J`/`K`) move through the files; **Refresh** reads them again.
+
+The badge is read again shortly after Claude Code uses a tool or finishes a turn, and every 15
+seconds for changes made elsewhere (an editor, a shell), and the open dialog follows. A commit
+takes the files out. These are the changes of the whole worktree, whoever made them: sessions
+that share a worktree share its badge. Files git ignores are not listed; a binary file, or a diff
+larger than 1 MB, is listed without its lines.
 
 ### Terminal background
 
@@ -579,9 +621,11 @@ node dist/cli/shellyard.js --foreground
 ```
 
 At every push to `main`, the [Desktop installers](.github/workflows/desktop-installers.yml)
-workflow runs the tests, builds the Windows setup program and the macOS disk image (each on its own
-system) and publishes them, with their checksums, as a GitHub release. It can also be started by
-hand (Actions → Desktop installers → Run workflow).
+workflow runs the tests, builds the Windows setup program and the macOS disk images for Apple
+Silicon and Intel (each on its own system and processor) and publishes them, with their
+checksums, as a GitHub release. It can also be started by hand (Actions → Desktop installers →
+Run workflow). Every pull request is checked by the [Checks](.github/workflows/checks.yml)
+workflow first: types, tests and build on Windows, macOS and Linux.
 
 The version of each release is worked out by the workflow: `VERSION_BASE` at its top gives the
 major and minor (its patch stays 0), and the patch is one more than the highest already released

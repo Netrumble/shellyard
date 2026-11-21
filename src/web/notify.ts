@@ -70,6 +70,15 @@ export function notify(s: SessionInfo, onClick: () => void, sound: boolean): voi
   show(s.name, { body: reasonLabel(s), tag: `shellyard-${s.id}`, silent: !sound }, onClick);
 }
 
+/**
+ * A scheduled run that has waited on the user too long. Shown even when the page is in view:
+ * it is a reminder, after the first notification of the wait went unanswered.
+ */
+export function notifyStuck(name: string, body: string, tag: string, onClick: () => void, sound: boolean): void {
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  show(name, { body, tag: `shellyard-stuck-${tag}`, silent: !sound }, onClick);
+}
+
 /** The digest at the end of a focus: one notification, if the page is not in view. */
 export function notifyDigest(text: string, onClick: () => void, sound: boolean): void {
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;

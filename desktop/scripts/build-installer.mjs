@@ -21,6 +21,7 @@ import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isRepoName } from '../updates.js';
 
 const desktop = join(dirname(fileURLToPath(import.meta.url)), '..');
 const root = join(desktop, '..');
@@ -75,13 +76,18 @@ mkdirSync(mainPackage, { recursive: true });
 execFileSync(tarProgram(), ['-xzf', join(stage, packed), '-C', mainPackage, '--strip-components=1'], { stdio: 'inherit' });
 rmSync(join(stage, packed), { force: true });
 
-for (const f of ['main.js', 'preload.cjs', 'find-node.js', 'login-env.js', 'icon.png']) copyFileSync(join(desktop, f), join(stage, f));
+for (const f of ['main.js', 'preload.cjs', 'find-node.js', 'login-env.js', 'updates.js', 'icon.png']) copyFileSync(join(desktop, f), join(stage, f));
 // A macOS app icon must be at least 512 pixels; sips, part of macOS, scales the one there is.
 if (process.platform === 'darwin') execFileSync('sips', ['-z', '512', '512', join(stage, 'icon.png'), '--out', join(stage, 'icon-mac.png')], { stdio: 'ignore' });
 
 const pkg = JSON.parse(readFileSync(join(desktop, 'package.json'), 'utf8'));
 const electronPkg = join(desktop, 'node_modules', 'electron', 'package.json');
 const electronVersion = existsSync(electronPkg) ? JSON.parse(readFileSync(electronPkg, 'utf8')).version : null;
+// Where "Check for updates…" looks for releases: SHELLYARD_UPDATE_REPO (owner/name, set by the
+// workflow to the repository it runs in), else the app's default.
+const updateRepo = process.env.SHELLYARD_UPDATE_REPO ?? '';
+// The same rule as the app's: a name it would refuse must not pass the build silently.
+if (updateRepo && !isRepoName(updateRepo)) throw new Error(`SHELLYARD_UPDATE_REPO must be owner/name, not "${updateRepo}".`);
 writeFileSync(
   join(stage, 'package.json'),
   JSON.stringify(
@@ -95,6 +101,7 @@ writeFileSync(
       type: 'module',
       main: 'main.js',
       dependencies: { [rootPkg.name]: rootPkg.version },
+      ...(updateRepo ? { shellyard: { updateRepo } } : {}),
       // Electron itself is not packed from here: the builder adds it.
       ...(electronVersion ? { devDependencies: { electron: electronVersion } } : {}),
     },
