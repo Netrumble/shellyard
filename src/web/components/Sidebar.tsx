@@ -7,6 +7,7 @@ import { requestPermissionOnce } from '../notify.js';
 import { selectCounts } from '../selectors.js';
 import { isTypingTarget, launcherIndex } from '../shortcuts.js';
 import { setView, useStore } from '../store.js';
+import { useNarrow } from '../narrow.js';
 import { dragSource, useDropTarget } from './drag-target.js';
 import { LAUNCHERS_FOLDED_KEY, SESSIONS_FOLDED_KEY, SIDEBAR_FOLDED_KEY, readFlag, writeFlag } from '../sidebar-memory.js';
 import { SidebarSessions } from './SidebarSessions.js';
@@ -70,8 +71,10 @@ function scheduleNote(schedules: Schedule[], now: number): string | null {
 }
 
 /** Where to go, the sessions under their areas, and what to start. */
-export function Sidebar({ onNewSession }: { onNewSession: (storyId?: string) => void }): React.JSX.Element {
+export function Sidebar({ onNewSession, drawerOpen = false, onCloseDrawer }: { onNewSession: (storyId?: string) => void; drawerOpen?: boolean; onCloseDrawer?: () => void }): React.JSX.Element {
   const { sessions, schedules, view, meta } = useStore();
+  // On a phone the sidebar is a drawer over the page: always unfolded, and its toggle closes it.
+  const narrow = useNarrow();
   const counts = selectCounts(sessions);
   const [railFolded, setRailFolded] = useState(() => readFlag(SIDEBAR_FOLDED_KEY));
   const [sessionsFolded, setSessionsFolded] = useState(() => readFlag(SESSIONS_FOLDED_KEY));
@@ -113,16 +116,18 @@ export function Sidebar({ onNewSession }: { onNewSession: (storyId?: string) => 
   const schedulesNote = scheduleNote(schedules, Date.now());
   const nav = (active: boolean): string => (active ? 'nav active' : 'nav');
 
+  const folded = railFolded && !narrow;
+
   return (
-    <aside className={railFolded ? 'sidebar folded' : 'sidebar'}>
+    <aside id="sidebar" className={classes('sidebar', folded && 'folded', narrow && drawerOpen && 'drawer-open')} aria-hidden={narrow && !drawerOpen ? true : undefined} inert={narrow && !drawerOpen ? true : undefined}>
       <div className="sidebar-top">
         <button
           type="button"
           className="icon sidebar-toggle"
-          aria-expanded={!railFolded}
-          title={railFolded ? 'Unfold the sidebar' : 'Fold the sidebar'}
-          aria-label={railFolded ? 'Unfold the sidebar' : 'Fold the sidebar'}
-          onClick={() => flip(railFolded, setRailFolded, SIDEBAR_FOLDED_KEY)}
+          aria-expanded={narrow ? drawerOpen : !folded}
+          title={narrow ? 'Close the menu' : folded ? 'Unfold the sidebar' : 'Fold the sidebar'}
+          aria-label={narrow ? 'Close the menu' : folded ? 'Unfold the sidebar' : 'Fold the sidebar'}
+          onClick={() => (narrow ? onCloseDrawer?.() : flip(railFolded, setRailFolded, SIDEBAR_FOLDED_KEY))}
         >
           <SidebarIcon size={18} />
         </button>
