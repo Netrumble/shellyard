@@ -1,6 +1,6 @@
 import type { Schedule, ScheduleRun } from '../../src/shared/types.js';
 import { describe, expect, it } from 'vitest';
-import { describeWhen, fromLocalInput, newlyStuck, outcomeText, runResult, toLocalInput } from '../../src/web/schedule-text.js';
+import { describeWhen, fromLocalInput, newlyStuck, outcomeText, runResult, spanLabel, toLocalInput } from '../../src/web/schedule-text.js';
 
 describe('describeWhen', () => {
   it('says a weekly timetable the way a person would', () => {
@@ -53,6 +53,14 @@ describe('runResult', () => {
     expect(runResult({ ...base, finishedAt: 6 * MIN, endedBy: 'session' }, 10 * MIN)).toMatchObject({ text: 'Ended after 6m, before finishing', tone: 'tone-muted' });
     expect(runResult({ ...base, endedBy: 'restart', costUsd: 0.2 }, 10 * MIN)).toMatchObject({ text: 'Stopped with ShellYard, before finishing · $0.20', tone: 'tone-muted' });
     expect(runResult({ ...base, endedBy: 'unknown' }, 10 * MIN).text).toBe('');
+  });
+
+  it('leaves out a wait under a second, and says "under 1s" rather than "now"', () => {
+    expect(runResult({ ...base, finishedAt: 400, endedBy: 'turn', blockedMs: 400 }, MIN).text).toBe('Done in under 1s');
+    expect(runResult({ ...base, finishedAt: 5 * MIN, endedBy: 'turn', blockedMs: 1_000 }, 10 * MIN).text).toBe('Done in 5m · waited on you 1s');
+    // A browser clock behind the server's gives a negative span: the shortest.
+    expect(runResult({ ...base, blockedSince: 2 * MIN }, MIN).text).toBe('Waiting on you for under 1s');
+    expect(spanLabel(-5_000)).toBe('under 1s');
   });
 
   it('says a run waits on you, more loudly once it is stuck', () => {

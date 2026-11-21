@@ -321,9 +321,10 @@ makes the run *Ended after 6m, before finishing*. A run still at work when Shell
 *Stopped with ShellYard, before finishing*: its session comes back as a new one, so the run is
 not followed further, and the time ShellYard was off is not counted as waiting on you. Runs
 from before ShellYard followed them say nothing of how they went. The cost is Claude
-Code's own estimate for the session until then (see Usage). A run that waits on a permission or a
-question for more than 10 minutes is marked, its schedule stands out in the list, and a
-notification reminds you once, even if the page is in view, since the first one went unanswered. **Run
+Code's own estimate for the session until the run's turn ends (see Usage); what you go on to ask in
+that session afterwards is not counted. A run that waits on a permission or a question for more
+than 10 minutes is marked, its schedule stands out in the list, and a notification reminds you
+once for that wait, even if the page is in view, since the first one went unanswered. **Run
 now** starts a run at once without moving the timetable; the **On** box pauses a schedule.
 
 Things to know:

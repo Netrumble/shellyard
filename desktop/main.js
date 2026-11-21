@@ -128,14 +128,18 @@ async function runCheck(manual) {
     }
     if (!manual) {
       if (readSettings().notifiedVersion === update.version) return;
-      writeSettings({ notifiedVersion: update.version });
       if (Notification.isSupported()) {
         const n = new Notification({ title: `ShellYard ${update.version} is available`, body: 'Click to see how to get it.', icon });
         updateNotification = n;
         const forget = () => {
           if (updateNotification === n) updateNotification = null;
         };
+        // Counted as announced once it is shown or clicked, not when it is only asked for: the
+        // system may not show it (notifications turned off, Focus), and the next check tries again.
+        const announced = () => writeSettings({ notifiedVersion: update.version });
+        n.once('show', announced);
         n.on('click', () => {
+          announced();
           forget();
           void offerUpdate(update);
         });
@@ -143,6 +147,8 @@ async function runCheck(manual) {
         n.show();
         return;
       }
+      // Without notifications the dialog says it, and is seen: once per version is enough.
+      writeSettings({ notifiedVersion: update.version });
     }
     await offerUpdate(update);
   } catch (e) {

@@ -316,7 +316,10 @@ export interface ScheduleRun {
   blockedMs: number;
   /** Since when it waits on the user now; null when it does not. */
   blockedSince: number | null;
-  /** When it was found waiting longer than the schedules allow (SCHEDULE_STUCK_AFTER_MS); null if never. */
+  /**
+   * When its wait of now was found longer than the schedules allow (SCHEDULE_STUCK_AFTER_MS);
+   * null when it does not wait, or not that long yet. Each wait is reported on its own.
+   */
   stuckAt: number | null;
 }
 

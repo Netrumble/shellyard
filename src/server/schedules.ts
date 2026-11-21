@@ -200,6 +200,10 @@ export class ScheduleStore {
   private readonly changeCbs: Array<(schedules: Schedule[]) => void> = [];
   /** When the cost of each run at work was last saved. */
   private readonly costSavedAt = new WeakMap<ScheduleRun, number>();
+  /** Runs whose session went on to another turn after theirs: late costs are not theirs any more. */
+  private readonly costClosed = new WeakSet<ScheduleRun>();
+  /** True while a cost taken is not saved yet. */
+  private costPending = false;
 
   constructor(private readonly deps: ScheduleDeps) {
     this.schedules = this.load();
@@ -235,7 +239,13 @@ export class ScheduleStore {
     }
   }
 
+  /** Saves what is held only in memory (a cost not saved yet); called when ShellYard stops. */
+  flush(): void {
+    if (this.costPending) this.save();
+  }
+
   private changed(): void {
+    this.costPending = false;
     this.save();
     const list = this.list();
     for (const cb of this.changeCbs) cb(list);
@@ -354,6 +364,8 @@ export class ScheduleStore {
     let any = false;
     for (const s of this.schedules) {
       for (const run of s.runs) {
+        // Once the session works again after the run's turn, what it costs is the user's own work.
+        if (run.endedBy === 'turn' && run.sessionId !== null && byId.get(run.sessionId)?.status === 'working') this.costClosed.add(run);
         if (!followed(run)) continue;
         const session = byId.get(run.sessionId!);
         const ended = !session || session.status === 'exited';
@@ -364,6 +376,8 @@ export class ScheduleStore {
         } else if (!blocked && run.blockedSince !== null) {
           run.blockedMs += Math.max(0, now - run.blockedSince);
           run.blockedSince = null;
+          // The next wait is reported on its own, if it too lasts.
+          run.stuckAt = null;
           any = true;
         }
         // Its turn is over once the prompt was given and Claude Code waits for the next one.
@@ -387,13 +401,16 @@ export class ScheduleStore {
   observeCost(sessionId: string, costUsd: number | null): void {
     if (costUsd === null || !Number.isFinite(costUsd) || costUsd < 0) return;
     const run = this.runOf(sessionId);
-    if (!run || !atWork(run) || run.costUsd === costUsd) return;
+    if (!run || !atWork(run) || run.costUsd === costUsd || this.costClosed.has(run)) return;
     const now = this.deps.now();
     const running = run.endedBy === null;
     const late = run.finishedAt !== null && (run.endedBy === 'turn' || run.endedBy === 'session') && now - run.finishedAt <= COST_GRACE_MS;
     if (!running && !late) return;
     run.costUsd = costUsd;
-    if (running && now - (this.costSavedAt.get(run) ?? -Infinity) < COST_SAVE_EVERY_MS) return;
+    if (running && now - (this.costSavedAt.get(run) ?? -Infinity) < COST_SAVE_EVERY_MS) {
+      this.costPending = true;
+      return;
+    }
     this.costSavedAt.set(run, now);
     this.changed();
   }

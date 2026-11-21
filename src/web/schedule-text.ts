@@ -66,12 +66,13 @@ export function costLabel(usd: number): string {
  */
 export function runResult(run: ScheduleRun, now: number): { text: string; tone: string; needsYou: boolean } {
   const cost = run.costUsd !== null && run.costUsd > 0 ? costLabel(run.costUsd) : null;
-  const waited = run.blockedMs > 0 ? `waited on you ${durationLabel(run.blockedMs)}` : null;
+  // A permission answered at once is not worth a mention.
+  const waited = run.blockedMs >= 1000 ? `waited on you ${spanLabel(run.blockedMs)}` : null;
   const join = (...parts: Array<string | null>): string => parts.filter(Boolean).join(' · ');
   const none = { text: '', tone: '', needsYou: false };
   // A run that never had a session at work (or whose prompt was not given) has nothing to add.
   if (run.sessionId === null || (run.outcome !== 'started' && run.outcome !== 'delivered')) return none;
-  const took = run.finishedAt !== null ? durationLabel(run.finishedAt - run.at) : '';
+  const took = run.finishedAt !== null ? spanLabel(run.finishedAt - run.at) : '';
   switch (run.endedBy) {
     case 'turn':
       return { text: join(`Done in ${took}`, cost, waited), tone: 'tone-ok', needsYou: false };
@@ -83,10 +84,19 @@ export function runResult(run: ScheduleRun, now: number): { text: string; tone: 
       return none;
   }
   if (run.blockedSince !== null) {
-    const text = join(`Waiting on you for ${durationLabel(now - run.blockedSince)}`, cost);
+    const text = join(`Waiting on you for ${spanLabel(now - run.blockedSince)}`, cost);
     return { text, tone: run.stuckAt !== null ? 'tone-dead' : 'tone-warn', needsYou: true };
   }
-  return { text: join(`Working for ${durationLabel(now - run.at)}`, cost, waited), tone: 'tone-done', needsYou: false };
+  return { text: join(`Working for ${spanLabel(now - run.at)}`, cost, waited), tone: 'tone-done', needsYou: false };
+}
+
+/**
+ * A span of time in words, "under 1s" for less than a second (where durationLabel says "now").
+ * A span from the server's clock to the browser's may come out negative when they disagree: it is
+ * then the shortest.
+ */
+export function spanLabel(ms: number): string {
+  return ms < 1000 ? 'under 1s' : durationLabel(ms);
 }
 
 /** The runs that have just been found waiting on the user too long, with their schedule. */

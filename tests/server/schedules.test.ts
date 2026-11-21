@@ -150,6 +150,25 @@ describe('ScheduleStore', () => {
       expect(run(store).stuckAt).toBe(stuckAt);
     });
 
+    it('reports each long wait of a run on its own', () => {
+      const { store, id } = started();
+      store.resolveRun(id, 'session-1', 'delivered', null);
+      store.observe(state('attention', 'blocked'));
+      now += SCHEDULE_STUCK_AFTER_MS;
+      store.tick();
+      expect(run(store).stuckAt).toBe(now);
+      store.observe(state('working'));
+      expect(run(store).stuckAt).toBeNull();
+      // Waiting again: not stuck at once, but once this wait too lasts.
+      store.observe(state('attention', 'blocked'));
+      now += 3_000;
+      store.tick();
+      expect(run(store).stuckAt).toBeNull();
+      now += SCHEDULE_STUCK_AFTER_MS;
+      store.tick();
+      expect(run(store).stuckAt).toBe(now);
+    });
+
     it('keeps all of it across a restart', () => {
       const { store, id, start } = started();
       store.resolveRun(id, 'session-1', 'delivered', null);
@@ -209,6 +228,31 @@ describe('ScheduleStore', () => {
       now += 1_000;
       store.observeCost('session-1', 0.35);
       expect(saved()).toBe(0.35);
+    });
+
+    it('takes no late cost once the session works on another turn after the run', () => {
+      const { store, id } = started();
+      store.resolveRun(id, 'session-1', 'delivered', null);
+      store.observeCost('session-1', 0.42);
+      store.observe(state('attention', 'finished'));
+      now += 1_000;
+      store.observeCost('session-1', 0.43);
+      // The user asks for more in the session: that work is theirs.
+      store.observe(state('working'));
+      now += 5_000;
+      store.observeCost('session-1', 1.8);
+      expect(run(store).costUsd).toBe(0.43);
+    });
+
+    it('saves a cost held in memory when ShellYard stops', () => {
+      const { store, id } = started();
+      store.resolveRun(id, 'session-1', 'delivered', null);
+      store.observeCost('session-1', 0.1);
+      now += 5_000;
+      store.observeCost('session-1', 0.2);
+      expect(make().list()[0]!.runs[0]!.costUsd).toBe(0.1);
+      store.flush();
+      expect(make().list()[0]!.runs[0]).toMatchObject({ costUsd: 0.2, endedBy: 'restart' });
     });
 
     it('says nothing more of a run whose session ended before the prompt was given', () => {

@@ -275,6 +275,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
       saveNow();
       saving = false;
       manager.shutdown();
+      schedules.flush();
       usage.flush();
       flow.observe([]);
       flow.persist();
