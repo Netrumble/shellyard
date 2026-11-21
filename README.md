@@ -53,15 +53,30 @@ Apps → Installed apps → ShellYard**. Uninstalling leaves your data in `~/.sh
 
 ### As a desktop app, with the disk image (macOS)
 
+> [!IMPORTANT]
+> **The first time, macOS refuses to open ShellYard** and says *"Apple could not verify
+> ShellYard.app is free of malware that may harm your Mac or compromise your privacy"*. This is
+> expected: the app is not signed with an Apple Developer ID certificate nor notarised by Apple
+> yet, so macOS cannot vouch for it. It is not damaged. Allow it once, as shown in step 3; check the
+> download against its checksum first if you want to be sure it is the published file.
+
 1. Download `ShellYard-<version>-arm64.dmg` (Apple Silicon) from the
    [latest release](https://github.com/Talentia-Software-OSS/shellyard/releases/latest), with the
-   `.dmg.sha256` beside it. To check the download: `shasum -a 256 -c ShellYard-<version>-arm64.dmg.sha256`
-   must print `OK`.
-2. Open it and drag ShellYard into Applications.
-3. The app is not signed with an Apple Developer certificate nor notarised, so the first time macOS
-   refuses to open it. Either remove the quarantine mark once, in Terminal:
-   `xattr -dr com.apple.quarantine /Applications/ShellYard.app`, or open it, then go to
-   **System Settings → Privacy & Security** and press **Open Anyway**.
+   `.dmg.sha256` beside it. To check the download, in Terminal, in the folder you downloaded them to:
+   `shasum -a 256 -c ShellYard-<version>-arm64.dmg.sha256` must print `OK`.
+2. Open the disk image and drag ShellYard into Applications.
+3. Allow it, in one of two ways:
+   - **In Terminal** (quickest): remove the quarantine mark macOS puts on downloaded files, then open
+     the app as usual:
+     ```
+     xattr -dr com.apple.quarantine /Applications/ShellYard.app
+     ```
+   - **In System Settings**: open ShellYard and close the warning with **Done**. Go to **System
+     Settings → Privacy & Security**, scroll down to *"ShellYard.app was blocked to protect your
+     Mac"*, press **Open Anyway** and confirm with your password or Touch ID. On recent macOS
+     versions, right-click → Open no longer offers to open such an app: use one of these two ways.
+
+   This is needed once per version: after an update, allow the new app again.
 
 ShellYard then runs in its own window, with an icon in the menu bar: closing the window keeps it
 there, and it still tells you when a session needs you; Cmd+Q quits it (the sessions keep running).

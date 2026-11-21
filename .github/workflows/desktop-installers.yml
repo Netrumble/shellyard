@@ -133,14 +133,34 @@ jobs:
           path: installers
           merge-multiple: true
 
+      # The notes start with how to install, then GitHub's list of the changes.
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           ls -l installers
+          cat > notes.md <<EOF
+          ## Install
+
+          - **Windows**: run \`ShellYard-Setup-$VERSION.exe\`. It is not code-signed yet: if SmartScreen says "Windows protected your PC", click **More info**, then **Run anyway**.
+          - **macOS (Apple Silicon)**: open \`ShellYard-$VERSION-arm64.dmg\` and drag ShellYard into Applications.
+
+          > [!IMPORTANT]
+          > **macOS refuses to open the app the first time** ("Apple could not verify ShellYard.app is free of malware…"): it is not signed with an Apple Developer ID nor notarised yet. It is not damaged. Allow it once, either in Terminal:
+          >
+          > \`\`\`
+          > xattr -dr com.apple.quarantine /Applications/ShellYard.app
+          > \`\`\`
+          >
+          > or open it, close the warning with **Done**, then **System Settings → Privacy & Security → Open Anyway**.
+
+          Node.js 22 or later must be installed: the server runs on it. Each file has its SHA-256 checksum beside it (\`shasum -a 256 -c <file>.sha256\` on macOS).
+
+          EOF
           gh release create "v$VERSION" installers/* \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "ShellYard $VERSION" \
+            --notes-file notes.md \
             --generate-notes
