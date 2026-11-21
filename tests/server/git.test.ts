@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { removeDir } from '../helpers.js';
 import {
   branches,
   createWorktree,
@@ -81,7 +82,7 @@ describe.skipIf(!hasGit)('git worktrees', () => {
     wtDir = join(root, 'wt');
     makeRepo(repo);
   });
-  afterEach(() => rmSync(root, { recursive: true, force: true }));
+  afterEach(() => removeDir(root));
 
   it('worktreesOf returns null outside a repository', async () => {
     expect(await worktreesOf(join(root))).toBeNull();
@@ -331,7 +332,10 @@ describe.skipIf(!hasGit)('git worktrees', () => {
         // The folder is either gone or reported.
         if (existsSync(wtDir)) expect(r.warning).toMatch(/could not be fully deleted/);
       } finally {
+        // The folder is free only once the process has really ended, not when it is told to.
+        const exited = new Promise((r) => child.once('exit', r));
         child.kill();
+        await exited;
       }
     });
   });
