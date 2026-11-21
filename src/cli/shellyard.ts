@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { clearServerState, dataDir, launcherPagePath, logPath, readServerState, type ServerState } from '../server/config.js';
 import { healthProof, newChallenge, safeEqual } from '../server/auth.js';
-import { DEFAULT_PORT, startServer } from '../server/index.js';
+import { DEFAULT_PORT, reportUncaught, startServer } from '../server/index.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const START_TIMEOUT_MS = 10_000;
@@ -223,8 +223,15 @@ async function ensureRunning(options: { port?: number; node?: string }): Promise
       await sleep(150);
       state = await liveState();
     }
-    if (!state) return { ok: false, error: `ShellYard did not start. Last lines of the log:
-${tailLog(15) || `(no log at ${logPath()})`}` };
+    if (!state) {
+      // The report holds the end of the log too, ready to read or attach to an issue.
+      const report = reportUncaught('startup', new Error('ShellYard did not start in time'), `shellyard start, port ${options.port ?? DEFAULT_PORT}`);
+      return {
+        ok: false,
+        error: `ShellYard did not start. Last lines of the log:
+${tailLog(15) || `(no log at ${logPath()})`}${report ? `\n\nError report: ${report}` : ''}`,
+      };
+    }
   }
   return { ok: true, state };
 }
