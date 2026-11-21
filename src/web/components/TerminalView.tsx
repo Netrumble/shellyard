@@ -8,6 +8,7 @@ import { backgroundUrl } from '../api.js';
 import { getSocket, getState, onThemeChange } from '../store.js';
 import { hostStyle, terminalFont, terminalLook } from '../terminal-look.js';
 import { HIGHLIGHT_LIMIT, isSearchKey, isValidPattern, searchCountText } from '../terminal-search.js';
+import { attachTouchScroll } from '../touch-scroll.js';
 
 const RESIZE_DEBOUNCE_MS = 100;
 
@@ -305,6 +306,7 @@ export function TerminalView(props: {
     const onFocusOut = (): void => onFocusChange.current?.(false);
     el.addEventListener('focusin', onFocusIn);
     el.addEventListener('focusout', onFocusOut);
+    const offTouch = attachTouchScroll(el, term);
     if (autoFocus) term.focus();
 
     return () => {
@@ -314,6 +316,7 @@ export function TerminalView(props: {
       followSize.current = () => undefined;
       el.removeEventListener('focusin', onFocusIn);
       el.removeEventListener('focusout', onFocusOut);
+      offTouch();
       input.dispose();
       applyLook.current = () => undefined;
       applyFont.current = () => undefined;
