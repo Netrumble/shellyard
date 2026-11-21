@@ -13,6 +13,8 @@ import { MAX_PROMPT } from '../shared/sessions.js';
 import { RecipeError, type RecipeStore } from './recipes.js';
 import { startFromTicket, TicketError } from './tickets.js';
 import type { StatusLog } from './status-log.js';
+import { revealCommand, type ErrorReporter } from './errors.js';
+import { spawn } from 'node:child_process';
 
 /** The most sessions one prompt is sent to at once. */
 const MAX_PROMPT_TARGETS = 50;
@@ -50,6 +52,10 @@ export interface HttpDeps {
   onClaudeStatus?: (sessionId: string) => void;
   /** A hosted Claude session took a prompt. */
   onPromptSubmitted?: (sessionId: string) => void;
+  /** Writes a report for each unexpected error, and keeps those of this run for the page. */
+  errors?: ErrorReporter;
+  /** Shows a file in the system's file manager; returns why not, or null. Stands in for the real one in tests. */
+  reveal?: (file: string) => string | null;
   port: number;
   /** The host name the page is served on in this start (see newPageHost). */
   pageHost: string;
@@ -193,6 +199,19 @@ async function gitCall<T>(fn: () => Promise<T>): Promise<T> {
   } catch (e) {
     if (e instanceof GitError) throw new HttpError(400, e.message);
     throw e;
+  }
+}
+
+/** Shows a file in the system's file manager, without waiting for it. */
+function revealFile(file: string): string | null {
+  const cmd = revealCommand(file);
+  try {
+    const child = spawn(cmd.file, cmd.args, { detached: true, stdio: 'ignore', windowsHide: false, windowsVerbatimArguments: cmd.verbatim });
+    child.on('error', () => undefined);
+    child.unref();
+    return null;
+  } catch (e) {
+    return `Could not open the folder: ${(e as Error).message}`;
   }
 }
 
@@ -918,6 +937,40 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       return send(res, 204);
     }
 
+    // Unexpected errors: those of the server, and those the page reports.
+    if (deps.errors && (path === '/api/errors' || path.startsWith('/api/errors/'))) {
+      const errors = deps.errors;
+      if (path === '/api/errors') {
+        if (method === 'GET') return send(res, 200, errors.list());
+        if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
+        const b = await readObject(req);
+        if (typeof b.message !== 'string' || b.message.trim() === '') throw new HttpError(400, 'message must be a non-empty string');
+        if (b.stack !== undefined && b.stack !== null && typeof b.stack !== 'string') throw new HttpError(400, 'stack must be a string');
+        if (b.context !== undefined && b.context !== null && typeof b.context !== 'string') throw new HttpError(400, 'context must be a string');
+        const report = errors.report({ source: 'page', error: b.message, stack: (b.stack as string | null | undefined) ?? null, context: (b.context as string | null | undefined) ?? null });
+        return send(res, 200, report);
+      }
+      if (path === '/api/errors/seen') {
+        if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
+        errors.dismissAll();
+        return send(res, 204);
+      }
+      const m = /^\/api\/errors\/([^/]+)\/(seen|reveal)$/.exec(path);
+      if (!m) throw new HttpError(404, 'Not found');
+      if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
+      const id = decodeId(m[1]!);
+      const report = errors.get(id);
+      if (!report) throw new HttpError(404, 'No such error report');
+      if (m[2] === 'seen') {
+        errors.dismiss(id);
+        return send(res, 204);
+      }
+      // Only the file of a report of this run is ever shown: the path never comes from the request.
+      const problem = (deps.reveal ?? revealFile)(report.file);
+      if (problem) throw new HttpError(500, problem);
+      return send(res, 204);
+    }
+
     if (path === '/api/usage') {
       if (method !== 'GET') throw new HttpError(405, 'Method not allowed');
       return send(res, 200, deps.usage.summary());
@@ -959,7 +1012,12 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       }
       if (e instanceof ConfigInvalidError) send(res, 409, { error: e.message });
       else if (e instanceof HttpError) send(res, e.status, { error: e.message }, e.status === 413 ? { connection: 'close' } : {});
-      else send(res, 500, { error: 'Internal error' });
+      else {
+        // Unexpected: written to a report, whose path the page is told about.
+        const path = (req.url ?? '/').split('?')[0];
+        const report = deps.errors?.report({ source: 'server', error: e, context: `${req.method ?? 'GET'} ${path}` });
+        send(res, 500, { error: report ? `Internal error. Details in ${report.file}` : 'Internal error' });
+      }
     });
   };
 }

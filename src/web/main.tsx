@@ -2,14 +2,23 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App.js';
 import { newlyWaiting } from './attention.js';
-import { notify } from './notify.js';
+import { notify, notifyError } from './notify.js';
+import { freshErrors, installPageErrorReporting } from './page-errors.js';
+import { PageErrorBoundary } from './components/ErrorNotices.js';
 import { pickSound, playSound, shouldPlay } from './sounds.js';
 import type { SessionInfo } from '../shared/types.js';
-import { getState, noteDigest, onSessionsChange, refreshSounds, setView, startStore } from './store.js';
+import { getState, noteDigest, onErrorsChange, onSessionsChange, refreshSounds, setView, startStore } from './store.js';
 import { focusOn, splitForFocus } from './focus.js';
 import './theme.css';
 
 startStore();
+// Errors nothing in the page caught are written to a report by the server, like its own.
+installPageErrorReporting(() => getState().view.kind);
+
+// An error while the page is in the background raises a notification that says where its report is.
+onErrorsChange((prev, next) => {
+  for (const r of freshErrors(prev, next).slice(0, 3)) notifyError(r, () => undefined, getState().sound);
+});
 
 // A session that starts waiting while the page is in the background raises a notification.
 onSessionsChange((prev, next) => {
@@ -36,7 +45,9 @@ const root = document.getElementById('root');
 if (root) {
   createRoot(root).render(
     <StrictMode>
-      <App />
+      <PageErrorBoundary>
+        <App />
+      </PageErrorBoundary>
     </StrictMode>,
   );
 }

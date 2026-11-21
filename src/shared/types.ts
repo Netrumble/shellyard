@@ -334,6 +334,27 @@ export interface Schedule {
   runs: ScheduleRun[];
 }
 
+/** Where an error happened: in the server, in the page, or while ShellYard was starting. */
+export type ErrorSource = 'server' | 'page' | 'startup';
+
+/** An unexpected error, written to a file of its own so that it can be read or sent on. */
+export interface ErrorReport {
+  id: string;
+  source: ErrorSource;
+  /** The first line of the error, with secrets taken out. */
+  message: string;
+  /** What was being done: an API route, a background task, the page's address. */
+  context: string | null;
+  /** The full path of the report file. */
+  file: string;
+  at: number;
+  /** The same error happened this many times in this run; the file says when. */
+  count: number;
+  lastAt: number;
+  /** True once the user has closed its notice. */
+  seen: boolean;
+}
+
 export type ServerMessage =
   | { t: 'sessions'; sessions: SessionInfo[] }
   | { t: 'schedules'; schedules: Schedule[] }
@@ -343,6 +364,8 @@ export type ServerMessage =
   | { t: 'usage'; usage: UsageSummary }
   /** Bytes printed in the last second, per session; sessions printing nothing are absent. */
   | { t: 'activity'; rates: Record<string, number> }
+  /** The errors of this run, newest first. */
+  | { t: 'errors'; errors: ErrorReport[] }
   | { t: 'snapshot'; id: string; data: string }
   | { t: 'output'; id: string; data: string };
 

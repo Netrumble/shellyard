@@ -9,7 +9,7 @@ import { RuleStore } from './area-rules.js';
 import { RecipeStore } from './recipes.js';
 import { StatusLog } from './status-log.js';
 import { ClosedStore } from './closed.js';
-import { clearServerState, dataDir, loadConfig, readServerState, writeServerState } from './config.js';
+import { clearServerState, dataDir, loadConfig, logPath, readServerState, writeServerState } from './config.js';
 import { openInEditor } from './editor.js';
 import { createRequestHandler } from './http.js';
 import { realPtyFactory, type PtyFactory } from './pty-session.js';
@@ -24,6 +24,7 @@ import { StoryStore } from './stories.js';
 import { UsageStore } from './usage.js';
 import type { Schedule } from '../shared/types.js';
 import { attachWebSocket } from './ws.js';
+import { ErrorReporter, errorsDir } from './errors.js';
 
 export const DEFAULT_PORT = 7717;
 
@@ -45,6 +46,8 @@ export interface RunningServer {
   pageHost: string;
   token: string;
   address: string;
+  /** Writes reports for unexpected errors of this run; the page is told about each. */
+  errors: ErrorReporter;
   stop(): Promise<void>;
   /** Resolves once the server has stopped, however that was triggered. */
   stopped: Promise<void>;
@@ -100,6 +103,15 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   const pageHost = newPageHost();
   const startedAt = Date.now();
   const here = dirname(fileURLToPath(import.meta.url));
+  const errors = new ErrorReporter({
+    dir: errorsDir(dataDir()),
+    now: Date.now,
+    version: packageVersion(),
+    // The page's host name is a secret too: whoever knows it can serve a page there.
+    secrets: () => [token, hookToken, pageHost.split('.')[0]!],
+    logTail: () => readLogTail(40),
+  });
+  activeReporter = errors;
 
   const stories = new StoryStore();
   stories.ensureColors();
@@ -235,7 +247,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   const stopped = new Promise<void>((r) => (resolveStopped = r));
   let stopping: Promise<void> | null = null;
 
-  const ws = attachWebSocket(server, { manager, stories, rules, closed, schedules, usage, activity, port, pageHost, token });
+  const ws = attachWebSocket(server, { manager, stories, rules, closed, schedules, usage, activity, errors, port, pageHost, token });
   const ticker = setInterval(() => {
     manager.tick();
     schedules.tick();
@@ -267,6 +279,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
       const recorded = readServerState();
       if (recorded && recorded.pid === process.pid && recorded.startedAt === startedAt) clearServerState();
       log('stopped');
+      if (activeReporter === errors) activeReporter = null;
       resolveStopped();
     })();
     return stopping;
@@ -289,6 +302,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
       openEditor: opts.openEditor ?? openInEditor,
       onClaudeStatus: (id) => delivery.ready(id),
       onPromptSubmitted: (id) => delivery.submitted(id),
+      errors,
       port,
       pageHost,
       token,
@@ -303,7 +317,32 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   writeServerState({ pid: process.pid, port, pageHost, token, hookToken, startedAt });
   log(`listening on http://${HOST}:${port}, page on http://${pageHost}:${port}`);
 
-  return { port, pageHost, token, address: (server.address() as AddressInfo).address, stop, stopped };
+  return { port, pageHost, token, address: (server.address() as AddressInfo).address, errors, stop, stopped };
+}
+
+/** The reporter of the server running in this process, for errors no request or task catches. */
+let activeReporter: ErrorReporter | null = null;
+
+function readLogTail(lines: number): string {
+  try {
+    return readFileSync(logPath(), 'utf8').trimEnd().split('\n').slice(-lines).join('\n');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Writes a report for an error nothing else caught, and logs where it is. Before the server is up
+ * (or after it stopped) the report is written without the secrets of a run, as there are none.
+ */
+export function reportUncaught(source: 'server' | 'startup', e: unknown, context: string): string | null {
+  let reporter = activeReporter;
+  try {
+    reporter ??= new ErrorReporter({ dir: errorsDir(dataDir()), now: Date.now, version: packageVersion(), logTail: () => readLogTail(40) });
+    return reporter.report({ source, error: e, context })?.file ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function isMainModule(): boolean {
@@ -320,8 +359,15 @@ if (isMainModule()) {
   const i = process.argv.indexOf('--port');
   const port = i >= 0 ? Number(process.argv[i + 1]) : undefined;
   // One failing session must not take the others down with it.
-  process.on('uncaughtException', (e) => console.error(`${new Date().toISOString()} uncaught: ${e.stack ?? e}`));
-  process.on('unhandledRejection', (e) => console.error(`${new Date().toISOString()} unhandled: ${String(e)}`));
+  // Each is written to a report of its own as well, and the page shows where.
+  process.on('uncaughtException', (e) => {
+    const file = reportUncaught('server', e, 'uncaught exception');
+    console.error(`${new Date().toISOString()} uncaught: ${e.stack ?? e}${file ? `\n  report: ${file}` : ''}`);
+  });
+  process.on('unhandledRejection', (e) => {
+    const file = reportUncaught('server', e, 'unhandled promise rejection');
+    console.error(`${new Date().toISOString()} unhandled: ${String(e)}${file ? `\n  report: ${file}` : ''}`);
+  });
   startServer({ port: Number.isInteger(port) ? port : undefined })
     .then((running) => {
       const shutdown = (): void => void running.stop();
@@ -330,7 +376,8 @@ if (isMainModule()) {
       void running.stopped.then(() => process.exit(0));
     })
     .catch((e: unknown) => {
-      console.error(`${new Date().toISOString()} failed to start: ${(e as Error).stack ?? e}`);
+      const file = reportUncaught('startup', e, 'starting the server');
+      console.error(`${new Date().toISOString()} failed to start: ${(e as Error).stack ?? e}${file ? `\n  report: ${file}` : ''}`);
       process.exit(1);
     });
 }
