@@ -34,7 +34,7 @@ jobs:
     outputs:
       version: ${{ steps.next.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Work out the version
         id: next
@@ -52,7 +52,7 @@ jobs:
     needs: version
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - name: Windows (.exe)
@@ -70,9 +70,9 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -83,8 +83,13 @@ jobs:
       - name: Install
         run: npm ci --no-audit --no-fund
 
+      # On Windows the runner's TEMP is a short 8.3 name (C:\Users\RUNNER~1\...), which git
+      # reports back in its long form: tests comparing folders would see two places.
       - name: Test
-        run: npm test
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then export TEMP="$RUNNER_TEMP" TMP="$RUNNER_TEMP"; fi
+          npm test
 
       - name: Install the desktop app's tools
         working-directory: desktop
@@ -111,8 +116,11 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  # Only main makes releases: a run started by hand on another branch builds the installers and
+  # stops there, its files left as artifacts of the run.
   release:
     name: Release
+    if: github.ref == 'refs/heads/main'
     needs: [version, build]
     runs-on: ubuntu-latest
     permissions:
