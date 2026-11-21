@@ -21,6 +21,7 @@ import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isRepoName } from '../updates.js';
 
 const desktop = join(dirname(fileURLToPath(import.meta.url)), '..');
 const root = join(desktop, '..');
@@ -85,7 +86,8 @@ const electronVersion = existsSync(electronPkg) ? JSON.parse(readFileSync(electr
 // Where "Check for updates…" looks for releases: SHELLYARD_UPDATE_REPO (owner/name, set by the
 // workflow to the repository it runs in), else the app's default.
 const updateRepo = process.env.SHELLYARD_UPDATE_REPO ?? '';
-if (updateRepo && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(updateRepo)) throw new Error(`SHELLYARD_UPDATE_REPO must be owner/name, not "${updateRepo}".`);
+// The same rule as the app's: a name it would refuse must not pass the build silently.
+if (updateRepo && !isRepoName(updateRepo)) throw new Error(`SHELLYARD_UPDATE_REPO must be owner/name, not "${updateRepo}".`);
 writeFileSync(
   join(stage, 'package.json'),
   JSON.stringify(

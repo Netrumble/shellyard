@@ -304,15 +304,12 @@ export interface ScheduleRun {
   /** True for a run asked for by hand. */
   manual: boolean;
   /**
-   * When the session of the run first finished its turn after the prompt (or ended); null while
-   * it works, or when it never got its prompt. With `at`, how long the run took.
+   * When the run ended, for a run that ended while ShellYard followed it ('turn' or 'session');
+   * null otherwise. With `at`, how long the run took.
    */
   finishedAt: number | null;
-  /**
-   * True when the session ended or was closed before it finished its turn (by hand, by its
-   * program, or by a restart of ShellYard, after which a session comes back as a new one).
-   */
-  closed: boolean;
+  /** How the run ended (see RunEnd); null while it runs, or when it never had a session at work. */
+  endedBy: RunEnd | null;
   /** Claude Code's estimate of what the run's session cost until it finished; null when unknown. */
   costUsd: number | null;
   /** How long the run waited on the user (a permission or a question), in all. */
@@ -322,6 +319,14 @@ export interface ScheduleRun {
   /** When it was found waiting longer than the schedules allow (SCHEDULE_STUCK_AFTER_MS); null if never. */
   stuckAt: number | null;
 }
+
+/**
+ * How a scheduled run ended. 'turn': Claude Code finished its turn after the prompt. 'session':
+ * the session ended or was closed before that. 'restart': ShellYard stopped while it ran; a
+ * session comes back as a new one, so the run could not be followed further. 'unknown': it was
+ * saved before ShellYard followed runs.
+ */
+export type RunEnd = 'turn' | 'session' | 'restart' | 'unknown';
 
 /** How long a scheduled run may wait on the user before it is reported as stuck. */
 export const SCHEDULE_STUCK_AFTER_MS = 10 * 60 * 1000;

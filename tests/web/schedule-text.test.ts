@@ -45,12 +45,14 @@ describe('the date-and-time field', () => {
 
 describe('runResult', () => {
   const MIN = 60_000;
-  const base: ScheduleRun = { at: 0, outcome: 'delivered', detail: null, sessionId: 's', manual: false, finishedAt: null, closed: false, costUsd: null, blockedMs: 0, blockedSince: null, stuckAt: null };
+  const base: ScheduleRun = { at: 0, outcome: 'delivered', detail: null, sessionId: 's', manual: false, finishedAt: null, endedBy: null, costUsd: null, blockedMs: 0, blockedSince: null, stuckAt: null };
 
   it('says how long a finished run took, what it cost and how long it waited on you', () => {
-    expect(runResult({ ...base, finishedAt: 4 * MIN, costUsd: 0.4234, blockedMs: 2 * MIN }, 10 * MIN)).toEqual({ text: 'Done in 4m · $0.42 · waited on you 2m', tone: 'tone-ok', needsYou: false });
-    expect(runResult({ ...base, finishedAt: 30_000, costUsd: 12.6 }, MIN).text).toBe('Done in 30s · $13');
-    expect(runResult({ ...base, finishedAt: 6 * MIN, closed: true }, 10 * MIN)).toMatchObject({ text: 'Ended after 6m, before finishing', tone: 'tone-muted' });
+    expect(runResult({ ...base, finishedAt: 4 * MIN, endedBy: 'turn', costUsd: 0.4234, blockedMs: 2 * MIN }, 10 * MIN)).toEqual({ text: 'Done in 4m · $0.42 · waited on you 2m', tone: 'tone-ok', needsYou: false });
+    expect(runResult({ ...base, finishedAt: 30_000, endedBy: 'turn', costUsd: 12.6 }, MIN).text).toBe('Done in 30s · $13');
+    expect(runResult({ ...base, finishedAt: 6 * MIN, endedBy: 'session' }, 10 * MIN)).toMatchObject({ text: 'Ended after 6m, before finishing', tone: 'tone-muted' });
+    expect(runResult({ ...base, endedBy: 'restart', costUsd: 0.2 }, 10 * MIN)).toMatchObject({ text: 'Stopped with ShellYard, before finishing · $0.20', tone: 'tone-muted' });
+    expect(runResult({ ...base, endedBy: 'unknown' }, 10 * MIN).text).toBe('');
   });
 
   it('says a run waits on you, more loudly once it is stuck', () => {
@@ -63,11 +65,13 @@ describe('runResult', () => {
     expect(runResult({ ...base, outcome: 'started' }, 3 * MIN).text).toBe('Working for 3m');
     expect(runResult({ ...base, outcome: 'failed', sessionId: null }, MIN).text).toBe('');
     expect(runResult({ ...base, outcome: 'undelivered' }, MIN).text).toBe('');
+    // The session ended while the prompt was on its way, which was then found not given.
+    expect(runResult({ ...base, outcome: 'undelivered', finishedAt: 20_000, endedBy: 'session' }, MIN).text).toBe('');
   });
 });
 
 describe('newlyStuck', () => {
-  const run = (over: Partial<ScheduleRun>): ScheduleRun => ({ at: 1, outcome: 'delivered', detail: null, sessionId: 's', manual: false, finishedAt: null, closed: false, costUsd: null, blockedMs: 0, blockedSince: 1, stuckAt: null, ...over });
+  const run = (over: Partial<ScheduleRun>): ScheduleRun => ({ at: 1, outcome: 'delivered', detail: null, sessionId: 's', manual: false, finishedAt: null, endedBy: null, costUsd: null, blockedMs: 0, blockedSince: 1, stuckAt: null, ...over });
   const schedule = (runs: ScheduleRun[]) => ({ id: 'a', name: 'Nightly', runs }) as unknown as Schedule;
 
   it('finds a run once, when it becomes stuck while still waiting', () => {

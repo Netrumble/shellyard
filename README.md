@@ -316,8 +316,11 @@ or did not confirm it took the prompt), *Could not start* (with the reason) or *
 
 Beside that, a run says how it is going or went: *Working for 3m*, *Done in 4m · $0.42 · waited on
 you 2m*, or *Waiting on you for 12m*. A run is done when Claude Code finishes its turn after the
-prompt; its duration counts from the start of the run. A session closed or ended before that,
-or replaced by a new one when ShellYard restarts, makes the run *Ended after 6m, before finishing*. The cost is Claude
+prompt; its duration counts from the start of the run. A session closed or ended before that
+makes the run *Ended after 6m, before finishing*. A run still at work when ShellYard stops is
+*Stopped with ShellYard, before finishing*: its session comes back as a new one, so the run is
+not followed further, and the time ShellYard was off is not counted as waiting on you. Runs
+from before ShellYard followed them say nothing of how they went. The cost is Claude
 Code's own estimate for the session until then (see Usage). A run that waits on a permission or a
 question for more than 10 minutes is marked, its schedule stands out in the list, and a
 notification reminds you once, even if the page is in view, since the first one went unanswered. **Run

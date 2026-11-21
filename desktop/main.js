@@ -66,7 +66,13 @@ function writeSettings(patch) {
   }
 }
 
-let checking = false;
+/** The check under way, if any: a check asked for by hand waits for it, then asks again. */
+let checking = null;
+/**
+ * The notification of a new version, kept until it is clicked or closed: Electron drops the
+ * click handler of a notification nothing refers to any more.
+ */
+let updateNotification = null;
 let firstCheck = null;
 let dailyCheck = null;
 
@@ -97,8 +103,23 @@ async function offerUpdate(update) {
  * automatic check, it says so once per version, as a notification, and keeps quiet otherwise.
  */
 async function checkUpdates({ manual }) {
-  if (checking) return;
-  checking = true;
+  // The automatic check is not repeated while one is under way; one asked for by hand waits for
+  // it and then answers, so that asking always gets an answer.
+  if (checking && !manual) return;
+  const previous = checking;
+  const mine = (async () => {
+    if (previous) await previous.catch(() => undefined);
+    await runCheck(manual);
+  })();
+  checking = mine;
+  try {
+    await mine;
+  } finally {
+    if (checking === mine) checking = null;
+  }
+}
+
+async function runCheck(manual) {
   try {
     const update = await checkForUpdate({ repo: updateRepo(), current: app.getVersion() });
     if (!update) {
@@ -110,7 +131,15 @@ async function checkUpdates({ manual }) {
       writeSettings({ notifiedVersion: update.version });
       if (Notification.isSupported()) {
         const n = new Notification({ title: `ShellYard ${update.version} is available`, body: 'Click to see how to get it.', icon });
-        n.on('click', () => void offerUpdate(update));
+        updateNotification = n;
+        const forget = () => {
+          if (updateNotification === n) updateNotification = null;
+        };
+        n.on('click', () => {
+          forget();
+          void offerUpdate(update);
+        });
+        n.on('close', forget);
         n.show();
         return;
       }
@@ -119,8 +148,6 @@ async function checkUpdates({ manual }) {
   } catch (e) {
     if (manual) await dialog.showMessageBox({ type: 'warning', title: 'ShellYard', message: 'Could not check for updates', detail: String(e?.message ?? e), buttons: ['OK'], noLink: true });
     else console.error('ShellYard: the update check failed:', e);
-  } finally {
-    checking = false;
   }
 }
 

@@ -246,12 +246,12 @@ export async function saveSoundTrim(id: string, trim: { start: number; end: numb
   }
 }
 
-/** Runs on every change of the session list, with the list before and after. */
 /** Called with the schedules before and after each update from the server, after the first. */
 export function onSchedulesChange(cb: (prev: Schedule[], next: Schedule[]) => void): void {
   scheduleListeners.push(cb);
 }
 
+/** Runs on every change of the session list, with the list before and after. */
 export function onSessionsChange(cb: (prev: SessionInfo[], next: SessionInfo[]) => void): void {
   sessionListeners.push(cb);
 }

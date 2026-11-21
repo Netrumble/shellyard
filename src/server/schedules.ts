@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { SCHEDULE_PERMISSION_MODES, SCHEDULE_STUCK_AFTER_MS, type Schedule, type ScheduleOutcome, type SchedulePermissionMode, type ScheduleRun, type ScheduleWhen } from '../shared/types.js';
+import { SCHEDULE_PERMISSION_MODES, SCHEDULE_STUCK_AFTER_MS, type RunEnd, type Schedule, type ScheduleOutcome, type SchedulePermissionMode, type ScheduleRun, type ScheduleWhen } from '../shared/types.js';
 import { nextRun, parseCron, parseTime } from './schedule-time.js';
 
 // Schedules: a prompt given to a new Claude Code session at set times. This file decides
@@ -128,29 +128,45 @@ const OUTCOMES: ScheduleOutcome[] = ['started', 'delivered', 'undelivered', 'fai
 
 /** A run as it is recorded when it starts: nothing known yet of how it went. */
 function newRun(at: number, outcome: ScheduleOutcome, detail: string | null, sessionId: string | null, manual: boolean): ScheduleRun {
-  return { at, outcome, detail, sessionId, manual, finishedAt: null, closed: false, costUsd: null, blockedMs: 0, blockedSince: null, stuckAt: null };
+  return { at, outcome, detail, sessionId, manual, finishedAt: null, endedBy: null, costUsd: null, blockedMs: 0, blockedSince: null, stuckAt: null };
 }
 
 const moment = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null);
 
+const RUN_ENDS: RunEnd[] = ['turn', 'session', 'restart', 'unknown'];
+
+/** Whether a run had a session at work: it has one, and got its prompt or may still. */
+const atWork = (r: ScheduleRun): boolean => r.sessionId !== null && (r.outcome === 'started' || r.outcome === 'delivered');
+
+/** A run whose session is still followed: at work, and not ended. */
+const followed = (r: ScheduleRun): boolean => atWork(r) && r.endedBy === null;
+
+/**
+ * A run as read from the file, when ShellYard starts. A run that was still followed then belongs
+ * to a session of the server that stopped: sessions come back as new ones, so it is not followed
+ * any more ('restart'), and the time the server was off is not counted as waiting on the user.
+ * A run saved before runs were followed is 'unknown': nothing is said of how it went.
+ */
 function toRun(v: unknown): ScheduleRun | null {
   if (!isObject(v) || typeof v.at !== 'number' || !Number.isFinite(v.at) || !OUTCOMES.includes(v.outcome as ScheduleOutcome)) return null;
-  return {
+  const run: ScheduleRun = {
     ...newRun(v.at, v.outcome as ScheduleOutcome, typeof v.detail === 'string' ? v.detail.slice(0, 500) : null, typeof v.sessionId === 'string' ? v.sessionId : null, v.manual === true),
     finishedAt: moment(v.finishedAt),
-    closed: v.closed === true,
+    endedBy: RUN_ENDS.includes(v.endedBy as RunEnd) ? (v.endedBy as RunEnd) : null,
     costUsd: moment(v.costUsd),
     blockedMs: moment(v.blockedMs) ?? 0,
-    blockedSince: moment(v.blockedSince),
+    blockedSince: null,
     stuckAt: moment(v.stuckAt),
   };
+  if (followed(run)) run.endedBy = 'endedBy' in v ? 'restart' : 'unknown';
+  return run;
 }
-
-/** A run whose session is still followed: it has one, got its prompt or may still, and has not finished. */
-const followed = (r: ScheduleRun): boolean => r.sessionId !== null && r.finishedAt === null && (r.outcome === 'started' || r.outcome === 'delivered');
 
 /** How long after its session finished a run still takes the cost Claude Code reports: the last report comes a little late. */
 const COST_GRACE_MS = 30_000;
+
+/** How often the cost of a run at work is saved and shown, at most. */
+const COST_SAVE_EVERY_MS = 15_000;
 
 /** What the store needs to know of a session to follow the run it belongs to. */
 export interface RunSessionState {
@@ -182,6 +198,8 @@ const copy = (s: Schedule): Schedule => ({ ...s, when: { ...s.when, ...('days' i
 export class ScheduleStore {
   private schedules: Schedule[];
   private readonly changeCbs: Array<(schedules: Schedule[]) => void> = [];
+  /** When the cost of each run at work was last saved. */
+  private readonly costSavedAt = new WeakMap<ScheduleRun, number>();
 
   constructor(private readonly deps: ScheduleDeps) {
     this.schedules = this.load();
@@ -352,7 +370,7 @@ export class ScheduleStore {
         const done = run.outcome === 'delivered' && session !== undefined && (session.status === 'idle' || (session.status === 'attention' && session.reason === 'finished'));
         if (ended || done) {
           run.finishedAt = now;
-          run.closed = !done;
+          run.endedBy = done ? 'turn' : 'session';
           any = true;
         }
       }
@@ -361,16 +379,23 @@ export class ScheduleStore {
   }
 
   /**
-   * Takes the cost Claude Code reports for a session, for the run that opened it: until it
-   * finishes, and a little after. Kept without saving, as reports come every few seconds; it is
-   * saved with the next change of the run.
+   * Takes the cost Claude Code reports for a session, for the run that opened it: while it runs,
+   * and a little after it ended, as the last report comes late. Reports come every few seconds:
+   * while the run works its cost is saved (and shown) at most every COST_SAVE_EVERY_MS; once it
+   * has ended, at once.
    */
   observeCost(sessionId: string, costUsd: number | null): void {
     if (costUsd === null || !Number.isFinite(costUsd) || costUsd < 0) return;
     const run = this.runOf(sessionId);
-    if (!run || run.sessionId === null) return;
-    if (run.finishedAt !== null && this.deps.now() - run.finishedAt > COST_GRACE_MS) return;
+    if (!run || !atWork(run) || run.costUsd === costUsd) return;
+    const now = this.deps.now();
+    const running = run.endedBy === null;
+    const late = run.finishedAt !== null && (run.endedBy === 'turn' || run.endedBy === 'session') && now - run.finishedAt <= COST_GRACE_MS;
+    if (!running && !late) return;
     run.costUsd = costUsd;
+    if (running && now - (this.costSavedAt.get(run) ?? -Infinity) < COST_SAVE_EVERY_MS) return;
+    this.costSavedAt.set(run, now);
+    this.changed();
   }
 
   /** Runs a schedule now, whether or not it is enabled; its own timetable is not moved. */

@@ -79,7 +79,7 @@ describe('ScheduleStore', () => {
     store.tick();
     expect(launches.map((l) => l.id)).toEqual([s.id]);
     const after = store.list()[0]!;
-    expect(after.runs).toEqual([{ at: now, outcome: 'started', detail: null, sessionId: 'session-1', manual: false, finishedAt: null, closed: false, costUsd: null, blockedMs: 0, blockedSince: null, stuckAt: null }]);
+    expect(after.runs).toEqual([{ at: now, outcome: 'started', detail: null, sessionId: 'session-1', manual: false, finishedAt: null, endedBy: null, costUsd: null, blockedMs: 0, blockedSince: null, stuckAt: null }]);
     expect(after.nextRunAt).toBe(now + HOUR);
     store.tick();
     expect(launches).toHaveLength(1);
@@ -104,7 +104,7 @@ describe('ScheduleStore', () => {
       now += 4 * MIN;
       store.observeCost('session-1', 0.42);
       store.observe(state('attention', 'finished'));
-      expect(run(store)).toMatchObject({ finishedAt: start + 4 * MIN, closed: false, costUsd: 0.42, blockedMs: 0 });
+      expect(run(store)).toMatchObject({ finishedAt: start + 4 * MIN, endedBy: 'turn', costUsd: 0.42, blockedMs: 0 });
       // A report coming a little late still counts; work done much later by hand does not.
       now += 10_000;
       store.observeCost('session-1', 0.45);
@@ -129,9 +129,9 @@ describe('ScheduleStore', () => {
       store.observe(state('working'));
       expect(run(store)).toMatchObject({ blockedSince: null, blockedMs: 3 * MIN });
       now += MIN;
-      // Gone from the list: closed, or replaced by a new session after a restart.
+      // Gone from the list: closed by hand or by its program.
       store.observe([]);
-      expect(run(store)).toMatchObject({ finishedAt: now, closed: true });
+      expect(run(store)).toMatchObject({ finishedAt: now, endedBy: 'session' });
     });
 
     it('reports a run that waits on the user too long, once', () => {
@@ -156,13 +156,66 @@ describe('ScheduleStore', () => {
       store.observeCost('session-1', 0.3);
       now += 2 * MIN;
       store.observe(state('attention', 'finished'));
-      expect(make().list()[0]!.runs[0]).toMatchObject({ finishedAt: start + 2 * MIN, costUsd: 0.3, blockedMs: 0, stuckAt: null });
+      expect(make().list()[0]!.runs[0]).toMatchObject({ finishedAt: start + 2 * MIN, endedBy: 'turn', costUsd: 0.3, blockedMs: 0, stuckAt: null });
     });
 
-    it('reads an older file, whose runs say nothing of how they went', () => {
+    it('stops following a run left at work when ShellYard stopped, without counting the time it was off', () => {
+      const { store, id } = started();
+      store.resolveRun(id, 'session-1', 'delivered', null);
+      now += MIN;
+      store.observe(state('attention', 'blocked'));
+      now += 2 * MIN;
+      store.observe(state('working'));
+      now += MIN;
+      store.observe(state('attention', 'blocked'));
+      // ShellYard stops here, and starts again fifteen hours later.
+      now += 15 * HOUR;
+      const again = make();
+      expect(again.list()[0]!.runs[0]).toMatchObject({ endedBy: 'restart', finishedAt: null, blockedSince: null, blockedMs: 2 * MIN, stuckAt: null });
+      // Neither the sessions coming back nor the clock make anything of it any more (the tick
+      // also starts the run now due, on a session of its own).
+      again.observe([]);
+      now += SCHEDULE_STUCK_AFTER_MS;
+      again.tick();
+      expect(again.list()[0]!.runs.find((r) => r.sessionId === 'session-1')).toMatchObject({ endedBy: 'restart', finishedAt: null, stuckAt: null });
+    });
+
+    it('reads an older file without saying how its runs went', () => {
       fresh();
-      writeFileSync(join(home.dir(), 'schedules.json'), JSON.stringify({ version: 1, schedules: [{ id: 'a', ...input(), runs: [{ at: 5, outcome: 'delivered', detail: null, sessionId: 'x', manual: false }] }] }));
-      expect(make().list()[0]!.runs[0]).toEqual({ at: 5, outcome: 'delivered', detail: null, sessionId: 'x', manual: false, finishedAt: null, closed: false, costUsd: null, blockedMs: 0, blockedSince: null, stuckAt: null });
+      const runs = [
+        { at: 5, outcome: 'delivered', detail: null, sessionId: 'x', manual: false },
+        { at: 4, outcome: 'failed', detail: 'no launcher', sessionId: null, manual: false },
+      ];
+      writeFileSync(join(home.dir(), 'schedules.json'), JSON.stringify({ version: 1, schedules: [{ id: 'a', ...input(), runs }] }));
+      const store = make();
+      expect(store.list()[0]!.runs.map((r) => r.endedBy)).toEqual(['unknown', null]);
+      store.observe([]);
+      expect(store.list()[0]!.runs[0]).toMatchObject({ endedBy: 'unknown', finishedAt: null });
+    });
+
+    it('saves the cost while the run works, now and then, and at once when it comes late', () => {
+      const { store, id } = started();
+      store.resolveRun(id, 'session-1', 'delivered', null);
+      const saved = (): number | null => make().list()[0]!.runs[0]!.costUsd;
+      store.observeCost('session-1', 0.1);
+      expect(saved()).toBe(0.1);
+      now += 5_000;
+      store.observeCost('session-1', 0.2);
+      expect(saved()).toBe(0.1);
+      now += 15_000;
+      store.observeCost('session-1', 0.3);
+      expect(saved()).toBe(0.3);
+      store.observe(state('attention', 'finished'));
+      now += 1_000;
+      store.observeCost('session-1', 0.35);
+      expect(saved()).toBe(0.35);
+    });
+
+    it('says nothing more of a run whose session ended before the prompt was given', () => {
+      const { store, id } = started();
+      store.observe([]);
+      store.resolveRun(id, 'session-1', 'undelivered', 'Claude Code did not become ready.');
+      expect(run(store)).toMatchObject({ outcome: 'undelivered', endedBy: 'session' });
     });
   });
 
@@ -293,7 +346,9 @@ describe('ScheduleStore', () => {
       now += HOUR;
       store.tick();
       const again = make();
-      expect(again.list()).toEqual(store.list());
+      // The run started before the restart is not followed any more: its session comes back as a new one.
+      const before = store.list().map((x) => ({ ...x, runs: x.runs.map((r) => ({ ...r, endedBy: 'restart' as const })) }));
+      expect(again.list()).toEqual(before);
       expect(again.list()[0]!.id).toBe(s.id);
     });
 

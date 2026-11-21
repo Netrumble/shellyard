@@ -324,6 +324,8 @@ describe.skipIf(!hasGit)('git worktrees', () => {
     it.runIf(process.platform === 'win32')('copes with a folder really held as the working folder of a process', async () => {
       await createWorktree(repo, { path: wtDir, branch: 'feat', newBranch: true });
       const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: wtDir, stdio: 'ignore' });
+      // Listened for from the start: the process may end before the cleanup (it may fail to start).
+      const exited = new Promise((r) => child.once('exit', r));
       try {
         await new Promise((r) => setTimeout(r, 300));
         const r = await removeWorktree(repo, wtDir, { force: false, deleteBranch: true });
@@ -333,7 +335,6 @@ describe.skipIf(!hasGit)('git worktrees', () => {
         if (existsSync(wtDir)) expect(r.warning).toMatch(/could not be fully deleted/);
       } finally {
         // The folder is free only once the process has really ended, not when it is told to.
-        const exited = new Promise((r) => child.once('exit', r));
         child.kill();
         await exited;
       }

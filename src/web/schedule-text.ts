@@ -68,9 +68,20 @@ export function runResult(run: ScheduleRun, now: number): { text: string; tone: 
   const cost = run.costUsd !== null && run.costUsd > 0 ? costLabel(run.costUsd) : null;
   const waited = run.blockedMs > 0 ? `waited on you ${durationLabel(run.blockedMs)}` : null;
   const join = (...parts: Array<string | null>): string => parts.filter(Boolean).join(' · ');
-  if (run.finishedAt !== null && run.closed) return { text: join(`Ended after ${durationLabel(run.finishedAt - run.at)}, before finishing`, cost, waited), tone: 'tone-muted', needsYou: false };
-  if (run.finishedAt !== null) return { text: join(`Done in ${durationLabel(run.finishedAt - run.at)}`, cost, waited), tone: 'tone-ok', needsYou: false };
-  if (run.sessionId === null || (run.outcome !== 'started' && run.outcome !== 'delivered')) return { text: '', tone: '', needsYou: false };
+  const none = { text: '', tone: '', needsYou: false };
+  // A run that never had a session at work (or whose prompt was not given) has nothing to add.
+  if (run.sessionId === null || (run.outcome !== 'started' && run.outcome !== 'delivered')) return none;
+  const took = run.finishedAt !== null ? durationLabel(run.finishedAt - run.at) : '';
+  switch (run.endedBy) {
+    case 'turn':
+      return { text: join(`Done in ${took}`, cost, waited), tone: 'tone-ok', needsYou: false };
+    case 'session':
+      return { text: join(`Ended after ${took}, before finishing`, cost, waited), tone: 'tone-muted', needsYou: false };
+    case 'restart':
+      return { text: join('Stopped with ShellYard, before finishing', cost, waited), tone: 'tone-muted', needsYou: false };
+    case 'unknown':
+      return none;
+  }
   if (run.blockedSince !== null) {
     const text = join(`Waiting on you for ${durationLabel(now - run.blockedSince)}`, cost);
     return { text, tone: run.stuckAt !== null ? 'tone-dead' : 'tone-warn', needsYou: true };
