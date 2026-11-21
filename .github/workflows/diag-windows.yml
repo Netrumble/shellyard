@@ -1,0 +1,35 @@
+# TEMPORARY: finds what keeps the test folders busy on the Windows runner. To be removed.
+name: Diagnose Windows tests
+
+on:
+  # A workflow started by hand must exist on main; a push to this branch starts it instead.
+  push:
+    branches: [macos-search-ci]
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Get Sysinternals handle
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://download.sysinternals.com/files/Handle.zip -OutFile "$env:RUNNER_TEMP\handle.zip"
+          Expand-Archive "$env:RUNNER_TEMP\handle.zip" -DestinationPath "$env:RUNNER_TEMP\handle"
+          "SHELLYARD_DIAG=$env:RUNNER_TEMP\handle\handle64.exe" >> $env:GITHUB_ENV
+      - name: Git configuration
+        shell: bash
+        run: git --version; git config --show-origin --list --system --global || true
+      - name: One failing file
+        shell: bash
+        run: |
+          export TEMP="$RUNNER_TEMP" TMP="$RUNNER_TEMP"
+          npx vitest run tests/server/fonts.test.ts --reporter=verbose 2>&1 | tail -150

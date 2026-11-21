@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,7 +12,24 @@ import type { PtyFactory, PtyLike } from '../src/server/pty-session.js';
  * machine (a CI runner): the deletion is tried again for up to six seconds.
  */
 export function removeDir(dir: string): void {
-  rmSync(dir, { recursive: true, force: true, maxRetries: 60, retryDelay: 100 });
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 60, retryDelay: 100 });
+  } catch (e) {
+    // TEMPORARY diagnostics for the Windows CI runner: who holds the folder.
+    if (process.env.SHELLYARD_DIAG && process.platform === 'win32') {
+      const run = (file: string, args: string[]): string => {
+        try {
+          return execFileSync(file, args, { encoding: 'utf8', timeout: 20000 });
+        } catch (err) {
+          return `(${file} failed: ${(err as Error).message})`;
+        }
+      };
+      console.error(`DIAG busy folder ${dir}`);
+      console.error(`DIAG handle:\n${run(process.env.SHELLYARD_DIAG, ['-accepteula', '-nobanner', dir])}`);
+      console.error(`DIAG processes:\n${run('powershell', ['-NoProfile', '-Command', 'Get-CimInstance Win32_Process | Where-Object { $_.Name -match "git|node|sh|bash|code|cmd|conhost" } | Select-Object ProcessId,ParentProcessId,Name,CommandLine | Format-List | Out-String -Width 400'])}`);
+    }
+    throw e;
+  }
 }
 
 /** Gives each test its own data folder through SHELLYARD_HOME, so the real one is never touched. */
