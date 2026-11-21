@@ -7,6 +7,8 @@ ShellYard starts real terminal processes on your machine (PowerShell, bash, `cla
 and shows them in a local web page. Each process is the same one you would get in a terminal
 window: your profile, your PATH, your permissions. The page is its screen and keyboard.
 
+![ShellYard: three Claude Code sessions ask for permission, they are answered from the queue with the keyboard, and they go back to work](docs/media/shellyard-demo.gif)
+
 > [!NOTE]
 > **Is it safe?** ShellYard stays on your machine and is built so that nothing else can use it:
 > - **Nothing leaves your PC.** The server listens on `127.0.0.1` only: no other computer can
@@ -153,6 +155,13 @@ running when you close the browser tab. Open the page again with `shellyard`.
 > started again at the next start (see below), so close in ShellYard the shells you no longer want.
 
 ## What you see
+
+| | |
+|---|---|
+| ![The board: the sessions waiting for you first, then the areas](docs/media/board.png) | ![Needs attention: the queue of requests, with the live terminal and the answers](docs/media/needs-attention.png) |
+| **Board** | **Needs attention** |
+| ![Terminals: every session side by side](docs/media/terminals.png) | ![Timeline: the last hour of each session](docs/media/timeline.png) |
+| **Terminals** | **Timeline** |
 
 - **Board** — the opening page. It starts with the sessions waiting for you, as cards with a
   wait timer and the answers that fit (allow once, deny, always in this area). The areas follow,
