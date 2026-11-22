@@ -7,7 +7,7 @@ ShellYard starts real terminal processes on your machine (PowerShell, bash, `cla
 and shows them in a local web page. Each process is the same one you would get in a terminal
 window: your profile, your PATH, your permissions. The page is its screen and keyboard.
 
-![ShellYard: three Claude Code sessions ask for permission, they are answered from the queue with the keyboard, and they go back to work](docs/media/shellyard-demo.gif)
+![ShellYard: three Claude Code sessions ask for permission, they are answered from the queue with the keyboard, and they go back to work](https://raw.githubusercontent.com/Netrumble/shellyard/main/docs/media/shellyard-demo.gif)
 
 > [!NOTE]
 > **Is it safe?** ShellYard stays on your machine and is built so that nothing else can use it:
@@ -158,9 +158,9 @@ running when you close the browser tab. Open the page again with `shellyard`.
 
 | | |
 |---|---|
-| ![The board: the sessions waiting for you first, then the areas](docs/media/board.png) | ![Needs attention: the queue of requests, with the live terminal and the answers](docs/media/needs-attention.png) |
+| ![The board: the sessions waiting for you first, then the areas](https://raw.githubusercontent.com/Netrumble/shellyard/main/docs/media/board.png) | ![Needs attention: the queue of requests, with the live terminal and the answers](https://raw.githubusercontent.com/Netrumble/shellyard/main/docs/media/needs-attention.png) |
 | **Board** | **Needs attention** |
-| ![Terminals: every session side by side](docs/media/terminals.png) | ![Timeline: the last hour of each session](docs/media/timeline.png) |
+| ![Terminals: every session side by side](https://raw.githubusercontent.com/Netrumble/shellyard/main/docs/media/terminals.png) | ![Timeline: the last hour of each session](https://raw.githubusercontent.com/Netrumble/shellyard/main/docs/media/timeline.png) |
 | **Terminals** | **Timeline** |
 
 - **Board** — the opening page. It starts with the sessions waiting for you, as cards with a
