@@ -41,9 +41,23 @@ export class SwipeTracker {
 /** What of the terminal a swipe needs: its rows, and whether a program has taken the scrolling. */
 export interface ScrollTarget {
   readonly rows: number;
-  readonly buffer: { readonly active: { readonly type: 'normal' | 'alternate' } };
+  readonly buffer: { readonly active: { readonly type: 'normal' | 'alternate'; readonly viewportY: number; readonly baseY: number } };
   readonly modes: { readonly mouseTrackingMode: 'none' | 'x10' | 'vt200' | 'drag' | 'any' };
   scrollLines(amount: number): void;
+}
+
+/**
+ * Who a swipe belongs to, decided once when it starts to move: the terminal, or the page around
+ * it. The page gets it when the history is already at its end in that direction (so stacked
+ * tiles can still be scrolled past), and when a full-screen program has the screen outside the
+ * single view, since such a program would otherwise keep the page from scrolling at all.
+ */
+export function swipeOwner(term: ScrollTarget, delta: number, single: boolean): 'terminal' | 'page' {
+  const { type, viewportY, baseY } = term.buffer.active;
+  if (type === 'alternate' || term.modes.mouseTrackingMode !== 'none') return single ? 'terminal' : 'page';
+  if (delta < 0 && viewportY <= 0) return 'page';
+  if (delta > 0 && viewportY >= baseY) return 'page';
+  return 'terminal';
 }
 
 /** Whole lines to scroll for the pixels gathered so far, and the pixels left over. */
@@ -58,9 +72,11 @@ export function attachTouchScroll(host: HTMLElement, term: ScrollTarget): () => 
   const swipe = new SwipeTracker();
   let finger: number | null = null;
   let pending = 0;
+  let owner: 'terminal' | 'page' | null = null;
 
   const onStart = (e: TouchEvent): void => {
     pending = 0;
+    owner = null;
     if (e.touches.length !== 1) {
       finger = null;
       swipe.end();
@@ -76,6 +92,8 @@ export function attachTouchScroll(host: HTMLElement, term: ScrollTarget): () => 
     if (!t) return;
     const delta = swipe.move(t.clientY);
     if (delta === null) return;
+    owner ??= swipeOwner(term, delta, host.closest('.tile.single') !== null);
+    if (owner === 'page') return;
     // The page must not scroll or bounce while the terminal does.
     e.preventDefault();
     const screen = host.querySelector<HTMLElement>('.xterm-screen');
@@ -92,6 +110,7 @@ export function attachTouchScroll(host: HTMLElement, term: ScrollTarget): () => 
   const onEnd = (): void => {
     finger = null;
     pending = 0;
+    owner = null;
     swipe.end();
   };
 

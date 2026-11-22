@@ -16,6 +16,7 @@ import { NewSessionDialog } from './components/NewSessionDialog.js';
 import { Sidebar } from './components/Sidebar.js';
 import { MenuIcon, SearchIcon } from './components/icons.js';
 import { SingleTerminal, TerminalsGrid } from './components/TerminalsGrid.js';
+import { useEscape } from './escape.js';
 import { paletteKey } from './palette.js';
 import { selectCounts } from './selectors.js';
 import { useStore } from './store.js';
@@ -30,14 +31,9 @@ export function App(): React.JSX.Element {
   // The sidebar as a drawer, on a phone: opened from the header, closed by going somewhere.
   const [menuOpen, setMenuOpen] = useState(false);
   useEffect(() => setMenuOpen(false), [view]);
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setMenuOpen(false);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [menuOpen]);
+  // On the Escape stack, so that a dialog opened from the drawer (New area, a launcher) closes
+  // first and alone.
+  useEscape(() => setMenuOpen(false), menuOpen);
   const newSession = (storyId?: string): void => {
     setMenuOpen(false);
     setDialog({ storyId });

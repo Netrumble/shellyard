@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { linesFor, SwipeTracker, TAP_SLOP_PX } from '../../src/web/touch-scroll.js';
+import { linesFor, SwipeTracker, swipeOwner, TAP_SLOP_PX } from '../../src/web/touch-scroll.js';
 
 describe('SwipeTracker', () => {
   it('leaves a small movement to be a tap', () => {
@@ -44,5 +44,34 @@ describe('linesFor', () => {
 
   it('does nothing while the terminal has no height', () => {
     expect(linesFor(100, 0)).toEqual({ lines: 0, rest: 0 });
+  });
+});
+
+describe('swipeOwner', () => {
+  const term = (type: 'normal' | 'alternate', viewportY: number, baseY: number, mouse: 'none' | 'vt200' = 'none') => ({
+    rows: 24,
+    buffer: { active: { type, viewportY, baseY } },
+    modes: { mouseTrackingMode: mouse },
+    scrollLines: () => undefined,
+  });
+
+  it('scrolls the history while there is history to scroll that way', () => {
+    expect(swipeOwner(term('normal', 50, 100), -10, false)).toBe('terminal');
+    expect(swipeOwner(term('normal', 50, 100), 10, false)).toBe('terminal');
+  });
+
+  it('leaves the swipe to the page at the top or the bottom of the history', () => {
+    expect(swipeOwner(term('normal', 0, 100), -10, false)).toBe('page');
+    expect(swipeOwner(term('normal', 100, 100), 10, false)).toBe('page');
+    // A fresh terminal with no history: every swipe scrolls the page.
+    expect(swipeOwner(term('normal', 0, 0), 10, false)).toBe('page');
+    expect(swipeOwner(term('normal', 0, 0), -10, false)).toBe('page');
+  });
+
+  it('gives a full-screen program the swipe only in the single view', () => {
+    expect(swipeOwner(term('alternate', 0, 0), 10, true)).toBe('terminal');
+    expect(swipeOwner(term('normal', 0, 0, 'vt200'), -10, true)).toBe('terminal');
+    expect(swipeOwner(term('alternate', 0, 0), 10, false)).toBe('page');
+    expect(swipeOwner(term('normal', 50, 100, 'vt200'), 10, false)).toBe('page');
   });
 });

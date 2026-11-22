@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { Profile, SessionKind, TerminalBackground, TerminalFont } from '../../shared/types.js';
 import { api } from '../api.js';
+import { useEscape } from '../escape.js';
 import { refreshMeta, useStore } from '../store.js';
 import { BackgroundEditor } from './BackgroundEditor.js';
 import { FolderPicker } from './FolderPicker.js';
@@ -31,13 +32,7 @@ export function ProfileDialog({ profile: given, onClose }: { profile?: Profile; 
   const isSaved = meta.saved.includes(profile.id);
   const isBuiltin = profile.id.startsWith('builtin-');
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  useEscape(onClose);
 
   const others = (): Profile[] => meta.profiles.filter((p) => meta.saved.includes(p.id) && p.id !== profile.id);
 
