@@ -7,19 +7,31 @@ import { api } from '../api.js';
  * browsing goes through the server, because a web page cannot ask the system's own folder
  * dialog for a full path.
  */
-export function FolderPicker(props: { value: string; onChange: (path: string) => void; placeholder?: string; labelledBy?: string }): React.JSX.Element {
-  const { value, onChange, placeholder, labelledBy } = props;
+export function FolderPicker(props: {
+  value: string;
+  onChange: (path: string) => void;
+  placeholder?: string;
+  labelledBy?: string;
+  /** Where browsing begins while the field is empty: the folder used when none is typed. */
+  start?: string;
+}): React.JSX.Element {
+  const { value, onChange, placeholder, labelledBy, start } = props;
   const [listing, setListing] = useState<FolderListing | null>(null);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const go = async (path?: string): Promise<void> => {
+  const go = async (path?: string, fallBackHome = false): Promise<void> => {
     setBusy(true);
     setError(null);
     try {
       setListing(await api.folders(path));
     } catch (e) {
+      // A default folder that is gone is no fault of the user: show the home folder instead.
+      if (fallBackHome && path) {
+        setBusy(false);
+        return go(undefined);
+      }
       setError((e as Error).message);
     } finally {
       setBusy(false);
@@ -32,8 +44,9 @@ export function FolderPicker(props: { value: string; onChange: (path: string) =>
       return;
     }
     setOpen(true);
-    // Start where the field points, or at the home folder; a path that is not there falls back to home.
-    void go(value.trim() || undefined).then(() => undefined);
+    // Start where the field points; empty, at the default folder, else the home folder.
+    const typed = value.trim();
+    void go(typed || start?.trim() || undefined, !typed).then(() => undefined);
   };
 
   const choose = (path: string): void => {

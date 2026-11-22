@@ -199,7 +199,7 @@ export function NewSessionDialog({ onClose, initialStoryId }: { onClose: () => v
 
         <div className="field">
           <span id="session-folder-label">Folder</span>
-          <FolderPicker value={cwd} onChange={setCwd} placeholder={story?.cwd || profile?.cwd || 'Your home folder'} labelledBy="session-folder-label" />
+          <FolderPicker value={cwd} onChange={setCwd} placeholder={story?.cwd || profile?.cwd || 'Your home folder'} start={story?.cwd || profile?.cwd} labelledBy="session-folder-label" />
         </div>
 
         {listing && offered.length > 1 && (

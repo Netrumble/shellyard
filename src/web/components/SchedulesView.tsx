@@ -196,7 +196,7 @@ function ScheduleDialog({ schedule, onClose }: { schedule?: Schedule; onClose: (
 
         <div className="field">
           <span id="schedule-folder-label">Folder</span>
-          <FolderPicker value={cwd} onChange={setCwd} placeholder={area?.cwd || profile?.cwd || 'Your home folder'} labelledBy="schedule-folder-label" />
+          <FolderPicker value={cwd} onChange={setCwd} placeholder={area?.cwd || profile?.cwd || 'Your home folder'} start={area?.cwd || profile?.cwd} labelledBy="schedule-folder-label" />
         </div>
 
         <label>
