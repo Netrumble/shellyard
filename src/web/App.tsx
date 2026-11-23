@@ -8,12 +8,15 @@ import { ConversationsView } from './components/ConversationsView.js';
 import { DigestBanner, FocusSwitch } from './components/FocusSwitch.js';
 import { SchedulesView } from './components/SchedulesView.js';
 import { SettingsMenu } from './components/SettingsMenu.js';
+import { ErrorNotices, RecentErrorsDialog } from './components/ErrorNotices.js';
 import { StoryDialog } from './components/StoryDialog.js';
 import { TicketDialog } from './components/TicketDialog.js';
 import { UsageView } from './components/UsageView.js';
 import { NewSessionDialog } from './components/NewSessionDialog.js';
 import { Sidebar } from './components/Sidebar.js';
+import { MenuIcon, SearchIcon } from './components/icons.js';
 import { SingleTerminal, TerminalsGrid } from './components/TerminalsGrid.js';
+import { useEscape } from './escape.js';
 import { paletteKey } from './palette.js';
 import { selectCounts } from './selectors.js';
 import { useStore } from './store.js';
@@ -24,6 +27,17 @@ export function App(): React.JSX.Element {
   const [palette, setPalette] = useState(false);
   const [areaDialog, setAreaDialog] = useState(false);
   const [ticketDialog, setTicketDialog] = useState(false);
+  const [errorsDialog, setErrorsDialog] = useState(false);
+  // The sidebar as a drawer, on a phone: opened from the header, closed by going somewhere.
+  const [menuOpen, setMenuOpen] = useState(false);
+  useEffect(() => setMenuOpen(false), [view]);
+  // On the Escape stack, so that a dialog opened from the drawer (New area, a launcher) closes
+  // first and alone.
+  useEscape(() => setMenuOpen(false), menuOpen);
+  const newSession = (storyId?: string): void => {
+    setMenuOpen(false);
+    setDialog({ storyId });
+  };
   const filter = view.kind === 'attention' || view.kind === 'grid' ? view.storyFilter : undefined;
   const filterName = filter === undefined ? '' : filter === null ? 'No area' : (stories.find((s) => s.id === filter)?.name ?? '');
   const heading = view.kind === 'board' ? 'Board' : view.kind === 'attention' ? 'Needs attention' : view.kind === 'usage' ? 'Usage' : view.kind === 'conversations' ? 'Conversations' : view.kind === 'schedules' ? 'Schedules' : 'Terminals';
@@ -71,20 +85,25 @@ export function App(): React.JSX.Element {
 
   return (
     <div className="app">
-      <Sidebar onNewSession={(storyId) => setDialog({ storyId })} />
+      <Sidebar onNewSession={newSession} drawerOpen={menuOpen} onCloseDrawer={() => setMenuOpen(false)} />
+      {menuOpen && <div className="drawer-backdrop" aria-hidden="true" onClick={() => setMenuOpen(false)} />}
       <main className="main">
         <header className="topbar">
+          <button type="button" className="icon menu-toggle" aria-label="Open the menu" aria-controls="sidebar" aria-expanded={menuOpen} onClick={() => setMenuOpen(true)}>
+            <MenuIcon size={22} />
+          </button>
           <h1>
             {heading}
             {filterName && <span className="heading-filter">, {filterName}</span>}
           </h1>
-          <button type="button" className="palette-open" aria-keyshortcuts="Control+K" onClick={() => setPalette(true)}>
+          <button type="button" className="palette-open" aria-keyshortcuts="Control+K" onClick={() => setPalette(true)} aria-label="Jump to a session, area, ticket or run a command">
+            <SearchIcon />
             <span>Jump to a session, area, ticket or run a command</span>
             <kbd className="key">Ctrl K</kbd>
           </button>
           <Cluster />
           <FocusSwitch />
-          <SettingsMenu />
+          <SettingsMenu onRecentErrors={() => setErrorsDialog(true)} />
         </header>
         {connection !== 'open' && (
           <div className="banner" role="status">
@@ -105,6 +124,8 @@ export function App(): React.JSX.Element {
       {dialog && <NewSessionDialog initialStoryId={dialog.storyId} onClose={() => setDialog(null)} />}
       {areaDialog && <StoryDialog onClose={() => setAreaDialog(false)} />}
       {ticketDialog && <TicketDialog onClose={() => setTicketDialog(false)} />}
+      {errorsDialog && <RecentErrorsDialog onClose={() => setErrorsDialog(false)} />}
+      <ErrorNotices onShowAll={() => setErrorsDialog(true)} />
       {palette && (
         <CommandPalette
           onClose={() => setPalette(false)}

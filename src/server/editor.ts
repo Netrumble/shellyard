@@ -105,7 +105,12 @@ function isFile(p: string): boolean {
  */
 export function findCode(): string | null {
   const onPath = resolveExecutable('code');
-  if (!onPath) return null;
+  if (!onPath) {
+    // On macOS the "code" command is added to PATH only on request; the app holds it anyway.
+    if (process.platform !== 'darwin') return null;
+    const inApp = '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code';
+    return isFile(inApp) ? inApp : null;
+  }
   if (process.platform !== 'win32') return onPath;
   const exe = join(dirname(onPath), '..', 'Code.exe');
   return isFile(exe) ? exe : null;

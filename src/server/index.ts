@@ -9,7 +9,7 @@ import { RuleStore } from './area-rules.js';
 import { RecipeStore } from './recipes.js';
 import { StatusLog } from './status-log.js';
 import { ClosedStore } from './closed.js';
-import { clearServerState, dataDir, loadConfig, readServerState, writeServerState } from './config.js';
+import { clearServerState, dataDir, loadConfig, logPath, readServerState, writeServerState } from './config.js';
 import { openInEditor } from './editor.js';
 import { createRequestHandler } from './http.js';
 import { realPtyFactory, type PtyFactory } from './pty-session.js';
@@ -24,6 +24,8 @@ import { StoryStore } from './stories.js';
 import { UsageStore } from './usage.js';
 import type { Schedule } from '../shared/types.js';
 import { attachWebSocket } from './ws.js';
+import { ErrorReporter, errorsDir } from './errors.js';
+import { ChangeTracker, changesOf } from './changes.js';
 
 export const DEFAULT_PORT = 7717;
 
@@ -45,6 +47,8 @@ export interface RunningServer {
   pageHost: string;
   token: string;
   address: string;
+  /** Writes reports for unexpected errors of this run; the page is told about each. */
+  errors: ErrorReporter;
   stop(): Promise<void>;
   /** Resolves once the server has stopped, however that was triggered. */
   stopped: Promise<void>;
@@ -100,6 +104,15 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   const pageHost = newPageHost();
   const startedAt = Date.now();
   const here = dirname(fileURLToPath(import.meta.url));
+  const errors = new ErrorReporter({
+    dir: errorsDir(dataDir()),
+    now: Date.now,
+    version: packageVersion(),
+    // The page's host name is a secret too: whoever knows it can serve a page there.
+    secrets: () => [token, hookToken, pageHost.split('.')[0]!],
+    logTail: () => readLogTail(40),
+  });
+  activeReporter = errors;
 
   const stories = new StoryStore();
   stories.ensureColors();
@@ -125,6 +138,16 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   const flow = new StatusLog({ now: Date.now, file: join(dataDir(), 'flow.json') });
   manager.onChange((sessions) => flow.observe(sessions));
   manager.onClosed((entry, sessionId) => closed.add(entry, sessionId));
+  // The uncommitted changes of the worktrees sessions work in, for the badges on the page.
+  const changes = new ChangeTracker({ read: (worktree) => changesOf(worktree) });
+  const trackWorktrees = (): void =>
+    changes.track(
+      manager
+        .list()
+        .filter((s) => s.status !== 'exited' && s.git)
+        .map((s) => s.git!.worktree),
+    );
+  manager.onChange(trackWorktrees);
 
   // Schedules: at its time, a schedule opens a Claude Code session like any other, and its
   // prompt is typed into the terminal once Claude Code is ready for it.
@@ -172,6 +195,8 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
     },
   });
   schedules.start();
+  // How each run goes: when it waits on the user, when it finishes.
+  manager.onChange((sessions) => schedules.observe(sessions));
   const deliveryTicker = setInterval(() => delivery.tick(), 200);
   deliveryTicker.unref?.();
 
@@ -235,13 +260,16 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   const stopped = new Promise<void>((r) => (resolveStopped = r));
   let stopping: Promise<void> | null = null;
 
-  const ws = attachWebSocket(server, { manager, stories, rules, closed, schedules, usage, activity, port, pageHost, token });
+  const ws = attachWebSocket(server, { manager, stories, rules, closed, schedules, usage, activity, errors, changes, port, pageHost, token });
   const ticker = setInterval(() => {
     manager.tick();
     schedules.tick();
   }, 1000);
   // A branch switched or a commit made inside a terminal shows up without a git process.
   const headTicker = setInterval(() => manager.refreshHeads(), 10_000);
+  // Changes made outside Claude's tools (an editor, a shell) show up within this time.
+  const changesTicker = setInterval(() => void changes.refreshAll(), 15_000);
+  changesTicker.unref?.();
   // The day totals of the flow are written now and then, and on stopping.
   const flowTicker = setInterval(() => flow.persist(), 60_000);
   flowTicker.unref?.();
@@ -250,6 +278,8 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
     stopping ??= (async () => {
       clearInterval(ticker);
       clearInterval(headTicker);
+      clearInterval(changesTicker);
+      changes.stop();
       clearInterval(flowTicker);
       clearInterval(deliveryTicker);
       scanning = false;
@@ -257,6 +287,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
       saveNow();
       saving = false;
       manager.shutdown();
+      schedules.flush();
       usage.flush();
       flow.observe([]);
       flow.persist();
@@ -267,6 +298,8 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
       const recorded = readServerState();
       if (recorded && recorded.pid === process.pid && recorded.startedAt === startedAt) clearServerState();
       log('stopped');
+      errors.dispose();
+      if (activeReporter === errors) activeReporter = null;
       resolveStopped();
     })();
     return stopping;
@@ -289,6 +322,14 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
       openEditor: opts.openEditor ?? openInEditor,
       onClaudeStatus: (id) => delivery.ready(id),
       onPromptSubmitted: (id) => delivery.submitted(id),
+      errors,
+      // After Claude uses a tool or ends a turn, its worktree is read again.
+      onHook: (id, name) => {
+        if (name !== 'PostToolUse' && name !== 'Stop') return;
+        const worktree = manager.get(id)?.git?.worktree;
+        if (worktree) changes.soon(worktree);
+      },
+      changes,
       port,
       pageHost,
       token,
@@ -303,7 +344,45 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   writeServerState({ pid: process.pid, port, pageHost, token, hookToken, startedAt });
   log(`listening on http://${HOST}:${port}, page on http://${pageHost}:${port}`);
 
-  return { port, pageHost, token, address: (server.address() as AddressInfo).address, stop, stopped };
+  return { port, pageHost, token, address: (server.address() as AddressInfo).address, errors, stop, stopped };
+}
+
+/** The reporter of the server running in this process, for errors no request or task catches. */
+let activeReporter: ErrorReporter | null = null;
+/**
+ * The reporter used when no server runs in this process. One for the whole process, made when
+ * first needed, so that a repeated error is counted and the rate limit holds here as well.
+ */
+let fallbackReporter: { dir: string; reporter: ErrorReporter } | null = null;
+
+function fallback(): ErrorReporter {
+  const dir = errorsDir(dataDir());
+  if (fallbackReporter?.dir !== dir) {
+    fallbackReporter = { dir, reporter: new ErrorReporter({ dir, now: Date.now, version: packageVersion(), logTail: () => readLogTail(40) }) };
+  }
+  return fallbackReporter.reporter;
+}
+
+function readLogTail(lines: number): string {
+  try {
+    return readFileSync(logPath(), 'utf8').trimEnd().split('\n').slice(-lines).join('\n');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Writes a report for an error nothing else caught, and logs where it is. Before the server is up
+ * (or after it stopped) the report is written without the secrets of a run, as there are none.
+ */
+export function reportUncaught(source: 'server' | 'startup', e: unknown, context: string): string | null {
+  let reporter = activeReporter;
+  try {
+    reporter ??= fallback();
+    return reporter.report({ source, error: e, context })?.file ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function isMainModule(): boolean {
@@ -320,8 +399,15 @@ if (isMainModule()) {
   const i = process.argv.indexOf('--port');
   const port = i >= 0 ? Number(process.argv[i + 1]) : undefined;
   // One failing session must not take the others down with it.
-  process.on('uncaughtException', (e) => console.error(`${new Date().toISOString()} uncaught: ${e.stack ?? e}`));
-  process.on('unhandledRejection', (e) => console.error(`${new Date().toISOString()} unhandled: ${String(e)}`));
+  // Each is written to a report of its own as well, and the page shows where.
+  process.on('uncaughtException', (e) => {
+    const file = reportUncaught('server', e, 'uncaught exception');
+    console.error(`${new Date().toISOString()} uncaught: ${e.stack ?? e}${file ? `\n  report: ${file}` : ''}`);
+  });
+  process.on('unhandledRejection', (e) => {
+    const file = reportUncaught('server', e, 'unhandled promise rejection');
+    console.error(`${new Date().toISOString()} unhandled: ${String(e)}${file ? `\n  report: ${file}` : ''}`);
+  });
   startServer({ port: Number.isInteger(port) ? port : undefined })
     .then((running) => {
       const shutdown = (): void => void running.stop();
@@ -330,7 +416,8 @@ if (isMainModule()) {
       void running.stopped.then(() => process.exit(0));
     })
     .catch((e: unknown) => {
-      console.error(`${new Date().toISOString()} failed to start: ${(e as Error).stack ?? e}`);
+      const file = reportUncaught('startup', e, 'starting the server');
+      console.error(`${new Date().toISOString()} failed to start: ${(e as Error).stack ?? e}${file ? `\n  report: ${file}` : ''}`);
       process.exit(1);
     });
 }

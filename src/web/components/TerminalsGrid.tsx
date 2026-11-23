@@ -7,6 +7,7 @@ import { Tachometer } from './Cluster.js';
 import { ColorDot, Elapsed, SessionActions, StatusBadge, StoryFilter, StorySelect } from './SessionBits.js';
 import { BackgroundButton } from './BackgroundEditor.js';
 import { WorktreeChip } from './WorktreeChip.js';
+import { ChangesBadge } from './ChangesDialog.js';
 import { TerminalView } from './TerminalView.js';
 
 /** What stands in for a terminal when the session never started. */
@@ -29,6 +30,7 @@ function TileHeader({ session, children }: { session: SessionInfo; children?: Re
       <span className="session-name">{session.name}</span>
       {session.model && <span className="model">{session.model}</span>}
       <WorktreeChip session={session} />
+      <ChangesBadge session={session} />
       {session.status !== 'exited' && <Tachometer sessionId={session.id} />}
       <StatusBadge session={session} />
       {session.status === 'exited' && session.exitCode !== null && <span className="hint">exit code {session.exitCode}</span>}

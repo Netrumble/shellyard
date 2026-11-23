@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createServer, request, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -16,8 +16,9 @@ import { RuleStore } from '../../src/server/area-rules.js';
 import { RecipeStore } from '../../src/server/recipes.js';
 import { StatusLog } from '../../src/server/status-log.js';
 import { UsageStore } from '../../src/server/usage.js';
+import { ErrorReporter } from '../../src/server/errors.js';
 import type { Profile, SessionInfo } from '../../src/shared/types.js';
-import { fakePtyFactory, useTempHome } from '../helpers.js';
+import { fakePtyFactory, removeDir, useTempHome } from '../helpers.js';
 
 const TOKEN = 't'.repeat(64);
 const HOOK_TOKEN = 'h'.repeat(64);
@@ -725,7 +726,7 @@ describe.skipIf(!hasGit)('http api: git', () => {
     mgr.shutdown();
     server.closeAllConnections();
     await new Promise((r) => server.close(r));
-    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    removeDir(root);
   });
 
   it('needs the page token on every git route', async () => {
@@ -765,6 +766,24 @@ describe.skipIf(!hasGit)('http api: git', () => {
     expect((await del('/api/git/worktrees', { repo: '', path: linked, force: false, deleteBranch: false })).status).toBe(400);
     expect((await post('/api/git/switch', { path: 'repo', branch: 'x', create: true })).status).toBe(400);
     expect((await post('/api/git/switch', { path: null, branch: 'x', create: true })).status).toBe(400);
+  });
+
+  it('lists the uncommitted changes of a worktree and the diff of one file', async () => {
+    const none = { auth: 'none' as const };
+    expect((await call('GET', `/api/git/changes?path=${q(repo)}`, none)).status).toBe(401);
+    expect((await call('GET', `/api/git/diff?path=${q(repo)}&file=a.txt`, none)).status).toBe(401);
+    expect((await call('GET', `/api/git/changes?path=${q(repo)}`)).json()).toEqual({ worktree: repo, files: [], added: 0, removed: 0, truncated: false });
+    writeFileSync(join(repo, 'a.txt'), 'b\n');
+    const c = (await call('GET', `/api/git/changes?path=${q(repo)}`)).json();
+    expect(c.files).toEqual([{ path: 'a.txt', status: 'modified', added: 1, removed: 1 }]);
+    const d = await call('GET', `/api/git/diff?path=${q(repo)}&file=a.txt`);
+    expect(d.status).toBe(200);
+    expect(d.json().diff).toContain('+b');
+    // Only a changed file is read: anything else is refused with the reason.
+    expect((await call('GET', `/api/git/diff?path=${q(repo)}&file=..%2Fplain`)).status).toBe(400);
+    expect((await call('GET', `/api/git/diff?path=${q(repo)}`)).status).toBe(400);
+    expect((await call('GET', `/api/git/changes?path=relative`)).status).toBe(400);
+    expect((await call('GET', `/api/git/changes?path=${q(plain)}`)).json()).toBeNull();
   });
 
   it('lists branches and tells whether a worktree is dirty', async () => {
@@ -940,5 +959,110 @@ describe.skipIf(!hasGit)('http api: git', () => {
     expect(r.status).toBe(409);
     expect((await call('GET', '/api/recipes')).json()).toHaveLength(1);
     expect(loadConfig().config.stories).toEqual([]);
+  });
+});
+
+describe('http api: errors', () => {
+  const home = useTempHome();
+  let server: Server;
+  let port = 0;
+  let errors: ErrorReporter;
+  let usage: UsageStore;
+  let revealed: string[] = [];
+
+  const call = (method: string, path: string, opts: CallOpts = {}): Promise<Res> => callAt(port, method, path, opts);
+
+  beforeEach(async () => {
+    revealed = [];
+    server = createServer();
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    port = (server.address() as AddressInfo).port;
+    const stories = new StoryStore();
+    const mgr = new SessionManager({
+      stories: () => stories.list(),
+      ptyFactory: fakePtyFactory().factory,
+      now: Date.now,
+      config: () => loadConfig().config,
+      port,
+      hookToken: HOOK_TOKEN,
+      hookScriptPath: '/h.js', statusScriptPath: '/s.js',
+      builtins: () => [builtin],
+      gitOf: async () => null,
+      headOf: () => null,
+    });
+    errors = new ErrorReporter({ dir: join(home.dir(), 'errors'), now: Date.now, version: '1.0.0', secrets: () => [TOKEN, HOOK_TOKEN] });
+    usage = new UsageStore({ now: Date.now, file: join(home.dir(), 'usage.json') });
+    server.on(
+      'request',
+      createRequestHandler({
+        manager: mgr,
+        stories,
+        usage,
+        closed: new ClosedStore({ now: Date.now, file: join(home.dir(), 'closed.json') }),
+        errors,
+        reveal: (file) => {
+          revealed.push(file);
+          return null;
+        },
+        port,
+        pageHost: PAGE,
+        token: TOKEN,
+        hookToken: HOOK_TOKEN,
+        webDir: home.dir(),
+        onShutdown: () => undefined,
+      }),
+    );
+  });
+
+  afterEach(async () => {
+    server.closeAllConnections();
+    await new Promise((r) => server.close(r));
+  });
+
+  it('answers an unexpected failure with a 500 that says where its report is', async () => {
+    vi.spyOn(usage, 'summary').mockImplementation(() => {
+      throw new Error(`exploded near ${TOKEN}`);
+    });
+    const r = await call('GET', '/api/usage');
+    expect(r.status).toBe(500);
+    const [report] = errors.list();
+    expect(report).toMatchObject({ source: 'server', context: 'GET /api/usage', message: 'Error: exploded near [redacted]' });
+    expect(r.json().error).toBe(`Internal error. Details in ${report!.file}`);
+    expect(readFileSync(report!.file, 'utf8')).not.toContain(TOKEN);
+  });
+
+  it('writes a report for an error of the page, lists it, and marks it seen', async () => {
+    const none = { auth: 'none' as const };
+    expect((await call('GET', '/api/errors', none)).status).toBe(401);
+    expect((await call('POST', '/api/errors', { ...none, body: JSON.stringify({ message: 'x' }) })).status).toBe(401);
+    const r = await call('POST', '/api/errors', { body: JSON.stringify({ message: 'TypeError: x is undefined', stack: 'at App', context: 'page: board' }) });
+    expect(r.status).toBe(200);
+    expect(r.json()).toMatchObject({ source: 'page', message: 'TypeError: x is undefined', context: 'page: board', seen: false });
+    expect(readFileSync(r.json().file, 'utf8')).toContain('at App');
+    expect((await call('GET', '/api/errors')).json()).toHaveLength(1);
+    expect((await call('POST', `/api/errors/${r.json().id}/seen`)).status).toBe(204);
+    expect(errors.list()[0]!.seen).toBe(true);
+    expect((await call('POST', '/api/errors/nope/seen')).status).toBe(404);
+  });
+
+  it('refuses a page report without a message', async () => {
+    expect((await call('POST', '/api/errors', { body: JSON.stringify({}) })).status).toBe(400);
+    expect((await call('POST', '/api/errors', { body: JSON.stringify({ message: 'x', stack: 3 }) })).status).toBe(400);
+  });
+
+  it('shows the file of a report of this run, never a path from the request', async () => {
+    const report = errors.report({ source: 'server', error: 'boom' })!;
+    expect((await call('POST', `/api/errors/${report.id}/reveal`)).status).toBe(204);
+    expect(revealed).toEqual([report.file]);
+    expect((await call('POST', `/api/errors/${encodeURIComponent('/etc/passwd')}/reveal`)).status).toBe(404);
+    expect((await call('GET', `/api/errors/${report.id}/reveal`)).status).toBe(405);
+    expect(revealed).toHaveLength(1);
+  });
+
+  it('marks every report seen at once', async () => {
+    errors.report({ source: 'server', error: 'a' });
+    errors.report({ source: 'server', error: 'b' });
+    expect((await call('POST', '/api/errors/seen')).status).toBe(204);
+    expect(errors.list().every((r) => r.seen)).toBe(true);
   });
 });

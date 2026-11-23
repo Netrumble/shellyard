@@ -5,6 +5,26 @@ import { afterEach, beforeEach } from 'vitest';
 import type { Launch } from '../src/server/shells.js';
 import type { PtyFactory, PtyLike } from '../src/server/pty-session.js';
 
+/**
+ * Deletes a test folder. On Windows a folder stays busy for a moment after a process that worked
+ * in it ends (the git processes the server starts in a session's folder), so the deletion is
+ * tried again for up to six seconds. The loop is done here: rmSync's own maxRetries does not
+ * retry on Windows with every Node version.
+ */
+export function removeDir(dir: string): void {
+  const until = Date.now() + 6000;
+  for (;;) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (!['EBUSY', 'EPERM', 'ENOTEMPTY', 'EMFILE', 'ENFILE'].includes(code ?? '') || Date.now() > until) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+    }
+  }
+}
+
 /** Gives each test its own data folder through SHELLYARD_HOME, so the real one is never touched. */
 export function useTempHome(): { dir: () => string } {
   let dir = '';
@@ -23,7 +43,7 @@ export function useTempHome(): { dir: () => string } {
     else process.env.SHELLYARD_HOME = previous;
     if (previousClaude === undefined) delete process.env.CLAUDE_CONFIG_DIR;
     else process.env.CLAUDE_CONFIG_DIR = previousClaude;
-    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    removeDir(dir);
   });
   return { dir: () => dir };
 }

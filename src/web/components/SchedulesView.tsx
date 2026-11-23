@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { SCHEDULE_PERMISSION_MODES, type Schedule, type SchedulePermissionMode, type ScheduleWhen } from '../../shared/types.js';
 import { api } from '../api.js';
 import { durationLabel } from '../gauges.js';
-import { describeWhen, fromLocalInput, outcomeText, outcomeTone, toLocalInput, WEEK, whenLabel } from '../schedule-text.js';
+import { describeWhen, fromLocalInput, outcomeText, outcomeTone, runResult, toLocalInput, WEEK, whenLabel } from '../schedule-text.js';
 import { refreshMeta, setView, useStore } from '../store.js';
 import { FolderPicker } from './FolderPicker.js';
 
@@ -196,7 +196,7 @@ function ScheduleDialog({ schedule, onClose }: { schedule?: Schedule; onClose: (
 
         <div className="field">
           <span id="schedule-folder-label">Folder</span>
-          <FolderPicker value={cwd} onChange={setCwd} placeholder={area?.cwd || profile?.cwd || 'Your home folder'} labelledBy="schedule-folder-label" />
+          <FolderPicker value={cwd} onChange={setCwd} placeholder={area?.cwd || profile?.cwd || 'Your home folder'} start={area?.cwd || profile?.cwd} labelledBy="schedule-folder-label" />
         </div>
 
         <label>
@@ -296,8 +296,9 @@ export function SchedulesView(): React.JSX.Element {
             const area = stories.find((x) => x.id === s.storyId);
             const profile = meta.profiles.find((p) => p.id === s.profileId);
             const lastSession = last?.sessionId ? sessions.find((x) => x.id === last.sessionId) : undefined;
+            const lastResult = last ? runResult(last, now) : null;
             return (
-              <li key={s.id} className={s.enabled ? 'schedule' : 'schedule paused'}>
+              <li key={s.id} className={[s.enabled ? 'schedule' : 'schedule paused', lastResult?.needsYou ? 'needs-you' : ''].filter(Boolean).join(' ')}>
                 <div className="schedule-main">
                   <div className="schedule-text">
                     <strong>{s.name}</strong>
@@ -319,6 +320,7 @@ export function SchedulesView(): React.JSX.Element {
                           <>
                             <span className={outcomeTone(last.outcome)}>{outcomeText(last.outcome)}</span>
                             <span className="hint"> {now - last.at < 60_000 ? 'just now' : `${durationLabel(now - last.at)} ago`}</span>
+                            {lastResult?.text && <span className={`schedule-result ${lastResult.tone}`}>{lastResult.text}</span>}
                           </>
                         ) : (
                           <span className="hint">Never</span>
@@ -366,6 +368,7 @@ export function SchedulesView(): React.JSX.Element {
                             <tr key={`${r.at}-${i}`}>
                               <td>{whenLabel(r.at)}</td>
                               <td className={outcomeTone(r.outcome)}>{outcomeText(r.outcome)}</td>
+                              <td className={runResult(r, now).tone}>{runResult(r, now).text}</td>
                               <td className="hint">{[r.manual ? 'Run by hand.' : null, r.detail].filter(Boolean).join(' ')}</td>
                             </tr>
                           ))}

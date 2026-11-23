@@ -30,16 +30,18 @@ export function handleEscape(e: Pick<KeyboardEvent, 'key' | 'preventDefault' | '
 
 /**
  * Closes this dialog on Escape while it is the newest one open. The key is caught on its way
- * down (capture), so overlays that stop key events from bubbling do not hide it.
+ * down (capture), so overlays that stop key events from bubbling do not hide it. With `open`
+ * false it takes no key, for panels that stay mounted while closed (the sidebar drawer).
  */
-export function useEscape(onClose: () => void): void {
+export function useEscape(onClose: () => void, open = true): void {
   const latest = useRef(onClose);
   latest.current = onClose;
   useEffect(() => {
+    if (!open) return;
     if (!listening) {
       listening = true;
       window.addEventListener('keydown', (e) => void handleEscape(e), true);
     }
     return pushEscape(() => latest.current());
-  }, []);
+  }, [open]);
 }

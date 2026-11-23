@@ -106,6 +106,25 @@ export function SidebarIcon(p: IconProps): React.JSX.Element {
   );
 }
 
+/** Three lines: opens the menu on a phone. */
+export function MenuIcon(p: IconProps): React.JSX.Element {
+  return (
+    <Svg {...p}>
+      <path d="M4 6h16M4 12h16M4 18h16" />
+    </Svg>
+  );
+}
+
+/** A magnifier: find and jump. */
+export function SearchIcon(p: IconProps): React.JSX.Element {
+  return (
+    <Svg {...p}>
+      <circle cx="11" cy="11" r="7" />
+      <path d="M20 20l-4-4" />
+    </Svg>
+  );
+}
+
 /** Three sliders: the settings of the page. */
 export function SettingsIcon(p: IconProps): React.JSX.Element {
   return (

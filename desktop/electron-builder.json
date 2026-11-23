@@ -3,11 +3,32 @@
   "productName": "ShellYard",
   "copyright": "Talentia Software",
   "asar": false,
-  "files": ["main.js", "find-node.js", "icon.png", "package.json", "node_modules/**/*", "!*.tgz"],
+  "files": [
+    "main.js",
+    "preload.cjs",
+    "find-node.js",
+    "login-env.js",
+    "updates.js",
+    "icon.png",
+    "package.json",
+    "node_modules/**/*",
+    "!*.tgz"
+  ],
   "win": {
     "target": "nsis",
     "icon": "icon.png",
     "artifactName": "ShellYard-Setup-${version}.${ext}"
+  },
+  "mac": {
+    "target": "dmg",
+    "icon": "icon-mac.png",
+    "category": "public.app-category.developer-tools",
+    "artifactName": "ShellYard-${version}-${arch}.${ext}",
+    "identity": "-",
+    "hardenedRuntime": false
+  },
+  "dmg": {
+    "artifactName": "ShellYard-${version}-${arch}.${ext}"
   },
   "nsis": {
     "oneClick": false,
