@@ -689,7 +689,7 @@ describe.skipIf(!hasGit)('http api: git', () => {
 
   beforeEach(async () => {
     gitPtys = fakePtyFactory();
-    root = realpathSync(mkdtempSync(join(tmpdir(), 'shellyard-http-git-')));
+    root = realpathSync.native(mkdtempSync(join(tmpdir(), 'shellyard-http-git-')));
     repo = join(root, 'repo');
     linked = join(root, 'repo-feature');
     plain = join(root, 'plain');

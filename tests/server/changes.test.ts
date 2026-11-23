@@ -91,7 +91,7 @@ describe.runIf(hasGit)('changesOf and diffOf', () => {
   let root = '';
   let repo = '';
   beforeEach(() => {
-    root = realpathSync(mkdtempSync(join(tmpdir(), 'shellyard-changes-')));
+    root = realpathSync.native(mkdtempSync(join(tmpdir(), 'shellyard-changes-')));
     repo = join(root, 'repo');
     makeRepo(repo);
   });

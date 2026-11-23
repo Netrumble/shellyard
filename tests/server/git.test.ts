@@ -77,7 +77,7 @@ describe.skipIf(!hasGit)('git worktrees', () => {
   let repo = '';
   let wtDir = '';
   beforeEach(() => {
-    root = realpathSync(mkdtempSync(join(tmpdir(), 'shellyard-git-')));
+    root = realpathSync.native(mkdtempSync(join(tmpdir(), 'shellyard-git-')));
     repo = join(root, 'repo');
     wtDir = join(root, 'wt');
     makeRepo(repo);
