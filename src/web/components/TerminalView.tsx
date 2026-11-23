@@ -35,7 +35,8 @@ function cssVar(name: string, fallback: string): string {
  * So one page decides and the others follow: a page claims the size when it is the one being
  * used (it is shown, its terminal is focused, its own layout changes), and a page that sees
  * the session take another size sets its terminal to that size instead of its own fit. A
- * terminal drawn at another size than the program believes shows its text out of place.
+ * terminal drawn at another size than the program believes shows its text out of place, so
+ * the size comes with the output, and is taken at the point of the output where it changed.
  */
 export function TerminalView(props: {
   sessionId: string;
@@ -65,8 +66,6 @@ export function TerminalView(props: {
   const applyFont = useRef<() => void>(() => undefined);
   const sizeRef = useRef(props.size);
   sizeRef.current = props.size;
-  /** Sets the terminal to the session's size when another page has changed it. */
-  const followSize = useRef<() => void>(() => undefined);
   const searchAddon = useRef<SearchAddon | null>(null);
   const terminal = useRef<Terminal | null>(null);
   const searchInput = useRef<HTMLInputElement>(null);
@@ -137,10 +136,6 @@ export function TerminalView(props: {
   useEffect(() => {
     applyFont.current();
   }, [font?.family, font?.size]);
-
-  useEffect(() => {
-    followSize.current();
-  }, [props.size?.cols, props.size?.rows]);
 
   useEffect(() => {
     const el = host.current;
@@ -214,19 +209,17 @@ export function TerminalView(props: {
       asked = { cols: term.cols, rows: term.rows, at: Date.now() };
       socket.send({ t: 'resize', id: sessionId, cols: term.cols, rows: term.rows });
     };
-    /** Takes the size the session has, when it is not the one this page asked for. */
-    const follow = (): void => {
-      const known = sizeRef.current;
-      if (!known || known.cols < 2 || known.rows < 2) return;
-      if (asked && asked.cols === known.cols && asked.rows === known.rows) asked = null;
+    /** Takes the size the session has taken, when it is not the one this page asked for. */
+    const follow = (size: { cols: number; rows: number }): void => {
+      if (size.cols < 2 || size.rows < 2) return;
+      if (asked && asked.cols === size.cols && asked.rows === size.rows) asked = null;
       // An answer still on its way must not be undone by an older size arriving first.
       if (asked && Date.now() - asked.at < ASKED_MS) return;
       asked = null;
-      if (known.cols === term.cols && known.rows === term.rows) return;
+      if (size.cols === term.cols && size.rows === term.rows) return;
       deciding = false;
-      term.resize(known.cols, known.rows);
+      term.resize(size.cols, size.rows);
     };
-    followSize.current = follow;
 
     const attach = (): void => {
       // A page nobody is looking at does not get to decide the size: it attaches as it is
@@ -242,10 +235,17 @@ export function TerminalView(props: {
     };
 
     const unsubscribe = socket.subscribe(sessionId, (m) => {
+      if (m.t === 'size') {
+        // The size changes where it did in the output: what was printed before it is drawn at
+        // the size it was printed for, and what comes after at the new one. Taking the size
+        // at any other moment draws the program's repaint out of place, and it stays so.
+        term.write('', () => follow(m));
+        return;
+      }
       if (m.t === 'snapshot') {
         term.reset();
-        // The snapshot was taken at the session's size; it is drawn at that size.
-        follow();
+        // The snapshot is drawn at the size it was taken at.
+        if (m.cols >= 2 && m.rows >= 2 && (m.cols !== term.cols || m.rows !== term.rows)) term.resize(m.cols, m.rows);
       }
       term.write(m.data);
     });
@@ -313,7 +313,6 @@ export function TerminalView(props: {
       clearTimeout(timer);
       observer.disconnect();
       document.removeEventListener('visibilitychange', onVisible);
-      followSize.current = () => undefined;
       el.removeEventListener('focusin', onFocusIn);
       el.removeEventListener('focusout', onFocusOut);
       offTouch();
