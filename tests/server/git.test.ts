@@ -70,7 +70,7 @@ describe.runIf(hasGit)('runGit', () => {
     // Reading from a standard input that never ends: git is still there when the time is up.
     const error = await runGit(['hash-object', '--stdin'], process.cwd(), { timeoutMs: 1000 }).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(GitError);
-    expect((error as GitError).message).toBe('git hash-object did not finish within 1 seconds and was stopped.');
+    expect((error as GitError).message).toBe('git hash-object did not finish within 1 second and was stopped.');
   });
 });
 

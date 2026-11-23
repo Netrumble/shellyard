@@ -172,14 +172,12 @@ export function attachWebSocket(
     // the snapshot holds everything before this point, the buffer everything after.
     const sub: Subscription = { ready: false, buffer: [] };
     c.subs.set(id, sub);
-    void manager.snapshot(id).then((data) => {
+    void manager.snapshot(id).then((snapshot) => {
       // A newer attach or a detach has replaced this subscription: drop the stale answer.
-      if (c.subs.get(id) !== sub || data === null) return;
-      // The size is read as the snapshot arrives, with nothing in between: it is the size the
-      // snapshot was taken at, which the terminal has to have to draw it.
-      const info = manager.get(id);
-      if (!info) return;
-      send(c, { t: 'snapshot', id, data, cols: info.cols, rows: info.rows });
+      if (c.subs.get(id) !== sub || snapshot === null) return;
+      // With the size the screen had as it was serialized, which the terminal has to have to
+      // draw it; a resize since then is in the buffer, after it.
+      send(c, { t: 'snapshot', id, ...snapshot });
       for (const m of sub.buffer) send(c, m);
       sub.buffer = [];
       sub.ready = true;

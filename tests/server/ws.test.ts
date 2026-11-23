@@ -309,8 +309,9 @@ describe('websocket', () => {
     await waitUntil(() => c1.of('output').length === 2);
     release();
     await waitUntil(() => c2.of('output').length === 2);
-    expect(c2.messages.filter((m) => m.t === 'snapshot' || m.t === 'output' || m.t === 'size').map((m) => (m.t === 'output' ? m.data : m.t === 'size' ? `${m.cols}x${m.rows}` : m.t))).toEqual([
-      'snapshot',
+    // The snapshot was taken before the resize: it says the size it was taken at, not the one of now.
+    expect(c2.messages.filter((m) => m.t === 'snapshot' || m.t === 'output' || m.t === 'size').map((m) => (m.t === 'output' ? m.data : m.t === 'size' ? `${m.cols}x${m.rows}` : `snapshot ${m.cols}x${m.rows}`))).toEqual([
+      'snapshot 90x25',
       'one',
       '120x40',
       'two',
