@@ -489,6 +489,35 @@ code {
   cursor: default;
 }
 
+.touch-keys {
+  display: none;
+}
+
+/* Phones and tablets: the keys their keyboard lacks (arrows, Esc, Tab), below the terminal. */
+@media (pointer: coarse) {
+  .touch-keys {
+    order: 1;
+    display: flex;
+    gap: 3px;
+    padding: 4px;
+    overflow-x: auto;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    -webkit-user-select: none;
+    user-select: none;
+    touch-action: manipulation;
+  }
+
+  .touch-keys button {
+    flex: 1 1 0;
+    min-width: 34px;
+    min-height: 40px;
+    padding: 0 2px;
+    font: inherit;
+    font-size: 15px;
+  }
+}
+
 .terminal-host {
   flex: 1;
   min-height: 0;

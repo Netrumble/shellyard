@@ -9,6 +9,7 @@ import { getSocket, getState, onThemeChange } from '../store.js';
 import { hostStyle, terminalFont, terminalLook } from '../terminal-look.js';
 import { HIGHLIGHT_LIMIT, isSearchKey, isValidPattern, searchCountText } from '../terminal-search.js';
 import { attachTouchScroll } from '../touch-scroll.js';
+import { TOUCH_KEYS, touchKeySequence, type TouchKey } from '../touch-keys.js';
 
 const RESIZE_DEBOUNCE_MS = 100;
 
@@ -331,10 +332,34 @@ export function TerminalView(props: {
     };
   }, [sessionId, autoFocus]);
 
+  /** A key of the touch bar: sent as the keyboard would send it, and the keyboard stays open. */
+  const sendTouchKey = (key: TouchKey): void => {
+    const term = terminal.current;
+    if (!term) return;
+    getSocket().send({ t: 'input', id: sessionId, data: touchKeySequence(key, term.modes.applicationCursorKeysMode) });
+  };
+
   const style = background?.color ? { background: background.color } : hostStyle(background, imageUrl);
   return (
     <div className="terminal-frame">
       <div className="terminal-host" ref={host} style={style} data-background={background?.image ? 'image' : background?.color ? 'color' : 'theme'} />
+      <div className="touch-keys" role="toolbar" aria-label="Terminal keys">
+        {TOUCH_KEYS.map((k) => (
+          <button
+            key={k.key}
+            type="button"
+            tabIndex={-1}
+            title={k.title}
+            aria-label={k.title}
+            // Taking the focus would close the phone keyboard and move the terminal out of the way.
+            onPointerDown={(e) => e.preventDefault()}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => sendTouchKey(k.key)}
+          >
+            {k.label}
+          </button>
+        ))}
+      </div>
       {searchOpen && (
         <div className="terminal-search" role="search">
           <input
