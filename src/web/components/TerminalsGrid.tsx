@@ -54,21 +54,38 @@ export function SessionBody({ session, autoFocus, onFocusChange, inOwnWindow }: 
 }
 
 /**
+ * The whole header of a terminal is its handle (its name alone is too small a target once it is
+ * shortened), except its buttons and lists, which keep their own use of the mouse.
+ */
+function headerDragSource(id: string): ReturnType<typeof dragSource> {
+  const source = dragSource(SESSION_DRAG, id);
+  return {
+    ...source,
+    onDragStart: (e) => {
+      if ((e.target as Element).closest?.('button, select, input, a, [role="button"]')) {
+        e.preventDefault();
+        return;
+      }
+      source.onDragStart(e);
+    },
+  };
+}
+
+/**
  * The header of a terminal. `inOwnWindow` is the header of a detached session's window: it has no
- * Detach button and its name is not dragged, and "_" brings the session back instead.
+ * Pop out button and it is not dragged, and "_" brings the session back instead.
  */
 export function TileHeader({ session, children, inOwnWindow }: { session: SessionInfo; children?: React.ReactNode; inOwnWindow?: boolean }): React.JSX.Element {
   const detached = useDetached().has(session.id);
   return (
-    <header className="tile-header" style={{ borderTopColor: session.color }}>
+    <header
+      className={inOwnWindow ? 'tile-header' : 'tile-header drag-handle'}
+      style={{ borderTopColor: session.color }}
+      title={inOwnWindow ? undefined : 'Drag to an area, or out of the window to open it in a window of its own'}
+      {...(inOwnWindow ? {} : headerDragSource(session.id))}
+    >
       <ColorDot color={session.color} />
-      {inOwnWindow ? (
-        <span className="session-name">{session.name}</span>
-      ) : (
-        <span className="session-name drag-handle" title="Drag to an area, or out of the window to open it in a window of its own" {...dragSource(SESSION_DRAG, session.id)}>
-          {session.name}
-        </span>
-      )}
+      <span className="session-name">{session.name}</span>
       {session.model && <span className="model">{session.model}</span>}
       <WorktreeChip session={session} />
       <ChangesBadge session={session} />
@@ -80,8 +97,8 @@ export function TileHeader({ session, children, inOwnWindow }: { session: Sessio
       <StorySelect session={session} />
       <BackgroundButton session={session} />
       {!inOwnWindow && !detached && (
-        <button type="button" className="icon" title="Open in a window of its own" aria-label={`Open ${session.name} in a window of its own`} onClick={() => detachOrWarn(session.id)}>
-          ⧉
+        <button type="button" className="pop-out" title="Open in a window of its own (or drag the header out of the window)" aria-label={`Open ${session.name} in a window of its own`} onClick={() => detachOrWarn(session.id)}>
+          ⧉<span className="label"> Pop out</span>
         </button>
       )}
       <SessionActions session={session} onMinimize={inOwnWindow ? undefined : () => setView({ kind: 'board' })} />
