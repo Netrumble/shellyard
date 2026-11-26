@@ -214,9 +214,15 @@ export async function restartServer(options: { port?: number; node?: string } = 
 }
 
 async function ensureRunning(options: { port?: number; node?: string }): Promise<{ ok: true; state: ServerState } | { ok: false; error: string }> {
+  const found = readServerState();
   let state = await liveState();
   if (!state) {
-    clearServerState();
+    // Only the record found dead is removed: a server started meanwhile by another start (the
+    // app asked twice to open) may have written its own, which must stay.
+    const now = readServerState();
+    if (!now || (found && now.pid === found.pid && now.startedAt === found.startedAt)) clearServerState();
+    // Starts that race each other each spawn a server; only one gets the data folder (see
+    // instance-lock.ts), the others end at once, and every start finds that one below.
     spawnDetachedServer(options.port ?? DEFAULT_PORT, options.node);
     const deadline = Date.now() + START_TIMEOUT_MS;
     while (!state && Date.now() < deadline) {

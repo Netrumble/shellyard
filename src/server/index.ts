@@ -26,6 +26,7 @@ import type { Schedule } from '../shared/types.js';
 import { attachWebSocket } from './ws.js';
 import { ErrorReporter, errorsDir } from './errors.js';
 import { ChangeTracker, changesOf } from './changes.js';
+import { acquireInstanceLock } from './instance-lock.js';
 
 export const DEFAULT_PORT = 7717;
 
@@ -96,8 +97,18 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   const first = loadConfig({ quarantineCorrupt: true });
   if (first.warning) log(`warning: ${first.warning}`);
 
+  // Before anything is restored: a second server on the same folder would resume every session again.
+  const lock = await acquireInstanceLock(dataDir());
+  if (!lock) throw new Error(`ShellYard is already running on ${dataDir()}. Stop it first with: shellyard stop`);
+
   const server = createServer();
-  const port = await listenOnFirstFree(server, opts.port ?? DEFAULT_PORT);
+  let port: number;
+  try {
+    port = await listenOnFirstFree(server, opts.port ?? DEFAULT_PORT);
+  } catch (e) {
+    await lock.release();
+    throw e;
+  }
   const token = newToken();
   const hookToken = newToken();
   // A new host name for the page at every start: see newPageHost.
@@ -297,6 +308,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
       // Another server may have taken over the state file since; only remove our own.
       const recorded = readServerState();
       if (recorded && recorded.pid === process.pid && recorded.startedAt === startedAt) clearServerState();
+      await lock.release();
       log('stopped');
       errors.dispose();
       if (activeReporter === errors) activeReporter = null;
