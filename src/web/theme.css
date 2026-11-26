@@ -181,6 +181,9 @@ code {
 .app {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
+  /* One row as tall as the window: without it the row grows to the content, the whole page
+     scrolls (topbar included) and the sidebar gets a second scrollbar inside the page's. */
+  grid-template-rows: minmax(0, 1fr);
   height: 100%;
 }
 
