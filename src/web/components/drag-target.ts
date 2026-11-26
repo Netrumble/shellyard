@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { dropChangesNothing, endDragged, getDragged, startDragged } from '../drag.js';
+import { dropChangesNothing, endDragged, getDragged, SESSION_DRAG, startDragged } from '../drag.js';
+import { detach, droppedOutside } from '../detached.js';
 import { placeFor, type Place } from '../order.js';
 
 /** What a drop target does with one drag type; `placed` shows a before/after line instead of a highlight. */
@@ -15,8 +16,19 @@ export interface DropRule {
 /** Drop events already taken by an inner target, so the targets around it leave them alone. */
 const taken = new WeakSet<Event>();
 
+/**
+ * A session dropped outside the window, where nothing took it, opens in a window of its own
+ * at that place. A browser allows the new window only shortly after the press that started
+ * the drag; when it refuses, the drop does nothing and the Detach button still works.
+ */
+function detachIfOutside(type: string, id: string, e: React.DragEvent): void {
+  if (type !== SESSION_DRAG || e.dataTransfer.dropEffect !== 'none') return;
+  const at = { screenX: e.screenX, screenY: e.screenY };
+  if (droppedOutside(at, window)) detach(id, at);
+}
+
 /** Makes an element the start of a drag carrying `id` under `type`. */
-export function dragSource(type: string, id: string): { draggable: true; onDragStart: (e: React.DragEvent) => void; onDragEnd: () => void } {
+export function dragSource(type: string, id: string): { draggable: true; onDragStart: (e: React.DragEvent) => void; onDragEnd: (e: React.DragEvent) => void } {
   return {
     draggable: true,
     onDragStart: (e) => {
@@ -25,7 +37,10 @@ export function dragSource(type: string, id: string): { draggable: true; onDragS
       e.dataTransfer.effectAllowed = 'move';
       startDragged(type, id);
     },
-    onDragEnd: endDragged,
+    onDragEnd: (e) => {
+      endDragged();
+      detachIfOutside(type, id, e);
+    },
   };
 }
 

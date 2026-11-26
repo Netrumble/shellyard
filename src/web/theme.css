@@ -531,6 +531,55 @@ code {
   height: 100%;
 }
 
+/* The name in a terminal's header is its handle: drag it to an area, or out of the window. */
+.tile-header .drag-handle {
+  cursor: grab;
+}
+
+.tile-header .drag-handle:active {
+  cursor: grabbing;
+}
+
+/* What stands in for the terminal of a session shown in a window of its own. */
+.detached-placeholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  min-height: 120px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.detached-placeholder strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.detached-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* A session's own window: the terminal and its header, nothing else. */
+.detached-app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 6px;
+  box-sizing: border-box;
+}
+
+.detached-app > .tile.single {
+  flex: 1;
+  min-height: 0;
+}
+
 .profile:hover {
   background: var(--panel-2);
 }

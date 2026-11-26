@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { ensureServer, pageAddress, restartServer, writeLauncherPage } from '@talentiaoss/shellyard/launcher';
 import { findNode } from './find-node.js';
 import { adoptLoginPath } from './login-env.js';
+import { isDetachedWindowUrl } from './windows.js';
 import { AUTO_CHECK_EVERY_MS, checkForUpdate, DEFAULT_UPDATE_REPO, isRepoName } from './updates.js';
 
 const isMac = process.platform === 'darwin';
@@ -294,6 +295,8 @@ async function openWindow() {
   const ses = session.fromPartition('shellyard');
   await ses.clearStorageData();
 
+  // The preload gives the page one call, showWindow (see preload.cjs), and nothing else.
+  const webPreferences = { contextIsolation: true, nodeIntegration: false, sandbox: true, session: ses, preload: join(here, 'preload.cjs') };
   win = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -301,20 +304,31 @@ async function openWindow() {
     icon: icon.isEmpty() ? undefined : icon,
     autoHideMenuBar: true,
     backgroundColor: '#181b21',
-    // The preload gives the page one call, showWindow (see preload.cjs), and nothing else.
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, session: ses, preload: join(here, 'preload.cjs') },
+    webPreferences,
   });
 
-  // Links leave the app for the browser; the window itself stays on the server.
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//.test(url)) void shell.openExternal(url);
-    return { action: 'deny' };
-  });
-  win.webContents.on('will-navigate', (e, url) => {
-    if (new URL(url).origin === origin) return;
-    e.preventDefault();
-    if (/^https?:\/\//.test(url)) void shell.openExternal(url);
-  });
+  // Links leave the app for the browser and every window stays on the server. A session's own
+  // window (the page on ?detached=<id>) opens in the app, locked down as the main one.
+  const lockDown = (contents) => {
+    contents.setWindowOpenHandler(({ url }) => {
+      if (isDetachedWindowUrl(url, origin)) {
+        return {
+          action: 'allow',
+          overrideBrowserWindowOptions: { icon: icon.isEmpty() ? undefined : icon, autoHideMenuBar: true, backgroundColor: '#181b21', webPreferences },
+        };
+      }
+      if (/^https?:\/\//.test(url)) void shell.openExternal(url);
+      return { action: 'deny' };
+    });
+    contents.on('will-navigate', (e, url) => {
+      if (new URL(url).origin === origin) return;
+      e.preventDefault();
+      if (/^https?:\/\//.test(url)) void shell.openExternal(url);
+    });
+    contents.on('did-create-window', (child) => lockDown(child.webContents));
+  };
+  lockDown(win.webContents);
+
   // Closing hides the window: the page stays loaded, so a session that needs you still
   // raises a notification. Quitting is in the tray menu.
   win.on('close', (e) => {
