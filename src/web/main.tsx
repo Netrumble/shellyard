@@ -10,7 +10,7 @@ import { pickSound, playSound, shouldPlay } from './sounds.js';
 import type { SessionInfo } from '../shared/types.js';
 import { getState, noteDigest, onErrorsChange, onSchedulesChange, onSessionsChange, refreshSounds, setView, startStore } from './store.js';
 import { focusOn, splitForFocus } from './focus.js';
-import { detachedIdFrom, startDetachedRegistry } from './detached.js';
+import { detachedIdFrom, isDetached, showDetached, startDetachedRegistry } from './detached.js';
 import { DetachedWindow } from './components/DetachedWindow.js';
 import './theme.css';
 
@@ -37,7 +37,9 @@ function watchForNotifications(): void {
     // In focus, only what blocks a session interrupts; finished ones wait for the digest.
     const { interrupt: waiting, digest } = splitForFocus(newlyWaiting(prev, next), focusOn(getState().focus, Date.now()));
     noteDigest(digest.map((s) => s.id));
-    for (const s of waiting) notify(s, () => setView(viewForSession(getState().sessions, s.id)), getState().sound);
+    // A session in a window of its own is shown there, not in the main page.
+    const open = (id: string): void => (isDetached(id) ? showDetached(id) : setView(viewForSession(getState().sessions, id)));
+    for (const s of waiting) notify(s, () => open(s.id), getState().sound);
     if (waiting.length > 0 && shouldPlay(document.hasFocus(), getState().sound)) void playEventSound(waiting);
   });
 

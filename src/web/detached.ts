@@ -217,6 +217,11 @@ export function reattach(id: string): void {
   mark(id, false);
 }
 
+/** True when the session is shown in a window of its own. */
+export function isDetached(id: string): boolean {
+  return detached.has(id);
+}
+
 /** Brings a detached session's window forward. */
 export function showDetached(id: string): void {
   detach(id);
