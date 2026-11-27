@@ -21,16 +21,23 @@ export function FolderPicker(props: {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const go = async (path?: string, fallBackHome = false): Promise<void> => {
+  /**
+   * Shows a folder. `follow` when the user went there (Up, a folder, a drive): the field then
+   * takes it, so that saving the form keeps the folder on screen without "Use this folder" first.
+   * Opening the browser is not going somewhere, and leaves the field as it is.
+   */
+  const go = async (path?: string, fallBackHome = false, follow = false): Promise<void> => {
     setBusy(true);
     setError(null);
     try {
-      setListing(await api.folders(path));
+      const shown = await api.folders(path);
+      setListing(shown);
+      if (follow) onChange(shown.path);
     } catch (e) {
       // A default folder that is gone is no fault of the user: show the home folder instead.
       if (fallBackHome && path) {
         setBusy(false);
-        return go(undefined);
+        return go(undefined, false, follow);
       }
       setError((e as Error).message);
     } finally {
@@ -67,7 +74,7 @@ export function FolderPicker(props: {
           {error && (
             <p className="error" role="alert">
               {error}{' '}
-              <button type="button" className="link" onClick={() => void go(undefined)}>
+              <button type="button" className="link" onClick={() => void go(undefined, false, true)}>
                 Go to the home folder
               </button>
             </p>
@@ -76,11 +83,11 @@ export function FolderPicker(props: {
             <>
               <div className="folder-bar">
                 <span className="folder-current">{listing.path}</span>
-                <button type="button" disabled={listing.parent === null || busy} onClick={() => listing.parent && void go(listing.parent)}>
+                <button type="button" disabled={listing.parent === null || busy} onClick={() => listing.parent && void go(listing.parent, false, true)}>
                   Up
                 </button>
                 {listing.roots.length > 1 && (
-                  <select aria-label="Drive" value="" onChange={(e) => e.target.value && void go(e.target.value)}>
+                  <select aria-label="Drive" value="" onChange={(e) => e.target.value && void go(e.target.value, false, true)}>
                     <option value="">Drive…</option>
                     {listing.roots.map((r) => (
                       <option key={r} value={r}>
@@ -100,7 +107,7 @@ export function FolderPicker(props: {
                 <ul className="folder-list">
                   {listing.folders.map((f) => (
                     <li key={f.path}>
-                      <button type="button" disabled={busy} onClick={() => void go(f.path)}>
+                      <button type="button" disabled={busy} onClick={() => void go(f.path, false, true)}>
                         {f.name}
                       </button>
                     </li>
