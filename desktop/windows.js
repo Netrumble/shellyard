@@ -16,3 +16,19 @@ export function isDetachedWindowUrl(url, origin) {
   const id = u.searchParams.get('detached');
   return id !== null && SESSION_ID.test(id) && [...u.searchParams.keys()].length === 1;
 }
+
+/** The session a window of the app shows on its own, or null for any other window. */
+export function detachedSessionOf(url, origin) {
+  return isDetachedWindowUrl(url, origin) ? new URL(url).searchParams.get('detached') : null;
+}
+
+/**
+ * Brings a window to the front: shown if hidden, restored if minimised, then focused. The page
+ * cannot do it itself, `window.focus()` on the window it opened leaves it behind or minimised.
+ */
+export function raise(win) {
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.moveTop();
+  win.focus();
+}

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { ensureServer, pageAddress, restartServer, writeLauncherPage } from '@talentiaoss/shellyard/launcher';
 import { findNode } from './find-node.js';
 import { adoptLoginPath } from './login-env.js';
-import { isDetachedWindowUrl } from './windows.js';
+import { detachedSessionOf, isDetachedWindowUrl, raise } from './windows.js';
 import { AUTO_CHECK_EVERY_MS, checkForUpdate, DEFAULT_UPDATE_REPO, isRepoName } from './updates.js';
 
 const isMac = process.platform === 'darwin';
@@ -28,9 +28,7 @@ let toldAboutTray = false;
 
 function showWindow() {
   if (!win) return void openWindow();
-  if (win.isMinimized()) win.restore();
-  win.show();
-  win.focus();
+  raise(win);
 }
 
 // --- Updates -------------------------------------------------------------------------------
@@ -368,6 +366,20 @@ if (!app.requestSingleInstanceLock()) {
       return;
     }
     if (from === pageOrigin) showWindow();
+  });
+  // "Show window" on the tile of a detached session, or a click on its notification: the page
+  // asks for that session's own window, which only the app can bring forward.
+  ipcMain.on('shellyard:show-detached', (e, id) => {
+    if (!win || e.sender !== win.webContents || typeof id !== 'string') return;
+    let from = null;
+    try {
+      from = new URL(e.senderFrame?.url ?? '').origin;
+    } catch {
+      return;
+    }
+    if (from !== pageOrigin) return;
+    const own = BrowserWindow.getAllWindows().find((w) => w !== win && detachedSessionOf(w.webContents.getURL(), pageOrigin) === id);
+    if (own) raise(own);
   });
   app.on('before-quit', () => {
     quitting = true;

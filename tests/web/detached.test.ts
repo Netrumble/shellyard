@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { boundsFor, detachedIdFrom, detachedUrl, droppedOutside, parseMessage, windowFeatures, withBounds, type Bounds } from '../../src/web/detached.js';
+import { describe, expect, it, vi } from 'vitest';
+import { boundsFor, bringForward, detachedIdFrom, detachedUrl, droppedOutside, parseMessage, windowFeatures, withBounds, type Bounds } from '../../src/web/detached.js';
 
 const ID = '0f8fad5b-d9cb-469f-a165-70867728950e';
 
@@ -85,5 +85,23 @@ describe('withBounds', () => {
     expect(keys).toHaveLength(50);
     expect(keys[0]).toBe('s10');
     expect(keys.at(-1)).toBe('s59');
+  });
+});
+
+describe('bringForward', () => {
+  it('asks the desktop app to raise the window, then focuses it', () => {
+    const calls: string[] = [];
+    const known = { focus: () => calls.push('focus') } as unknown as Window;
+    const w = { shellyardDesktop: { showWindow: vi.fn(), showDetached: (id: string) => calls.push(`raise ${id}`) } } as unknown as Window;
+    bringForward(ID, known, w);
+    expect(calls).toEqual([`raise ${ID}`, 'focus']);
+  });
+
+  it('still focuses the window in a browser, or with an app that lacks the call or fails', () => {
+    for (const w of [{}, { shellyardDesktop: { showWindow: vi.fn() } }, { shellyardDesktop: { showWindow: vi.fn(), showDetached: () => { throw new Error('gone'); } } }]) {
+      const focus = vi.fn();
+      bringForward(ID, { focus } as unknown as Window, w as unknown as Window);
+      expect(focus).toHaveBeenCalledOnce();
+    }
   });
 });

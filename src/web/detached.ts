@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import type { DesktopBridge } from './notify.js';
 
 // A session can be shown in a window of its own (to put it on another monitor): the same page,
 // opened on ?detached=<session id>, showing only that terminal. The pages of one origin tell each
@@ -180,17 +181,28 @@ export function useDetached(): ReadonlySet<string> {
 }
 
 /**
+ * Brings forward a session's window. `window.focus()` on it, or asked of it, is not enough: in
+ * the desktop app it leaves the window behind the main one, or minimised, so the app is asked to
+ * raise it. A browser lets the page focus a window it opened.
+ */
+export function bringForward(id: string, known: Window | null, w: Window & { shellyardDesktop?: DesktopBridge } = window): void {
+  try {
+    w.shellyardDesktop?.showDetached?.(id);
+  } catch {
+    // An app without the call: focusing is all there is.
+  }
+  if (known) known.focus();
+  else channel?.postMessage({ t: 'focus', id } satisfies DetachedMessage);
+}
+
+/**
  * Opens a session in a window of its own, or brings its window forward if it has one. `at` is
  * where a drag dropped it. False when the browser refused the window (a popup blocker).
  */
 export function detach(id: string, at: ScreenPoint | null = null): boolean {
   const known = opened.get(id);
-  if (known && !known.closed) {
-    known.focus();
-    return true;
-  }
-  if (detached.has(id)) {
-    channel?.postMessage({ t: 'focus', id } satisfies DetachedMessage);
+  if ((known && !known.closed) || detached.has(id)) {
+    bringForward(id, known && !known.closed ? known : null);
     return true;
   }
   const win = window.open(detachedUrl(id), windowName(id), windowFeatures(boundsFor(savedBounds(id), at)));

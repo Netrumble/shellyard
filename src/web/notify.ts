@@ -4,8 +4,10 @@ import { reasonLabel } from './attention.js';
 let asked = false;
 
 /** What the desktop app's window offers the page (see desktop/preload.cjs); absent in a browser. */
-interface DesktopBridge {
+export interface DesktopBridge {
   showWindow(): void;
+  /** Brings forward the window of a session shown on its own; absent in an older app. */
+  showDetached?(id: string): void;
 }
 
 /**
