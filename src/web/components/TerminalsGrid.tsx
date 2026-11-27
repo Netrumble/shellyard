@@ -9,9 +9,39 @@ import { BackgroundButton } from './BackgroundEditor.js';
 import { WorktreeChip } from './WorktreeChip.js';
 import { ChangesBadge } from './ChangesDialog.js';
 import { TerminalView } from './TerminalView.js';
+import { dragSource, pressOnControl } from './drag-target.js';
+import { SESSION_DRAG } from '../drag.js';
+import { detach, reattach, showDetached, useDetached } from '../detached.js';
 
-/** What stands in for a terminal when the session never started. */
-export function SessionBody({ session, autoFocus, onFocusChange }: { session: SessionInfo; autoFocus?: boolean; onFocusChange?: (focused: boolean) => void }): React.JSX.Element {
+/** What stands in for the terminal of a session shown in a window of its own. */
+function DetachedPlaceholder({ session }: { session: SessionInfo }): React.JSX.Element {
+  return (
+    <div className="detached-placeholder" role="status">
+      <strong>{session.name} is open in a window of its own.</strong>
+      <span className="detached-actions">
+        <button type="button" onClick={() => showDetached(session.id)}>
+          Show window
+        </button>
+        <button type="button" onClick={() => reattach(session.id)}>
+          Bring back
+        </button>
+      </span>
+    </div>
+  );
+}
+
+/** Opens a session in a window of its own; says so when the browser blocked the window. */
+export function detachOrWarn(id: string): void {
+  if (!detach(id)) window.alert('The browser blocked the new window. Allow pop-ups for this page to open sessions in windows of their own.');
+}
+
+/**
+ * The terminal of a session; what stands in for it when the session never started, or when it
+ * is shown in a window of its own (`inOwnWindow` is that window, which always draws it).
+ */
+export function SessionBody({ session, autoFocus, onFocusChange, inOwnWindow }: { session: SessionInfo; autoFocus?: boolean; onFocusChange?: (focused: boolean) => void; inOwnWindow?: boolean }): React.JSX.Element {
+  const detached = useDetached();
+  if (!inOwnWindow && detached.has(session.id)) return <DetachedPlaceholder session={session} />;
   if (session.error) {
     return (
       <div className="session-error" role="alert">
@@ -23,9 +53,35 @@ export function SessionBody({ session, autoFocus, onFocusChange }: { session: Se
   return <TerminalView sessionId={session.id} autoFocus={autoFocus} onFocusChange={onFocusChange} background={session.background} font={session.font} size={{ cols: session.cols, rows: session.rows }} />;
 }
 
-function TileHeader({ session, children }: { session: SessionInfo; children?: React.ReactNode }): React.JSX.Element {
+/**
+ * The whole header of a terminal is its handle (its name alone is too small a target once it is
+ * shortened), except its buttons, lists and inputs, which keep their own use of the mouse. It is
+ * decided on the press: `dragstart` is dispatched on the header itself, never on the control
+ * under the pointer, and a draggable header would also take a slider's or a text field's drag.
+ */
+function headerDragSource(id: string): ReturnType<typeof dragSource> & { onPointerDownCapture: (e: React.PointerEvent<HTMLElement>) => void } {
+  return {
+    ...dragSource(SESSION_DRAG, id),
+    onPointerDownCapture: (e) => {
+      e.currentTarget.draggable = !pressOnControl(e.target);
+    },
+  };
+}
+
+
+/**
+ * The header of a terminal. `inOwnWindow` is the header of a detached session's window: it has no
+ * Pop out button and it is not dragged, and "_" brings the session back instead.
+ */
+export function TileHeader({ session, children, inOwnWindow }: { session: SessionInfo; children?: React.ReactNode; inOwnWindow?: boolean }): React.JSX.Element {
+  const detached = useDetached().has(session.id);
   return (
-    <header className="tile-header" style={{ borderTopColor: session.color }}>
+    <header
+      className={inOwnWindow ? 'tile-header' : 'tile-header drag-handle'}
+      style={{ borderTopColor: session.color }}
+      title={inOwnWindow ? undefined : 'Drag to an area, or out of the window to open it in a window of its own'}
+      {...(inOwnWindow ? {} : headerDragSource(session.id))}
+    >
       <ColorDot color={session.color} />
       <span className="session-name">{session.name}</span>
       {session.model && <span className="model">{session.model}</span>}
@@ -38,7 +94,12 @@ function TileHeader({ session, children }: { session: SessionInfo; children?: Re
       {children}
       <StorySelect session={session} />
       <BackgroundButton session={session} />
-      <SessionActions session={session} onMinimize={() => setView({ kind: 'board' })} />
+      {!inOwnWindow && !detached && (
+        <button type="button" className="pop-out" title="Open in a window of its own (or drag the header out of the window)" aria-label={`Open ${session.name} in a window of its own`} onClick={() => detachOrWarn(session.id)}>
+          ⧉<span className="label"> Pop out</span>
+        </button>
+      )}
+      <SessionActions session={session} onMinimize={inOwnWindow ? undefined : () => setView({ kind: 'board' })} />
     </header>
   );
 }

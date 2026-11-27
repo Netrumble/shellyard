@@ -1,12 +1,13 @@
 // The desktop app: a window on the ShellYard server. The server itself is the one `shellyard` starts, a
 // background process that outlives the window, so closing the app never stops a session.
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, session, shell, Tray } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, screen, session, shell, Tray } from 'electron';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ensureServer, pageAddress, restartServer, writeLauncherPage } from '@talentiaoss/shellyard/launcher';
 import { findNode } from './find-node.js';
 import { adoptLoginPath } from './login-env.js';
+import { detachedSessionOf, isDetachedWindowUrl, placeOnScreen, raise } from './windows.js';
 import { AUTO_CHECK_EVERY_MS, checkForUpdate, DEFAULT_UPDATE_REPO, isRepoName } from './updates.js';
 
 const isMac = process.platform === 'darwin';
@@ -27,9 +28,7 @@ let toldAboutTray = false;
 
 function showWindow() {
   if (!win) return void openWindow();
-  if (win.isMinimized()) win.restore();
-  win.show();
-  win.focus();
+  raise(win);
 }
 
 // --- Updates -------------------------------------------------------------------------------
@@ -308,6 +307,8 @@ async function createWindow() {
   const ses = session.fromPartition('shellyard');
   await ses.clearStorageData();
 
+  // The preload gives the page one call, showWindow (see preload.cjs), and nothing else.
+  const webPreferences = { contextIsolation: true, nodeIntegration: false, sandbox: true, session: ses, preload: join(here, 'preload.cjs') };
   win = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -315,20 +316,45 @@ async function createWindow() {
     icon: icon.isEmpty() ? undefined : icon,
     autoHideMenuBar: true,
     backgroundColor: '#181b21',
-    // The preload gives the page one call, showWindow (see preload.cjs), and nothing else.
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, session: ses, preload: join(here, 'preload.cjs') },
+    webPreferences,
   });
 
-  // Links leave the app for the browser; the window itself stays on the server.
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//.test(url)) void shell.openExternal(url);
-    return { action: 'deny' };
-  });
-  win.webContents.on('will-navigate', (e, url) => {
-    if (new URL(url).origin === origin) return;
-    e.preventDefault();
-    if (/^https?:\/\//.test(url)) void shell.openExternal(url);
-  });
+  // Links leave the app for the browser and every window stays on the server. A session's own
+  // window (the page on ?detached=<id>) opens in the app, locked down as the main one.
+  const lockDown = (contents) => {
+    contents.setWindowOpenHandler(({ url }) => {
+      if (isDetachedWindowUrl(url, origin)) {
+        return {
+          action: 'allow',
+          // useContentSize: the page asks for the size of the content, as window.open does in a
+          // browser, not of the window with its frame.
+          overrideBrowserWindowOptions: { icon: icon.isEmpty() ? undefined : icon, autoHideMenuBar: true, backgroundColor: '#181b21', useContentSize: true, webPreferences },
+        };
+      }
+      if (/^https?:\/\//.test(url)) void shell.openExternal(url);
+      return { action: 'deny' };
+    });
+    contents.on('will-navigate', (e, url) => {
+      if (new URL(url).origin === origin) return;
+      e.preventDefault();
+      if (/^https?:\/\//.test(url)) void shell.openExternal(url);
+    });
+    contents.on('did-create-window', (child) => {
+      lockDown(child.webContents);
+      keepOnScreen(child);
+    });
+  };
+  lockDown(win.webContents);
+
+  // A session's window asked for where it was last: brought back if that is off every screen.
+  const keepOnScreen = (child) => {
+    const bounds = child.getBounds();
+    const areas = screen.getAllDisplays().map((d) => d.workArea);
+    const home = screen.getDisplayMatching(win?.getBounds() ?? bounds).workArea;
+    const placed = placeOnScreen(bounds, areas, home);
+    if (placed !== bounds) child.setBounds(placed);
+  };
+
   // Closing hides the window: the page stays loaded, so a session that needs you still
   // raises a notification. Quitting is in the tray menu.
   const shown = win;
@@ -369,6 +395,20 @@ if (!app.requestSingleInstanceLock()) {
       return;
     }
     if (from === pageOrigin) showWindow();
+  });
+  // "Show window" on the tile of a detached session, or a click on its notification: the page
+  // asks for that session's own window, which only the app can bring forward.
+  ipcMain.on('shellyard:show-detached', (e, id) => {
+    if (!win || e.sender !== win.webContents || typeof id !== 'string') return;
+    let from = null;
+    try {
+      from = new URL(e.senderFrame?.url ?? '').origin;
+    } catch {
+      return;
+    }
+    if (from !== pageOrigin) return;
+    const own = BrowserWindow.getAllWindows().find((w) => w !== win && detachedSessionOf(w.webContents.getURL(), pageOrigin) === id);
+    if (own) raise(own);
   });
   app.on('before-quit', () => {
     quitting = true;
