@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { PtySession, realPtyFactory } from '../../src/server/pty-session.js';
+import { PtySession, realPtyFactory, spawnOptions } from '../../src/server/pty-session.js';
 import { toLaunch } from '../../src/server/shells.js';
 import { fakePtyFactory, waitUntil } from '../helpers.js';
 
@@ -190,5 +190,18 @@ describe('PtySession with a real pty', () => {
     s.onExit(() => (exited = true));
     s.kill();
     await waitUntil(() => exited, 8000);
+  });
+});
+
+describe('spawnOptions', () => {
+  const opts = { cwd: '.', env: {}, cols: 80, rows: 24 };
+
+  it('uses the ConPTY shipped with node-pty on Windows, which counts emoji widths as the terminals do', () => {
+    expect(spawnOptions(opts, 'win32')).toHaveProperty('useConptyDll', true);
+  });
+
+  it('leaves the option out elsewhere', () => {
+    expect(spawnOptions(opts, 'linux')).not.toHaveProperty('useConptyDll');
+    expect(spawnOptions(opts, 'darwin')).not.toHaveProperty('useConptyDll');
   });
 });
