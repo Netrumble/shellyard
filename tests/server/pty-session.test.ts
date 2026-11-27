@@ -30,6 +30,14 @@ describe('PtySession with a fake pty', () => {
     expect(snap).toContain('world');
   });
 
+  it('counts an emoji, also one written with U+FE0F, as two cells in the snapshot', async () => {
+    const f = fakePtyFactory();
+    const s = new PtySession(f.factory, launch, opts);
+    // Two emoji, then a jump to column 5: right after them only if each took two cells.
+    f.last().emit('\u{1F3F7}️\u{1F525}\x1b[5GZ');
+    expect((await s.snapshot()).data).toContain('\u{1F3F7}️\u{1F525}Z');
+  });
+
   it('gives a snapshot with the size the screen had when it was taken', async () => {
     const f = fakePtyFactory();
     const s = new PtySession(f.factory, launch, opts);

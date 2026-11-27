@@ -1,10 +1,12 @@
 import nodePty from '@lydell/node-pty';
 import serializePkg from '@xterm/addon-serialize';
 import headlessPkg from '@xterm/headless';
+import graphemesPkg from '@xterm/addon-unicode-graphemes';
 import type { Launch } from './shells.js';
 
 const { Terminal } = headlessPkg;
 const { SerializeAddon } = serializePkg;
+const { UnicodeGraphemesAddon } = graphemesPkg;
 
 export const SCROLLBACK_LINES = 5000;
 
@@ -66,6 +68,10 @@ export class PtySession {
       scrollback: SCROLLBACK_LINES,
       allowProposedApi: true,
     });
+    // Count emoji and other wide characters as two cells, as the browser terminal does, so the
+    // screen a later viewer restores lines up with the one live viewers saw.
+    this.mirror.loadAddon(new UnicodeGraphemesAddon());
+    this.mirror.unicode.activeVersion = '15-graphemes';
     this.serializer = new SerializeAddon();
     this.mirror.loadAddon(this.serializer);
 

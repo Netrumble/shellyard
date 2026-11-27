@@ -49,15 +49,22 @@ describe('hostStyle', () => {
 });
 
 describe('terminalFont', () => {
+  const STACK = '"Cascadia Mono", "Cascadia Code", Consolas, "DejaVu Sans Mono", "CaskaydiaCove Nerd Font", "CaskaydiaCove NF", "Symbols Nerd Font Mono", "Symbols Nerd Font", "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", monospace';
   it('uses the usual stack and size when nothing was chosen', () => {
-    expect(terminalFont(null)).toEqual({ fontFamily: '"Cascadia Mono", "Cascadia Code", Consolas, "DejaVu Sans Mono", monospace', fontSize: 13 });
+    expect(terminalFont(null)).toEqual({ fontFamily: STACK, fontSize: 13 });
   });
   it('puts a chosen font first, and keeps the stack behind it for a machine without that font', () => {
-    expect(terminalFont({ family: 'JetBrains Mono', size: 16 })).toEqual({ fontFamily: '"JetBrains Mono", "Cascadia Mono", "Cascadia Code", Consolas, "DejaVu Sans Mono", monospace', fontSize: 16 });
+    expect(terminalFont({ family: 'JetBrains Mono', size: 16 })).toEqual({ fontFamily: `"JetBrains Mono", ${STACK}`, fontSize: 16 });
   });
   it('takes a size alone, or a font alone', () => {
     expect(terminalFont({ family: null, size: 18 }).fontSize).toBe(18);
     expect(terminalFont({ family: null, size: 18 }).fontFamily).toMatch(/^"Cascadia Mono"/);
     expect(terminalFont({ family: 'Consolas', size: null })).toMatchObject({ fontSize: 13 });
+  });
+  it('falls back to a Nerd Font for icons and to an emoji font for pictographs, after the text fonts', () => {
+    const family = terminalFont(null).fontFamily;
+    expect(family.indexOf('Nerd Font')).toBeGreaterThan(family.indexOf('"DejaVu Sans Mono"'));
+    expect(family.indexOf('"Segoe UI Emoji"')).toBeGreaterThan(family.indexOf('Nerd Font'));
+    expect(family.endsWith('monospace')).toBe(true);
   });
 });
