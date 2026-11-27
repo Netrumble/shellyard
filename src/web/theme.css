@@ -181,6 +181,9 @@ code {
 .app {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
+  /* One row as tall as the window: without it the row grows to the content, the whole page
+     scrolls (topbar included) and the sidebar gets a second scrollbar inside the page's. */
+  grid-template-rows: minmax(0, 1fr);
   height: 100%;
 }
 
@@ -356,6 +359,33 @@ code {
   min-height: 0;
   overflow: auto;
   padding: 14px 16px;
+}
+
+/* Focusable only so the keys scroll it (see App.tsx): no ring on a click, one from the keyboard. */
+.content:focus {
+  outline: none;
+}
+
+.content:focus-visible {
+  outline: 2px solid var(--done);
+  outline-offset: -2px;
+}
+
+/* A printed view (or one saved as PDF) runs over as many pages as it needs, as before the
+   window-high row: the view is no longer cut to one window. */
+@media print {
+  .app {
+    grid-template-rows: auto;
+    height: auto;
+  }
+
+  .main {
+    height: auto;
+  }
+
+  .content {
+    overflow: visible;
+  }
 }
 
 .empty {
