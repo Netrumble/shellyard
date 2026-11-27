@@ -18,6 +18,11 @@ let token = '';
 let onUnauthorized: () => void = () => {};
 
 /** The page holds the token and sends it on every call; the browser never sends it by itself. */
+/** The token in use, to hand to a window this page opens. */
+export function currentToken(): string {
+  return token;
+}
+
 export function configureApi(opts: { token: string; onUnauthorized: () => void }): void {
   token = opts.token;
   onUnauthorized = opts.onUnauthorized;

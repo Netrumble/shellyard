@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 // @ts-expect-error plain JavaScript module of the desktop app, without types
-import { detachedSessionOf, isDetachedWindowUrl, raise } from '../../desktop/windows.js';
+import { detachedSessionOf, isDetachedWindowUrl, placeOnScreen, raise } from '../../desktop/windows.js';
 
 const ORIGIN = 'http://0123456789abcdef0123456789abcdef.localhost:7717';
 const ID = '0f8fad5b-d9cb-469f-a165-70867728950e';
@@ -58,5 +58,27 @@ describe('raise', () => {
     const { w, calls } = fakeWindow(false);
     raise(w);
     expect(calls).toEqual(['show', 'moveTop', 'focus']);
+  });
+});
+
+describe('placeOnScreen', () => {
+  const main = { x: 0, y: 0, width: 1920, height: 1040 };
+  const left = { x: -1920, y: 0, width: 1920, height: 1040 };
+
+  it('leaves a window whose title bar is on a screen where it is, on any monitor', () => {
+    const b = { x: 200, y: 100, width: 900, height: 600 };
+    expect(placeOnScreen(b, [main, left], main)).toBe(b);
+    const other = { x: -1500, y: 50, width: 900, height: 600 };
+    expect(placeOnScreen(other, [main, left], main)).toBe(other);
+  });
+
+  it('centres on the main window screen a window off every screen, or where a minimised one was', () => {
+    expect(placeOnScreen({ x: -1500, y: 50, width: 900, height: 600 }, [main], main)).toEqual({ x: 510, y: 220, width: 900, height: 600 });
+    expect(placeOnScreen({ x: -32000, y: -32000, width: 900, height: 600 }, [main], main)).toEqual({ x: 510, y: 220, width: 900, height: 600 });
+  });
+
+  it('brings back a window whose title bar is above the screen, and shrinks one larger than it', () => {
+    expect(placeOnScreen({ x: 200, y: -700, width: 900, height: 800 }, [main], main)).toEqual({ x: 510, y: 120, width: 900, height: 800 });
+    expect(placeOnScreen({ x: 5000, y: 0, width: 3000, height: 2000 }, [main], main)).toEqual({ x: 0, y: 0, width: 1920, height: 1040 });
   });
 });

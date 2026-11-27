@@ -1,13 +1,13 @@
 // The desktop app: a window on the ShellYard server. The server itself is the one `shellyard` starts, a
 // background process that outlives the window, so closing the app never stops a session.
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, session, shell, Tray } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, screen, session, shell, Tray } from 'electron';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ensureServer, pageAddress, restartServer, writeLauncherPage } from '@talentiaoss/shellyard/launcher';
 import { findNode } from './find-node.js';
 import { adoptLoginPath } from './login-env.js';
-import { detachedSessionOf, isDetachedWindowUrl, raise } from './windows.js';
+import { detachedSessionOf, isDetachedWindowUrl, placeOnScreen, raise } from './windows.js';
 import { AUTO_CHECK_EVERY_MS, checkForUpdate, DEFAULT_UPDATE_REPO, isRepoName } from './updates.js';
 
 const isMac = process.platform === 'darwin';
@@ -312,7 +312,9 @@ async function openWindow() {
       if (isDetachedWindowUrl(url, origin)) {
         return {
           action: 'allow',
-          overrideBrowserWindowOptions: { icon: icon.isEmpty() ? undefined : icon, autoHideMenuBar: true, backgroundColor: '#181b21', webPreferences },
+          // useContentSize: the page asks for the size of the content, as window.open does in a
+          // browser, not of the window with its frame.
+          overrideBrowserWindowOptions: { icon: icon.isEmpty() ? undefined : icon, autoHideMenuBar: true, backgroundColor: '#181b21', useContentSize: true, webPreferences },
         };
       }
       if (/^https?:\/\//.test(url)) void shell.openExternal(url);
@@ -323,9 +325,21 @@ async function openWindow() {
       e.preventDefault();
       if (/^https?:\/\//.test(url)) void shell.openExternal(url);
     });
-    contents.on('did-create-window', (child) => lockDown(child.webContents));
+    contents.on('did-create-window', (child) => {
+      lockDown(child.webContents);
+      keepOnScreen(child);
+    });
   };
   lockDown(win.webContents);
+
+  // A session's window asked for where it was last: brought back if that is off every screen.
+  const keepOnScreen = (child) => {
+    const bounds = child.getBounds();
+    const areas = screen.getAllDisplays().map((d) => d.workArea);
+    const home = screen.getDisplayMatching(win?.getBounds() ?? bounds).workArea;
+    const placed = placeOnScreen(bounds, areas, home);
+    if (placed !== bounds) child.setBounds(placed);
+  };
 
   // Closing hides the window: the page stays loaded, so a session that needs you still
   // raises a notification. Quitting is in the tray menu.

@@ -9,7 +9,7 @@ import { BackgroundButton } from './BackgroundEditor.js';
 import { WorktreeChip } from './WorktreeChip.js';
 import { ChangesBadge } from './ChangesDialog.js';
 import { TerminalView } from './TerminalView.js';
-import { dragSource } from './drag-target.js';
+import { dragSource, pressOnControl } from './drag-target.js';
 import { SESSION_DRAG } from '../drag.js';
 import { detach, reattach, showDetached, useDetached } from '../detached.js';
 
@@ -55,21 +55,19 @@ export function SessionBody({ session, autoFocus, onFocusChange, inOwnWindow }: 
 
 /**
  * The whole header of a terminal is its handle (its name alone is too small a target once it is
- * shortened), except its buttons and lists, which keep their own use of the mouse.
+ * shortened), except its buttons, lists and inputs, which keep their own use of the mouse. It is
+ * decided on the press: `dragstart` is dispatched on the header itself, never on the control
+ * under the pointer, and a draggable header would also take a slider's or a text field's drag.
  */
-function headerDragSource(id: string): ReturnType<typeof dragSource> {
-  const source = dragSource(SESSION_DRAG, id);
+function headerDragSource(id: string): ReturnType<typeof dragSource> & { onPointerDownCapture: (e: React.PointerEvent<HTMLElement>) => void } {
   return {
-    ...source,
-    onDragStart: (e) => {
-      if ((e.target as Element).closest?.('button, select, input, a, [role="button"]')) {
-        e.preventDefault();
-        return;
-      }
-      source.onDragStart(e);
+    ...dragSource(SESSION_DRAG, id),
+    onPointerDownCapture: (e) => {
+      e.currentTarget.draggable = !pressOnControl(e.target);
     },
   };
 }
+
 
 /**
  * The header of a terminal. `inOwnWindow` is the header of a detached session's window: it has no

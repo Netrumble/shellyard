@@ -32,3 +32,26 @@ export function raise(win) {
   win.moveTop();
   win.focus();
 }
+
+/** How much of a window must be on a screen to be found and moved: a good part of its title bar. */
+const GRIP_WIDTH = 120;
+const GRIP_HEIGHT = 32;
+
+/**
+ * Where a session's window goes so that it can be seen: unchanged when its title bar is on one of
+ * the screens' work areas, otherwise centred on `home` (the main window's screen) and no larger
+ * than it. The page asks for the place the window was last, which may be on a monitor since
+ * unplugged or (from an older version) where Windows puts a minimised window, -32000; a browser
+ * pulls such a window back, the app has to.
+ */
+export function placeOnScreen(bounds, areas, home) {
+  const grip = (a) => {
+    const w = Math.min(bounds.x + bounds.width, a.x + a.width) - Math.max(bounds.x, a.x);
+    const h = Math.min(bounds.y + GRIP_HEIGHT, a.y + a.height) - Math.max(bounds.y, a.y);
+    return w >= Math.min(GRIP_WIDTH, bounds.width) && h >= Math.min(GRIP_HEIGHT, bounds.height);
+  };
+  if (areas.some(grip)) return bounds;
+  const width = Math.min(bounds.width, home.width);
+  const height = Math.min(bounds.height, home.height);
+  return { x: Math.round(home.x + (home.width - width) / 2), y: Math.round(home.y + (home.height - height) / 2), width, height };
+}

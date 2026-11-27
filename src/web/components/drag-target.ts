@@ -27,6 +27,13 @@ function detachIfOutside(type: string, id: string, e: React.DragEvent): void {
   if (droppedOutside(at, window)) detach(id, at);
 }
 
+const CONTROLS = 'button, select, input, textarea, a, label, [role="button"], [role="slider"]';
+
+/** True when a press is on a control (a button, a list, an input), which is then not the start of a drag. */
+export function pressOnControl(target: EventTarget | null): boolean {
+  return typeof (target as Element | null)?.closest === 'function' && (target as Element).closest(CONTROLS) !== null;
+}
+
 /** Makes an element the start of a drag carrying `id` under `type`. */
 export function dragSource(type: string, id: string): { draggable: true; onDragStart: (e: React.DragEvent) => void; onDragEnd: (e: React.DragEvent) => void } {
   return {
