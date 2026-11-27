@@ -64,13 +64,18 @@ export function hostStyle(background: TerminalBackground | null, imageUrl: strin
 
 /**
  * The fonts a terminal falls back through; the first one installed is used. The Nerd Font
- * names come after the usual fonts so the icons they carry (git branch, folders...) still show,
- * and the emoji fonts last so pictographs are drawn in colour rather than as empty boxes.
+ * names come after the usual fonts so the icons they carry (git branch, folders...) still show:
+ * the Mono variants first, whose icons fit one cell as the terminal draws them (the others' are
+ * wider and overlap the next character). Then `monospace`, before the emoji fonts: these carry
+ * the digits, `#` and `*` too (keycap bases), and on a machine with none of the fonts named
+ * (a Mac out of the box) they would draw every digit. Fallback goes on per character past a
+ * generic family, so pictographs still reach the colour fonts.
  */
 const FONT_STACK =
   '"Cascadia Mono", "Cascadia Code", Consolas, "DejaVu Sans Mono", ' +
-  '"CaskaydiaCove Nerd Font", "CaskaydiaCove NF", "Symbols Nerd Font Mono", "Symbols Nerd Font", ' +
-  '"Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", monospace';
+  '"CaskaydiaCove Nerd Font Mono", "CaskaydiaCove NFM", "Symbols Nerd Font Mono", ' +
+  '"CaskaydiaCove Nerd Font", "CaskaydiaCove NF", "Symbols Nerd Font", monospace, ' +
+  '"Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji"';
 export const DEFAULT_FONT_SIZE = 13;
 
 /** Fixed-width fonts commonly installed, offered by name. Any other can be typed. */

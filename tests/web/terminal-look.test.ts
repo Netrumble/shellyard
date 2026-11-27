@@ -49,7 +49,9 @@ describe('hostStyle', () => {
 });
 
 describe('terminalFont', () => {
-  const STACK = '"Cascadia Mono", "Cascadia Code", Consolas, "DejaVu Sans Mono", "CaskaydiaCove Nerd Font", "CaskaydiaCove NF", "Symbols Nerd Font Mono", "Symbols Nerd Font", "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", monospace';
+  const STACK =
+    '"Cascadia Mono", "Cascadia Code", Consolas, "DejaVu Sans Mono", "CaskaydiaCove Nerd Font Mono", "CaskaydiaCove NFM", "Symbols Nerd Font Mono", ' +
+    '"CaskaydiaCove Nerd Font", "CaskaydiaCove NF", "Symbols Nerd Font", monospace, "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji"';
   it('uses the usual stack and size when nothing was chosen', () => {
     expect(terminalFont(null)).toEqual({ fontFamily: STACK, fontSize: 13 });
   });
@@ -64,7 +66,17 @@ describe('terminalFont', () => {
   it('falls back to a Nerd Font for icons and to an emoji font for pictographs, after the text fonts', () => {
     const family = terminalFont(null).fontFamily;
     expect(family.indexOf('Nerd Font')).toBeGreaterThan(family.indexOf('"DejaVu Sans Mono"'));
-    expect(family.indexOf('"Segoe UI Emoji"')).toBeGreaterThan(family.indexOf('Nerd Font'));
-    expect(family.endsWith('monospace')).toBe(true);
+    expect(family.indexOf('"Segoe UI Emoji"')).toBeGreaterThan(family.lastIndexOf('Nerd Font'));
+  });
+  it('puts the single-cell Nerd Font variants before the wide ones', () => {
+    const family = terminalFont(null).fontFamily;
+    expect(family.indexOf('"Symbols Nerd Font Mono"')).toBeLessThan(family.indexOf('"CaskaydiaCove Nerd Font"'));
+    expect(family.indexOf('"CaskaydiaCove Nerd Font Mono"')).toBeLessThan(family.indexOf('"CaskaydiaCove Nerd Font"'));
+  });
+  it('reaches monospace before the emoji fonts, which would otherwise draw the digits', () => {
+    const family = terminalFont(null).fontFamily;
+    for (const emoji of ['"Segoe UI Emoji"', '"Apple Color Emoji"', '"Noto Color Emoji"']) {
+      expect(family.indexOf('monospace')).toBeLessThan(family.indexOf(emoji));
+    }
   });
 });
