@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { PtySession, realPtyFactory } from '../../src/server/pty-session.js';
+import { PtySession, realPtyFactory, spawnOptions } from '../../src/server/pty-session.js';
 import { toLaunch } from '../../src/server/shells.js';
 import { fakePtyFactory, waitUntil } from '../helpers.js';
 
@@ -28,6 +28,14 @@ describe('PtySession with a fake pty', () => {
     const snap = (await s.snapshot()).data;
     expect(snap).toContain('hello');
     expect(snap).toContain('world');
+  });
+
+  it('counts an emoji, also one written with U+FE0F, as two cells in the snapshot', async () => {
+    const f = fakePtyFactory();
+    const s = new PtySession(f.factory, launch, opts);
+    // Two emoji, then a jump to column 5: right after them only if each took two cells.
+    f.last().emit('\u{1F3F7}\u{FE0F}\u{1F525}\x1b[5GZ');
+    expect((await s.snapshot()).data).toContain('\u{1F3F7}\u{FE0F}\u{1F525}Z');
   });
 
   it('gives a snapshot with the size the screen had when it was taken', async () => {
@@ -182,5 +190,18 @@ describe('PtySession with a real pty', () => {
     s.onExit(() => (exited = true));
     s.kill();
     await waitUntil(() => exited, 8000);
+  });
+});
+
+describe('spawnOptions', () => {
+  const opts = { cwd: '.', env: {}, cols: 80, rows: 24 };
+
+  it('uses the ConPTY shipped with node-pty on Windows, which counts emoji widths as the terminals do', () => {
+    expect(spawnOptions(opts, 'win32')).toHaveProperty('useConptyDll', true);
+  });
+
+  it('leaves the option out elsewhere', () => {
+    expect(spawnOptions(opts, 'linux')).not.toHaveProperty('useConptyDll');
+    expect(spawnOptions(opts, 'darwin')).not.toHaveProperty('useConptyDll');
   });
 });

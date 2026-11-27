@@ -1,5 +1,6 @@
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon, type ISearchOptions, type ISearchResultChangeEvent } from '@xterm/addon-search';
+import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { useEffect, useRef, useState } from 'react';
@@ -174,6 +175,11 @@ export function TerminalView(props: {
       term.options.minimumContrastRatio = next.minimumContrastRatio;
     };
     const offTheme = onThemeChange(() => applyLook.current());
+    // Emoji take two cells, as the programs writing them (Claude Code among them) count them,
+    // also when an emoji is a sequence such as U+FE0F after a symbol; with the default Unicode 6
+    // widths a status line of icons runs into itself.
+    term.loadAddon(new UnicodeGraphemesAddon());
+    term.unicode.activeVersion = '15-graphemes';
     const fit = new FitAddon();
     term.loadAddon(fit);
     const search = new SearchAddon({ highlightLimit: HIGHLIGHT_LIMIT });

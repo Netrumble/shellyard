@@ -1,10 +1,12 @@
 import nodePty from '@lydell/node-pty';
 import serializePkg from '@xterm/addon-serialize';
 import headlessPkg from '@xterm/headless';
+import graphemesPkg from '@xterm/addon-unicode-graphemes';
 import type { Launch } from './shells.js';
 
 const { Terminal } = headlessPkg;
 const { SerializeAddon } = serializePkg;
+const { UnicodeGraphemesAddon } = graphemesPkg;
 
 export const SCROLLBACK_LINES = 5000;
 
@@ -32,14 +34,25 @@ export interface Snapshot {
 
 export type PtyFactory =(launch: Launch, opts: PtyOptions) => PtyLike;
 
-export const realPtyFactory: PtyFactory = (launch, opts) =>
-  nodePty.spawn(launch.file, launch.args, {
+/**
+ * The options node-pty spawns a session with. On Windows the output passes through a ConPTY,
+ * which lays each line out by its own idea of character widths before the terminals see it.
+ * The one shipped with node-pty, not the system's, is used: a system conhost of an older
+ * Windows counts an emoji with U+FE0F as one cell where the terminals (15-graphemes) count
+ * two, which shifts the rest of the line; the bundled one counts two on every Windows.
+ */
+export function spawnOptions(opts: PtyOptions, platform: NodeJS.Platform = process.platform): Parameters<typeof nodePty.spawn>[2] {
+  return {
     name: 'xterm-256color',
     cols: opts.cols,
     rows: opts.rows,
     cwd: opts.cwd,
     env: opts.env,
-  });
+    ...(platform === 'win32' ? { useConptyDll: true } : {}),
+  };
+}
+
+export const realPtyFactory: PtyFactory = (launch, opts) => nodePty.spawn(launch.file, launch.args, spawnOptions(opts));
 
 /**
  * One pseudo-terminal process plus a headless terminal fed with the same bytes.
@@ -66,6 +79,10 @@ export class PtySession {
       scrollback: SCROLLBACK_LINES,
       allowProposedApi: true,
     });
+    // Count emoji and other wide characters as two cells, as the browser terminal does, so the
+    // screen a later viewer restores lines up with the one live viewers saw.
+    this.mirror.loadAddon(new UnicodeGraphemesAddon());
+    this.mirror.unicode.activeVersion = '15-graphemes';
     this.serializer = new SerializeAddon();
     this.mirror.loadAddon(this.serializer);
 
