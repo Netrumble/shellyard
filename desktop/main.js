@@ -267,7 +267,21 @@ async function offerRestart(started, node) {
   return restartServer({ port: started.state.port, node });
 }
 
-async function openWindow() {
+let opening = null;
+
+/**
+ * Opens the window, starting the server if needed. Asked again while that is under way (the
+ * app's icon clicked twice, the tray, a second instance), it waits for the same opening: each
+ * call would otherwise start a server of its own, and open a window of its own.
+ */
+function openWindow() {
+  opening ??= createWindow().finally(() => {
+    opening = null;
+  });
+  return opening;
+}
+
+async function createWindow() {
   const node = findNode();
   if (!node) {
     dialog.showErrorBox('ShellYard', 'Node.js was not found on PATH. ShellYard runs its server on Node 22 or later: install it, then start the app again.');
@@ -343,10 +357,11 @@ async function openWindow() {
 
   // Closing hides the window: the page stays loaded, so a session that needs you still
   // raises a notification. Quitting is in the tray menu.
-  win.on('close', (e) => {
+  const shown = win;
+  shown.on('close', (e) => {
     if (quitting) return;
     e.preventDefault();
-    win.hide();
+    shown.hide();
     if (!toldAboutTray && Notification.isSupported()) {
       toldAboutTray = true;
       const body = isMac
@@ -355,13 +370,13 @@ async function openWindow() {
       new Notification({ title: 'ShellYard is still running', body, icon }).show();
     }
   });
-  win.on('closed', () => {
-    win = null;
+  shown.on('closed', () => {
+    if (win === shown) win = null;
   });
   createTray();
 
   // The token travels in the fragment, as with the browser: no server sees it in a request line.
-  await win.loadURL(`${origin}/#token=${started.state.token}`);
+  await shown.loadURL(`${origin}/#token=${started.state.token}`);
 }
 
 // One window is enough: a second start brings the first one forward.

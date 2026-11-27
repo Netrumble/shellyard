@@ -1,4 +1,6 @@
-import { readFileSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -147,13 +149,25 @@ describe('shellyard cli', () => {
 
     it('does not stop, or kill the recorded pid, when the port now belongs to another ShellYard', async () => {
       const s = await start();
-      // A stale file pointing at a live ShellYard that did not write it; its pid is this test process.
+      // Another data folder, whose stale file points at the live ShellYard of the first one; its
+      // pid is this test process.
+      process.env.SHELLYARD_HOME = mkdtempSync(join(tmpdir(), 'shellyard-test-'));
       writeServerState({ pid: process.pid, port: s.port, token: 'stale-token', hookToken: 'h', startedAt: 12345 });
       const c = capture();
       expect(await main(['stop'], c.out)).toBe(0);
       expect(c.lines.join('\n')).toMatch(/not running/i);
       const res = await fetch('http://127.0.0.1:' + s.port + '/api/health');
       expect(res.ok).toBe(true);
+    });
+
+    it('finds and stops a server whose state file was lost, through the folder lock', async () => {
+      const s = await start();
+      rmSync(join(process.env.SHELLYARD_HOME!, 'server.json'));
+      const c = capture();
+      expect(await main(['stop'], c.out)).toBe(0);
+      expect(c.lines.join(' ')).toMatch(/stopped/i);
+      await s.stopped;
+      running.length = 0;
     });
 
     it('clears a stale state file without killing anything', async () => {
@@ -175,6 +189,14 @@ describe('shellyard cli', () => {
       const help = capture();
       await main(['--help'], help.out);
       expect(help.lines.join('\n')).toMatch(/shellyard start/);
+    });
+
+    it('finds a running server whose state file was lost, instead of starting another', async () => {
+      const s = await start();
+      rmSync(join(process.env.SHELLYARD_HOME!, 'server.json'));
+      const r = await ensureServer();
+      expect(r.ok && r.state.port).toBe(s.port);
+      expect(r.ok && r.state.pid).toBe(process.pid);
     });
 
     it('reuses a running server instead of starting another', async () => {
