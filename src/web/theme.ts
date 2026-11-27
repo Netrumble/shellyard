@@ -1,6 +1,8 @@
 // Light, dark, or Talentia's own colours. The choice belongs to this browser; "system" follows
 // what the operating system asks for (light or dark), and keeps following it if that changes.
 
+import { onMediaChange } from './media.js';
+
 export type Theme = 'light' | 'dark' | 'talentia';
 export type ThemeChoice = 'system' | Theme;
 
@@ -38,5 +40,5 @@ export function systemPrefersLight(): boolean {
 /** Calls back whenever the system switches between light and dark. */
 export function watchSystemTheme(cb: () => void): void {
   if (typeof matchMedia !== 'function') return;
-  matchMedia('(prefers-color-scheme: light)').addEventListener('change', cb);
+  onMediaChange(matchMedia('(prefers-color-scheme: light)'), cb);
 }
