@@ -9,6 +9,7 @@
     "find-node.js",
     "login-env.js",
     "updates.js",
+    "windows.js",
     "icon.png",
     "package.json",
     "node_modules/**/*",
