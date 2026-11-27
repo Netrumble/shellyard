@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { clearServerState, dataDir, launcherPagePath, logPath, readServerState, type ServerState } from '../server/config.js';
 import { healthProof, newChallenge, safeEqual } from '../server/auth.js';
 import { DEFAULT_PORT, reportUncaught, startServer } from '../server/index.js';
+import { askHolder, folderId, InstanceHeldError, isInstanceHeld, lockAddress, type Holder } from '../server/instance-lock.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const START_TIMEOUT_MS = 10_000;
@@ -95,6 +96,56 @@ async function liveState(): Promise<ServerState | null> {
     await sleep(300);
   }
   return null;
+}
+
+/**
+ * Asks the process that holds the data folder (see instance-lock.ts) who it is; with `state`, a
+ * ShellYard server writes its state file again first, so that a server whose file was lost, or
+ * that missed the health checks, can still be found and stopped.
+ */
+async function folderHolder(request: 'who' | 'state'): Promise<Holder | 'dead' | 'unknown'> {
+  return askHolder(lockAddress(await folderId(dataDir())), request);
+}
+
+/** The running server, found by its state file or, failing that, through the folder's lock. */
+async function findServer(): Promise<{ state: ServerState } | { holder: Holder | 'unknown' } | null> {
+  const state = await liveState();
+  if (state) return { state };
+  const holder = await folderHolder('state');
+  if (holder === 'dead') return null;
+  const again = await liveState();
+  return again ? { state: again } : { holder };
+}
+
+/**
+ * Waits for a process to end; false if it is still there after the time given. This very process
+ * is never waited for, nor ended below: a server it runs itself (the tests) stops on its own.
+ */
+async function exited(pid: number, ms: number): Promise<boolean> {
+  if (pid === process.pid) return true;
+  const deadline = Date.now() + ms;
+  while (pidAlive(pid)) {
+    if (Date.now() >= deadline) return false;
+    await sleep(100);
+  }
+  return true;
+}
+
+/** Ends a process that does not stop on request: politely, then for good. */
+async function terminate(pid: number): Promise<void> {
+  if (pid === process.pid) return;
+  try {
+    process.kill(pid);
+  } catch {
+    return;
+  }
+  if (await exited(pid, 2000)) return;
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch {
+    // Gone meanwhile.
+  }
+  await exited(pid, 2000);
 }
 
 /**
@@ -217,17 +268,28 @@ async function ensureRunning(options: { port?: number; node?: string }): Promise
   const found = readServerState();
   let state = await liveState();
   if (!state) {
-    // Only the record found dead is removed: a server started meanwhile by another start (the
-    // app asked twice to open) may have written its own, which must stay.
-    const now = readServerState();
-    if (!now || (found && now.pid === found.pid && now.startedAt === found.startedAt)) clearServerState();
-    // Starts that race each other each spawn a server; only one gets the data folder (see
-    // instance-lock.ts), the others end at once, and every start finds that one below.
-    spawnDetachedServer(options.port ?? DEFAULT_PORT, options.node);
+    // A server that holds the folder but was not found (its state file lost, or busy) is asked
+    // to write its file again; one that is still starting writes it soon. Either way no second
+    // server is started, which would only be refused.
+    let holder = await folderHolder('state');
+    if (holder === 'dead') {
+      // Only the record found dead is removed: a server started meanwhile by another start (the
+      // app asked twice to open) may have written its own, which must stay.
+      const now = readServerState();
+      if (!now || (found && now.pid === found.pid && now.startedAt === found.startedAt)) clearServerState();
+      // Starts that race each other each spawn a server; only one gets the data folder (see
+      // instance-lock.ts), the others end, and every start finds that one below.
+      spawnDetachedServer(options.port ?? DEFAULT_PORT, options.node);
+    }
     const deadline = Date.now() + START_TIMEOUT_MS;
     while (!state && Date.now() < deadline) {
       await sleep(150);
       state = await liveState();
+    }
+    if (!state && holder === 'dead') holder = await folderHolder('state');
+    if (!state && holder !== 'dead') {
+      state = await liveState();
+      if (!state) return { ok: false, error: new InstanceHeldError(dataDir(), typeof holder === 'object' ? holder : null).message };
     }
     if (!state) {
       // The report holds the end of the log too, ready to read or attach to an issue.
@@ -288,18 +350,32 @@ async function stop(out: Out): Promise<number> {
       ? 'ShellYard is not running.'
       : result === 'stopped'
         ? 'ShellYard stopped.'
-        : 'ShellYard did not stop on request and was terminated.',
+        : result === 'held'
+          ? new InstanceHeldError(dataDir(), null).message
+          : 'ShellYard did not stop on request and was terminated.',
   );
-  return 0;
+  return result === 'held' ? 1 : 0;
 }
 
-/** Stops the running server, if any, and every session it hosts. */
-export async function stopServer(): Promise<'not-running' | 'stopped' | 'terminated'> {
-  const state = await liveState();
-  if (!state) {
+/**
+ * Stops the running server, if any, and every session it hosts. 'held' when a process holds the
+ * data folder but does not say who it is, so there is nothing safe to stop.
+ */
+export async function stopServer(): Promise<'not-running' | 'stopped' | 'terminated' | 'held'> {
+  const found = await findServer();
+  if (!found) {
     clearServerState();
     return 'not-running';
   }
+  if ('holder' in found) {
+    if (found.holder === 'unknown') return 'held';
+    // A ShellYard server of this folder (only it can listen on the folder's lock) that cannot be
+    // reached over HTTP: nothing to ask, only to end.
+    await terminate(found.holder.pid);
+    clearServerState();
+    return 'terminated';
+  }
+  const state = found.state;
   try {
     await fetch(`http://127.0.0.1:${state.port}/api/shutdown`, {
       method: 'POST',
@@ -313,17 +389,15 @@ export async function stopServer(): Promise<'not-running' | 'stopped' | 'termina
   while (Date.now() < deadline) {
     if (!(await isServerAlive(state))) {
       clearServerState();
+      // Done only once the process is gone: a start right after must not be refused the folder.
+      if (!(await exited(state.pid, STOP_TIMEOUT_MS))) await terminate(state.pid);
       return 'stopped';
     }
     await sleep(150);
   }
   // The server that wrote the state file is still answering on its port (same start time),
   // so the recorded pid is that server and nothing else: safe to kill.
-  try {
-    process.kill(state.pid);
-  } catch {
-    // Already gone.
-  }
+  await terminate(state.pid);
   clearServerState();
   return 'terminated';
 }
@@ -372,7 +446,14 @@ export async function main(argv: string[], out: Out = console.log): Promise<numb
     // One failing session must not take the server, and every other session, down with it.
     process.on('uncaughtException', (e) => console.error(`uncaught: ${e.stack ?? e}`));
     process.on('unhandledRejection', (e) => console.error(`unhandled: ${String(e)}`));
-    const running = await startServer({ port });
+    let running;
+    try {
+      running = await startServer({ port });
+    } catch (e) {
+      if (!isInstanceHeld(e)) throw e;
+      out(e.message);
+      return 1;
+    }
     const shutdown = (): void => void running.stop();
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);

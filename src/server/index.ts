@@ -26,9 +26,12 @@ import type { Schedule } from '../shared/types.js';
 import { attachWebSocket } from './ws.js';
 import { ErrorReporter, errorsDir } from './errors.js';
 import { ChangeTracker, changesOf } from './changes.js';
-import { acquireInstanceLock } from './instance-lock.js';
+import { acquireInstanceLock, isInstanceHeld, type InstanceLock } from './instance-lock.js';
 
 export const DEFAULT_PORT = 7717;
+
+/** How long a start waits for the folder to be let go by a server that is stopping. */
+const LOCK_WAIT_MS = 3000;
 
 /** The version of the package this file belongs to (from dist/server or src/server alike). */
 export function packageVersion(): string {
@@ -97,18 +100,30 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   const first = loadConfig({ quarantineCorrupt: true });
   if (first.warning) log(`warning: ${first.warning}`);
 
-  // Before anything is restored: a second server on the same folder would resume every session again.
-  const lock = await acquireInstanceLock(dataDir());
-  if (!lock) throw new Error(`ShellYard is already running on ${dataDir()}. Stop it first with: shellyard stop`);
+  // Before anything is restored: a second server on the same folder would resume every session
+  // again. A server being replaced lets go of the folder as it stops: it is given a moment.
+  const lock = await acquireInstanceLock(dataDir(), { waitMs: LOCK_WAIT_MS });
 
   const server = createServer();
-  let port: number;
   try {
-    port = await listenOnFirstFree(server, opts.port ?? DEFAULT_PORT);
+    const port = await listenOnFirstFree(server, opts.port ?? DEFAULT_PORT);
+    return await serve(opts, log, first, lock, server, port);
   } catch (e) {
+    // A start that fails leaves the folder free for the next one.
+    if (server.listening) server.close();
     await lock.release();
     throw e;
   }
+}
+
+async function serve(
+  opts: StartOptions,
+  log: (msg: string) => void,
+  first: ReturnType<typeof loadConfig>,
+  lock: InstanceLock,
+  server: Server,
+  port: number,
+): Promise<RunningServer> {
   const token = newToken();
   const hookToken = newToken();
   // A new host name for the page at every start: see newPageHost.
@@ -302,13 +317,15 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
       usage.flush();
       flow.observe([]);
       flow.persist();
+      // Everything is saved: the folder is free for the server that replaces this one, which
+      // need not wait for the connections below to close.
+      await lock.release();
       ws.close();
       server.closeAllConnections();
       await new Promise<void>((r) => server.close(() => r()));
       // Another server may have taken over the state file since; only remove our own.
       const recorded = readServerState();
       if (recorded && recorded.pid === process.pid && recorded.startedAt === startedAt) clearServerState();
-      await lock.release();
       log('stopped');
       errors.dispose();
       if (activeReporter === errors) activeReporter = null;
@@ -353,7 +370,11 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
     }),
   );
 
-  writeServerState({ pid: process.pid, port, pageHost, token, hookToken, startedAt });
+  const state = { pid: process.pid, port, pageHost, token, hookToken, startedAt };
+  writeServerState(state);
+  // A start that cannot find this server (its state file lost, or a health check missed) asks
+  // the lock who holds the folder, and has the file written again.
+  lock.serve({ port, restate: () => writeServerState(state) });
   log(`listening on http://${HOST}:${port}, page on http://${pageHost}:${port}`);
 
   return { port, pageHost, token, address: (server.address() as AddressInfo).address, errors, stop, stopped };
@@ -428,6 +449,11 @@ if (isMainModule()) {
       void running.stopped.then(() => process.exit(0));
     })
     .catch((e: unknown) => {
+      // The expected loser of starts that race each other: not a failure worth a report.
+      if (isInstanceHeld(e)) {
+        console.error(`${new Date().toISOString()} not started: ${e.message}`);
+        process.exit(1);
+      }
       const file = reportUncaught('startup', e, 'starting the server');
       console.error(`${new Date().toISOString()} failed to start: ${(e as Error).stack ?? e}${file ? `\n  report: ${file}` : ''}`);
       process.exit(1);
