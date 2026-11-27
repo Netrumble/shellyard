@@ -8,6 +8,7 @@ import { backgroundUrl } from '../api.js';
 import { getSocket, getState, onThemeChange } from '../store.js';
 import { hostStyle, terminalFont, terminalLook } from '../terminal-look.js';
 import { HIGHLIGHT_LIMIT, isSearchKey, isValidPattern, searchCountText } from '../terminal-search.js';
+import { TOUCH_KEYS, touchKeySequence, useTouchScreen, type TouchKeyName } from '../touch-keys.js';
 import { attachTouchScroll } from '../touch-scroll.js';
 
 const RESIZE_DEBOUNCE_MS = 100;
@@ -359,10 +360,36 @@ export function TerminalView(props: {
     };
   }, [sessionId, autoFocus]);
 
+  const touch = useTouchScreen();
+  const pressKey = (name: TouchKeyName): void => {
+    const term = terminal.current;
+    if (!term) return;
+    // As if typed: it reaches the session through onData, like any key.
+    term.input(touchKeySequence(name, term.modes.applicationCursorKeysMode), true);
+  };
+
   const style = background?.color ? { background: background.color } : hostStyle(background, imageUrl);
   return (
     <div className="terminal-frame">
       <div className="terminal-host" ref={host} style={style} data-background={background?.image ? 'image' : background?.color ? 'color' : 'theme'} />
+      {touch && (
+        <div className="terminal-keys" role="toolbar" aria-label="Keys a phone keyboard lacks">
+          {TOUCH_KEYS.map((k) => (
+            <button
+              key={k.name}
+              type="button"
+              title={k.title}
+              aria-label={k.title}
+              // Not taking the focus keeps the on-screen keyboard as it is, open or closed.
+              onPointerDown={(e) => e.preventDefault()}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => pressKey(k.name)}
+            >
+              {k.label}
+            </button>
+          ))}
+        </div>
+      )}
       {searchOpen && (
         <div className="terminal-search" role="search">
           <input

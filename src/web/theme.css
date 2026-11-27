@@ -425,6 +425,37 @@ code {
   flex-direction: column;
 }
 
+/* On a touch screen, under the terminal: the keys a phone keyboard lacks. */
+.terminal-keys {
+  flex: none;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  overflow-x: auto;
+  background: var(--panel-2);
+  border-top: 1px solid var(--border);
+}
+
+.terminal-keys button {
+  flex: 1 0 auto;
+  min-width: 40px;
+  min-height: 36px;
+  padding: 0 8px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: 600 14px/1 ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.terminal-keys button:active {
+  background: var(--accent);
+  color: #fff;
+}
+
 .terminal-search {
   position: absolute;
   top: 6px;
