@@ -4,8 +4,10 @@ import { reasonLabel } from './attention.js';
 let asked = false;
 
 /** What the desktop app's window offers the page (see desktop/preload.cjs); absent in a browser. */
-interface DesktopBridge {
+export interface DesktopBridge {
   showWindow(): void;
+  /** Brings forward the window of a session shown on its own; absent in an older app. */
+  showDetached?(id: string): void;
 }
 
 /**
@@ -31,23 +33,26 @@ export function viewForSession(sessions: SessionInfo[], id: string): { kind: 'si
  * What a click on a notification does. In a browser the default is left alone: it is the browser
  * that brings the notification's tab to the front, which `window.focus()` alone often cannot do
  * for a tab in the background or in another window. Only in the desktop app, where the app shows
- * its own window, is the default prevented.
+ * its own window, is the default prevented. `ownWindow`: the notification is about a session shown
+ * in a window of its own, which `onClick` brings forward; the app then leaves the main window be,
+ * or it would come forward over that window.
  */
 export function handleNotificationClick(
   e: Pick<Event, 'preventDefault'>,
   onClick: () => void,
   w: Window & { shellyardDesktop?: DesktopBridge } = window,
+  ownWindow = false,
 ): void {
   if (w.shellyardDesktop) e.preventDefault();
-  bringToFront(w);
+  if (!(ownWindow && w.shellyardDesktop)) bringToFront(w);
   onClick();
 }
 
 /** Shows a notification that, when clicked, brings ShellYard to the front and runs `onClick`. */
-function show(title: string, options: NotificationOptions, onClick: () => void): void {
+function show(title: string, options: NotificationOptions, onClick: () => void, ownWindow = false): void {
   const n = new Notification(title, options);
   n.onclick = (e) => {
-    handleNotificationClick(e, onClick);
+    handleNotificationClick(e, onClick, window, ownWindow);
     n.close();
   };
 }
@@ -61,13 +66,14 @@ export function requestPermissionOnce(): void {
 
 /**
  * Shows a system notification, but only when the page is not what the user is looking at.
+ * `ownWindow`: the session is shown in a window of its own (see handleNotificationClick).
  * The system plays its own sound with a notification unless told not to: with Sound off it
  * is told not to.
  */
-export function notify(s: SessionInfo, onClick: () => void, sound: boolean): void {
+export function notify(s: SessionInfo, onClick: () => void, sound: boolean, ownWindow = false): void {
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
   if (document.hasFocus()) return;
-  show(s.name, { body: reasonLabel(s), tag: `shellyard-${s.id}`, silent: !sound }, onClick);
+  show(s.name, { body: reasonLabel(s), tag: `shellyard-${s.id}`, silent: !sound }, onClick, ownWindow);
 }
 
 /**

@@ -43,3 +43,23 @@ describe('viewForSession', () => {
     expect(viewForSession(sessions, 'b')).toEqual({ kind: 'board' });
   });
 });
+
+describe('a notification of a session in a window of its own', () => {
+  it('in the desktop app does not bring the main window forward over that window', () => {
+    const e = { preventDefault: vi.fn() };
+    const showWindow = vi.fn();
+    const onClick = vi.fn();
+    handleNotificationClick(e, onClick, { focus: vi.fn(), shellyardDesktop: { showWindow } } as unknown as Window, true);
+    expect(e.preventDefault).toHaveBeenCalled();
+    expect(showWindow).not.toHaveBeenCalled();
+    expect(onClick).toHaveBeenCalled();
+  });
+
+  it('in a browser still lets the browser show the page, then opens the window', () => {
+    const e = { preventDefault: vi.fn() };
+    const onClick = vi.fn();
+    handleNotificationClick(e, onClick, { focus: vi.fn() } as unknown as Window, true);
+    expect(e.preventDefault).not.toHaveBeenCalled();
+    expect(onClick).toHaveBeenCalled();
+  });
+});
