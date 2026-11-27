@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { onMediaChange } from './media.js';
 
 /** Below this width the page is laid out for a phone: the sidebar becomes a drawer. Keep in step with theme.css. */
 export const NARROW_QUERY = '(max-width: 700px)';
@@ -15,8 +16,7 @@ export function useNarrow(): boolean {
     const list = window.matchMedia(NARROW_QUERY);
     const onChange = (): void => setNarrow(list.matches);
     onChange();
-    list.addEventListener('change', onChange);
-    return () => list.removeEventListener('change', onChange);
+    return onMediaChange(list, onChange);
   }, []);
   return narrow;
 }

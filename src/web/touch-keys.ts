@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { onMediaChange } from './media.js';
 
 // A phone's keyboard has no Escape, Tab, arrows or Ctrl. A program that is driven by them (the
 // menus of Claude Code, the folder trust question first of all, whose answer is one arrow
@@ -23,7 +24,7 @@ export const TOUCH_KEYS: readonly TouchKey[] = [
   { name: 'left', label: '←', title: 'Left arrow' },
   { name: 'right', label: '→', title: 'Right arrow' },
   { name: 'enter', label: '⏎', title: 'Enter' },
-  { name: 'ctrl-c', label: '^C', title: 'Ctrl+C' },
+  { name: 'ctrl-c', label: '^C', title: 'Ctrl+C: copies the selection if there is one, otherwise interrupts' },
 ];
 
 const ARROW_FINAL: Record<'up' | 'down' | 'left' | 'right', string> = { up: 'A', down: 'B', right: 'C', left: 'D' };
@@ -62,8 +63,7 @@ export function useTouchScreen(): boolean {
     const list = window.matchMedia(TOUCH_QUERY);
     const onChange = (): void => setTouch(list.matches);
     onChange();
-    list.addEventListener('change', onChange);
-    return () => list.removeEventListener('change', onChange);
+    return onMediaChange(list, onChange);
   }, []);
   return touch;
 }

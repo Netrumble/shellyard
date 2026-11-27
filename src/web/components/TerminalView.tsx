@@ -69,6 +69,8 @@ export function TerminalView(props: {
   sizeRef.current = props.size;
   const searchAddon = useRef<SearchAddon | null>(null);
   const terminal = useRef<Terminal | null>(null);
+  /** True while the keyboard holds a word being typed (predictive text) that the terminal has not sent yet. */
+  const composing = useRef(false);
   const searchInput = useRef<HTMLInputElement>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -337,6 +339,14 @@ export function TerminalView(props: {
     el.addEventListener('focusin', onFocusIn);
     el.addEventListener('focusout', onFocusOut);
     const offTouch = attachTouchScroll(el, term);
+    const onCompositionStart = (): void => {
+      composing.current = true;
+    };
+    const onCompositionEnd = (): void => {
+      composing.current = false;
+    };
+    el.addEventListener('compositionstart', onCompositionStart);
+    el.addEventListener('compositionend', onCompositionEnd);
     if (autoFocus) term.focus();
 
     return () => {
@@ -346,6 +356,9 @@ export function TerminalView(props: {
       el.removeEventListener('focusin', onFocusIn);
       el.removeEventListener('focusout', onFocusOut);
       offTouch();
+      el.removeEventListener('compositionstart', onCompositionStart);
+      el.removeEventListener('compositionend', onCompositionEnd);
+      composing.current = false;
       input.dispose();
       applyLook.current = () => undefined;
       applyFont.current = () => undefined;
@@ -364,8 +377,26 @@ export function TerminalView(props: {
   const pressKey = (name: TouchKeyName): void => {
     const term = terminal.current;
     if (!term) return;
+    // ^C with text selected copies it, as Ctrl+C on a keyboard does (see the key handler).
+    if (name === 'ctrl-c' && term.hasSelection()) {
+      void navigator.clipboard?.writeText(term.getSelection());
+      term.clearSelection();
+      return;
+    }
     // As if typed: it reaches the session through onData, like any key.
-    term.input(touchKeySequence(name, term.modes.applicationCursorKeysMode), true);
+    const send = (): void => term.input(touchKeySequence(name, term.modes.applicationCursorKeysMode), true);
+    const textarea = term.textarea;
+    if (!textarea || !composing.current) {
+      send();
+      return;
+    }
+    // A phone keyboard with predictive text holds the word being typed in a composition, which
+    // the terminal sends only when it ends: `cd Doc` then Tab would send the Tab first. Leaving
+    // the field and coming back ends it; the terminal sends the word on a timer, which this one,
+    // set after it, follows.
+    textarea.blur();
+    textarea.focus();
+    setTimeout(send, 0);
   };
 
   const style = background?.color ? { background: background.color } : hostStyle(background, imageUrl);
