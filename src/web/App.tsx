@@ -111,7 +111,8 @@ export function App(): React.JSX.Element {
           </div>
         )}
         <DigestBanner />
-        <div className="content">
+        {/* Focusable: the page itself no longer scrolls, so PageDown, Space and the arrows need the view to be a stop. */}
+        <div className="content" tabIndex={0}>
           {view.kind === 'board' && <BoardView onNewSession={(storyId) => setDialog({ storyId })} />}
           {view.kind === 'attention' && <AnswerQueue storyFilter={view.storyFilter} />}
           {view.kind === 'grid' && <TerminalsGrid storyFilter={view.storyFilter} />}
